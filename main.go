@@ -9,11 +9,11 @@ import (
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
-	"jb.favre/mikrotik-fleet-autopilot/config"
+	"jb.favre/mikrotik-fleet-autopilot/core"
 )
 
 func main() {
-	var globalConfig config.Config
+	var globalConfig core.Config
 	cmd := &cli.Command{
 		Name:    "mikrotik-fleet-autopilot",
 		Version: "0.1.0",
@@ -49,8 +49,11 @@ func main() {
 		},
 		Commands: append(export.Command, updates.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			slog.Debug("Starting command")
-			cfg, ok := ctx.Value("config").(*config.Config)
+			if globalConfig.LogVerbosity {
+				slog.SetLogLoggerLevel(slog.LevelDebug)
+			}
+			slog.Debug("Starting global")
+			cfg, ok := ctx.Value("config").(*core.Config)
 			if !ok {
 				return nil, fmt.Errorf("invalid config type")
 			}

@@ -2,9 +2,11 @@ package partitions
 
 import (
 	"context"
-	"log"
+	"fmt"
+	"log/slog"
 
 	"github.com/urfave/cli/v3"
+	"jb.favre/mikrotik-fleet-autopilot/core"
 )
 
 var create string
@@ -21,19 +23,28 @@ var Command = []*cli.Command{
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return partitions(ctx, cmd)
+			return partitions(ctx, cmd, ctx.Value("config").(*core.Config))
 		},
 	},
 }
 
-func partitions(ctx context.Context, cmd *cli.Command) error {
+func partitions(ctx context.Context, cmd *cli.Command, cfg *core.Config) error {
+	slog.Info("Starting partitions command")
 	sshCmd := "/partitions"
 	if create != "" {
 		sshCmd += "/install"
 	} else {
 		sshCmd += "/check-for-updates"
 	}
-	log.Printf("SSH cmd is %s\n", sshCmd)
+	slog.Debug("SSH cmd is " + sshCmd)
+
+	// SSH init
+	conn, err := core.NewSsh(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
+	if err != nil {
+		return fmt.Errorf("failed to create SSH connection: %w", err)
+	}
+	defer conn.Close()
+
 	// Ping router to check it's up
 	// Run SSH command to check for existing partitions
 	return nil

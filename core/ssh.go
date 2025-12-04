@@ -1,4 +1,4 @@
-package ssh
+package core
 
 import (
 	"bufio"

@@ -1,8 +1,8 @@
 package core
 
 type Config struct {
-	Host         string
-	User         string
-	Password     string
-	LogVerbosity bool
+	Host     string
+	User     string
+	Password string
+	Debug    bool
 }

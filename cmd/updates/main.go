@@ -3,7 +3,7 @@ package updates
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/core"
@@ -33,13 +33,14 @@ var Command = []*cli.Command{
 }
 
 func updates(ctx context.Context, cmd *cli.Command, cfg *core.Config) error {
+	slog.Info("Starting updates command")
 	sshCmd := "/system/package/update"
 	if applyUpdates {
 		sshCmd += "/install"
 	} else {
 		sshCmd += "/check-for-updates"
 	}
-	log.Printf("SSH cmd is %s\n", sshCmd)
+	slog.Debug("SSH cmd is " + sshCmd)
 
 	// SSH init
 	conn, err := core.NewSsh(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)

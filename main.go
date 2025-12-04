@@ -44,21 +44,19 @@ func main() {
 			&cli.BoolFlag{
 				Name:        "debug",
 				Usage:       "Enable debug logging",
-				Destination: &globalConfig.LogVerbosity,
+				Destination: &globalConfig.Debug,
 			},
 		},
 		Commands: append(export.Command, updates.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			if globalConfig.LogVerbosity {
+			// Set log level
+			if globalConfig.Debug {
 				slog.SetLogLoggerLevel(slog.LevelDebug)
 			}
 			slog.Debug("Starting global")
-			cfg, ok := ctx.Value("config").(*core.Config)
-			if !ok {
-				return nil, fmt.Errorf("invalid config type")
-			}
-			ctx = context.WithValue(ctx, "config", cfg)
-			slog.Debug("globalConfig is available in context with value: " + fmt.Sprintf("%+v", cfg))
+			// Make global config available in context
+			ctx = context.WithValue(ctx, "config", &globalConfig)
+			slog.Debug("globalConfig is available in context with value: " + fmt.Sprintf("%+v", globalConfig))
 			return ctx, nil
 		},
 	}

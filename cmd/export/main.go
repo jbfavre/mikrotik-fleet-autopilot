@@ -32,21 +32,23 @@ var Command = []*cli.Command{
 	},
 }
 
-func export(ctx context.Context, cmd *cli.Command, cfg *core.Config) error {
-	slog.Info("Starting export command")
-	// Build Mikrotik command line
-	sshCmd := "/export terse"
-	if showSensitive {
-		sshCmd += " show-sensitive"
-	}
-	slog.Debug("SSH cmd is " + sshCmd)
+func init() {
+}
 
+func export(ctx context.Context, cmd *cli.Command, cfg *core.Config) error {
 	// SSH init
 	conn, err := core.NewSsh(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
 	if err != nil {
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	defer conn.Close()
+
+	// Build Mikrotik command line
+	sshCmd := "/export terse"
+	if showSensitive {
+		sshCmd += " show-sensitive"
+	}
+	slog.Debug("SSH cmd is " + sshCmd)
 
 	// Ping router to check it's up
 	// Run SSH command to export configuration

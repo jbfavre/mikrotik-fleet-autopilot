@@ -2,14 +2,20 @@ package updates
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"log/slog"
+	"regexp"
+	"time"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/core"
 )
 
-var applyUpdates bool
+var applyUpdates bool = true
+var sshCmdPrefix string = "/system/package/update"
+
 var Command = []*cli.Command{
 	{
 		Name:  "updates",
@@ -32,24 +38,58 @@ var Command = []*cli.Command{
 	},
 }
 
-func updates(ctx context.Context, cmd *cli.Command, cfg *core.Config) error {
-	slog.Info("Starting updates command")
-	sshCmd := "/system/package/update"
-	if applyUpdates {
-		sshCmd += "/install"
-	} else {
-		sshCmd += "/check-for-updates"
-	}
-	slog.Debug("SSH cmd is " + sshCmd)
+func init() {}
 
+func updates(ctx context.Context, cmd *cli.Command, cfg *core.Config) error {
+	slog.Debug("Apply updates is " + fmt.Sprintf("%v", applyUpdates))
 	// SSH init
-	conn, err := core.NewSsh(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
+	conn, err := sshInit(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	defer conn.Close()
+	// Check for available update
+	updateNeeded, err := checkForUpdate(*conn, cfg)
+	if err != nil {
+		return fmt.Errorf("Failed to check for updates: %w", err)
+	}
+	// If we don't have any update available, there's no need to trigger the update part
+	// even if the flag has been provided
+	applyUpdates = updateNeeded && applyUpdates
 
-	// Ping router to check it's up
+	// Apply it if needed
+	if applyUpdates {
+		slog.Debug("Applying updates on router " + cfg.Host)
+		sshCmd := sshCmdPrefix + "/install"
+		_, err := conn.Run(sshCmd)
+		if err != nil {
+			return fmt.Errorf("failed to run SSH command: %w", err)
+		}
+		conn.Close()
+		fmt.Printf("⏳ Update applied on router %v\n", cfg.Host)
+
+		conn = nil
+		for conn == nil {
+			fmt.Printf("⏳ Waiting for router %v to come back up...\n", cfg.Host)
+			time.Sleep(10 * time.Second)
+
+			conn, err := sshInit(cfg)
+			if err != nil {
+				conn = nil
+				continue
+			}
+			defer conn.Close()
+
+			updateNeeded, err := checkForUpdate(*conn, cfg)
+			if err != nil {
+				continue
+			} else {
+				applyUpdates = updateNeeded && applyUpdates
+				break
+			}
+		}
+		fmt.Printf("👌 Router %v successfully updated\n", cfg.Host)
+	}
 	// Run SSH command to check for updates
 	// If an update is available AND apply is selected,
 	// 		Run SSH command to check partitions
@@ -61,4 +101,59 @@ func updates(ctx context.Context, cmd *cli.Command, cfg *core.Config) error {
 	// 		Run SSH command to reboot if needed
 	// 		Ping router to check it's back up
 	return nil
+}
+
+func checkForUpdate(conn core.SshConnection, cfg *core.Config) (bool, error) {
+	updateNeeded := false
+
+	//            channel: stable \r\n  installed-version: 7.20.2 \r\n     latest-version: 7.20.5 \r\n             status: New version is available\r\n \r\n
+	sshCmd := sshCmdPrefix + "/check-for-updates"
+	slog.Debug("SSH cmd is " + sshCmd)
+	result, err := conn.Run(sshCmd)
+	if err != nil {
+		return updateNeeded, fmt.Errorf("failed to run SSH command: %w", err)
+	}
+	//result = "            channel: stable \r\n  installed-version: 7.20.2 \r\n     latest-version: 7.20.5 \r\n             status: New version is available\r\n \r\n"
+	slog.Debug("SSH command result:" + result)
+
+	// Check for installed version
+	installedVersion, installedError := checkVersion(regexp.MustCompile(`.*installed-version: (\S+)`), result)
+	if installedError != nil {
+		return updateNeeded, fmt.Errorf("failed to parse installed version: %v", installedError)
+	}
+	// Check for available version
+	availableVersion, availableError := checkVersion(regexp.MustCompile(`.*latest-version: (\S+)`), result)
+	if availableError != nil {
+		return updateNeeded, fmt.Errorf("failed to parse available version: %v", availableError)
+	}
+
+	// Asses wether an update is needed or not
+	if installedVersion == availableVersion {
+		slog.Info("RouterOS already up to date with version " + installedVersion)
+		fmt.Printf("✅ Router %v is up-to-date running version %v\n", cfg.Host, installedVersion)
+	} else {
+		slog.Info("RouterOS update available from version " + installedVersion + " to " + availableVersion)
+		fmt.Printf("⚠️ Router %v can be upgraded from %v to %v\n", cfg.Host, installedVersion, availableVersion)
+		updateNeeded = true
+	}
+	return updateNeeded, nil
+}
+
+func checkVersion(re *regexp.Regexp, output string) (string, error) {
+	version := re.FindStringSubmatch(output)
+	log.Printf("Version is %v", version)
+	if len(version) < 2 {
+		return "", errors.New("version not found in output")
+	}
+
+	return version[1], nil
+}
+
+func sshInit(cfg *core.Config) (*core.SshConnection, error) {
+	// SSH init
+	conn, err := core.NewSsh(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
 }

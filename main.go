@@ -51,12 +51,13 @@ func main() {
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			// Set log level
 			if globalConfig.Debug {
-				slog.SetLogLoggerLevel(slog.LevelDebug)
+				core.SetupLogging(slog.LevelDebug)
 			}
-			slog.Debug("Starting global")
+			slog.Info("Starting global")
 			// Make global config available in context
 			ctx = context.WithValue(ctx, "config", &globalConfig)
 			slog.Debug("globalConfig is available in context with value: " + fmt.Sprintf("%+v", globalConfig))
+			slog.Info("Starting " + cmd.Args().Get(0) + " command")
 			return ctx, nil
 		},
 	}

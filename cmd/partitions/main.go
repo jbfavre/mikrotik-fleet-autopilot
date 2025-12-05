@@ -28,8 +28,16 @@ var Command = []*cli.Command{
 	},
 }
 
+func init() {}
+
 func partitions(ctx context.Context, cmd *cli.Command, cfg *core.Config) error {
-	slog.Info("Starting partitions command")
+	// SSH init
+	conn, err := core.NewSsh(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
+	if err != nil {
+		return fmt.Errorf("failed to create SSH connection: %w", err)
+	}
+	defer conn.Close()
+
 	sshCmd := "/partitions"
 	if create != "" {
 		sshCmd += "/install"
@@ -37,13 +45,6 @@ func partitions(ctx context.Context, cmd *cli.Command, cfg *core.Config) error {
 		sshCmd += "/check-for-updates"
 	}
 	slog.Debug("SSH cmd is " + sshCmd)
-
-	// SSH init
-	conn, err := core.NewSsh(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
-	if err != nil {
-		return fmt.Errorf("failed to create SSH connection: %w", err)
-	}
-	defer conn.Close()
 
 	// Ping router to check it's up
 	// Run SSH command to check for existing partitions

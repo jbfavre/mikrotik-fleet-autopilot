@@ -61,7 +61,11 @@ func updates(cfg *core.Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			slog.Debug("failed to close SSH connection: " + closeErr.Error())
+		}
+	}()
 
 	// Step 1: Check current status
 	osStatus, boardStatus, err := checkCurrentStatus(conn)
@@ -162,7 +166,11 @@ func applyComponentUpdate(conn core.SshRunner, cfg *core.Config, component, upda
 	if err != nil {
 		return err
 	}
-	defer newConn.Close()
+	defer func() {
+		if closeErr := newConn.Close(); closeErr != nil {
+			slog.Debug("failed to close SSH connection: " + closeErr.Error())
+		}
+	}()
 
 	// Check status after upgrade
 	osStatusPtr, err := getUpdateStatus(
@@ -285,7 +293,9 @@ func applyUpdate(conn core.SshRunner, cfg *core.Config, updateCmd, waitMsg strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to run SSH command: %w", err)
 	}
-	conn.Close()
+	if closeErr := conn.Close(); closeErr != nil {
+		slog.Debug("failed to close SSH connection: " + closeErr.Error())
+	}
 	fmt.Printf("⏳ %s\n", waitMsg)
 
 	var newConn core.SshRunner

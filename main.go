@@ -55,7 +55,7 @@ func main() {
 			}
 			slog.Info("Starting global")
 			// Make global config available in context
-			ctx = context.WithValue(ctx, "config", &globalConfig)
+			ctx = context.WithValue(ctx, core.ConfigKey, &globalConfig)
 			slog.Debug("globalConfig is available in context with value: " + fmt.Sprintf("%+v", globalConfig))
 			slog.Info("Starting " + cmd.Args().Get(0) + " command")
 			return ctx, nil
@@ -76,7 +76,7 @@ func main() {
 		}
 		defer sshClient.Close()
 	*/
-	if err := cmd.Run(context.WithValue(context.Background(), "config", &globalConfig), os.Args); err != nil {
+	if err := cmd.Run(context.WithValue(context.Background(), core.ConfigKey, &globalConfig), os.Args); err != nil {
 		slog.Error("command failed: " + err.Error())
 	}
 }

@@ -7,9 +7,17 @@ import (
 	"os"
 )
 
+// ContextKey is a custom type for context keys to avoid collisions
+type ContextKey string
+
+const (
+	// ConfigKey is the context key for storing Config
+	ConfigKey ContextKey = "config"
+)
+
 // GetConfig extracts *config.Config from context
 func GetConfig(ctx context.Context) (*Config, error) {
-	cfg, ok := ctx.Value("config").(*Config)
+	cfg, ok := ctx.Value(ConfigKey).(*Config)
 	if !ok {
 		return nil, fmt.Errorf("invalid config type")
 	}

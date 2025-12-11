@@ -36,7 +36,11 @@ func partitions(ctx context.Context, cmd *cli.Command, cfg *core.Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			slog.Debug("failed to close SSH connection: " + closeErr.Error())
+		}
+	}()
 
 	sshCmd := "/partitions"
 	if create != "" {

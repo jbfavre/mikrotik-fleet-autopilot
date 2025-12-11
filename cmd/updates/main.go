@@ -13,6 +13,16 @@ import (
 
 var applyUpdates bool = true
 
+// reconnectDelay is the delay between reconnection attempts after a router reboot
+// This can be overridden in tests to speed up test execution
+var reconnectDelay = 10 * time.Second
+
+// sshConnectionFactory is the factory function for creating SSH connections
+// This can be overridden in tests to inject mock connections
+var sshConnectionFactory = func(host, user, password string) (core.SshRunner, error) {
+	return core.NewSsh(host, user, password)
+}
+
 var Command = []*cli.Command{
 	{
 		Name:  "updates",
@@ -47,14 +57,14 @@ func updates(cfg *core.Config) error {
 	slog.Debug("Apply updates flag from cmd is " + fmt.Sprintf("%v", applyUpdatesFlag))
 
 	// SSH init
-	conn, err := core.NewSsh(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
+	conn, err := sshConnectionFactory(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
 	if err != nil {
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	defer conn.Close()
 
 	// Step 1: Check current status
-	osStatus, boardStatus, err := checkCurrentStatus(conn, cfg)
+	osStatus, boardStatus, err := checkCurrentStatus(conn)
 	if err != nil {
 		return err
 	}
@@ -71,10 +81,10 @@ func updates(cfg *core.Config) error {
 }
 
 // checkCurrentStatus retrieves the current RouterOS and RouterBoard status
-func checkCurrentStatus(conn *core.SshConnection, cfg *core.Config) (UpdateStatus, *UpdateStatus, error) {
+func checkCurrentStatus(conn core.SshRunner) (UpdateStatus, *UpdateStatus, error) {
 	slog.Info("Checking RouterOS update status")
 	osStatusPtr, err := getUpdateStatus(
-		*conn,
+		conn,
 		"/system/package/update/check-for-updates",
 		"RouterOS",
 		regexp.MustCompile(`.*installed-version: (\S+)`),
@@ -93,7 +103,7 @@ func checkCurrentStatus(conn *core.SshConnection, cfg *core.Config) (UpdateStatu
 
 	slog.Info("Checking RouterBoard update status")
 	boardStatus, err := getUpdateStatus(
-		*conn,
+		conn,
 		"/system/routerboard/print",
 		"RouterBoard",
 		regexp.MustCompile(`.*current-firmware: (\S+)`),
@@ -118,7 +128,7 @@ func checkCurrentStatus(conn *core.SshConnection, cfg *core.Config) (UpdateStatu
 }
 
 // applyUpdatesIfNeeded applies RouterOS and RouterBoard updates if they are needed
-func applyUpdatesIfNeeded(conn *core.SshConnection, cfg *core.Config, osStatus UpdateStatus, boardStatus *UpdateStatus) error {
+func applyUpdatesIfNeeded(conn core.SshRunner, cfg *core.Config, osStatus UpdateStatus, boardStatus *UpdateStatus) error {
 	osUpToDate := osStatus.Installed == osStatus.Available
 	boardUpToDate := boardStatus == nil || boardStatus.Installed == boardStatus.Available
 
@@ -140,7 +150,7 @@ func applyUpdatesIfNeeded(conn *core.SshConnection, cfg *core.Config, osStatus U
 }
 
 // applyComponentUpdate applies an update to RouterOS or RouterBoard and displays the result
-func applyComponentUpdate(conn *core.SshConnection, cfg *core.Config, component, updateCmd string, checkBoth bool) error {
+func applyComponentUpdate(conn core.SshRunner, cfg *core.Config, component, updateCmd string, checkBoth bool) error {
 	slog.Info(component + " update needed, applying updates")
 	slog.Debug("Applying " + component + " updates on router " + cfg.Host)
 
@@ -156,7 +166,7 @@ func applyComponentUpdate(conn *core.SshConnection, cfg *core.Config, component,
 
 	// Check status after upgrade
 	osStatusPtr, err := getUpdateStatus(
-		*newConn,
+		newConn,
 		"/system/package/update/check-for-updates",
 		"RouterOS",
 		regexp.MustCompile(`.*installed-version: (\S+)`),
@@ -175,7 +185,7 @@ func applyComponentUpdate(conn *core.SshConnection, cfg *core.Config, component,
 
 	// RouterBoard update - check both OS and Board
 	boardStatus, err2 := getUpdateStatus(
-		*newConn,
+		newConn,
 		"/system/routerboard/print",
 		"RouterBoard",
 		regexp.MustCompile(`.*current-firmware: (\S+)`),
@@ -188,45 +198,48 @@ func applyComponentUpdate(conn *core.SshConnection, cfg *core.Config, component,
 	}
 
 	osStatus := *osStatusPtr
-	formatAndDisplayResult(cfg.Host, osStatus, boardStatus)
+	fmt.Println(formatUpdateResult(cfg.Host, osStatus, boardStatus))
 	return nil
 }
 
-// formatAndDisplayResult formats and displays the update result
-func formatAndDisplayResult(host string, osStatus UpdateStatus, boardStatus *UpdateStatus) {
+// formatUpdateResult formats the update result into a string
+func formatUpdateResult(host string, osStatus UpdateStatus, boardStatus *UpdateStatus) string {
 	osUpToDate := osStatus.Installed == osStatus.Available
 
 	if boardStatus == nil {
 		// Virtualized router or RouterOS-only update
 		if osUpToDate {
-			fmt.Printf("✅ %s is up-to-date (RouterOS: %s)\n", host, osStatus.Installed)
-		} else {
-			fmt.Printf("⚠️  %s upgrade available (RouterOS: %s → %s)\n", host, osStatus.Installed, osStatus.Available)
+			return fmt.Sprintf("✅ %s is up-to-date (RouterOS: %s)", host, osStatus.Installed)
 		}
-		return
+		return fmt.Sprintf("⚠️  %s upgrade available (RouterOS: %s → %s)", host, osStatus.Installed, osStatus.Available)
 	}
 
 	// Physical router with RouterBoard
 	boardUpToDate := boardStatus.Installed == boardStatus.Available
 	if osUpToDate && boardUpToDate {
-		fmt.Printf("✅ %s is up-to-date (RouterOS: %s, RouterBoard: %s)\n", host, osStatus.Installed, boardStatus.Installed)
-	} else {
-		var boardUpgrade string
-		if boardUpToDate {
-			if osUpToDate {
-				boardUpgrade = boardStatus.Installed
-			} else {
-				boardUpgrade = fmt.Sprintf("%s → pending", boardStatus.Installed)
-			}
-		} else {
-			boardUpgrade = fmt.Sprintf("%s → %s", boardStatus.Installed, boardStatus.Available)
-		}
-		fmt.Printf("⚠️  %s upgrade available (RouterOS: %s → %s, RouterBoard: %s)\n", host, osStatus.Installed, osStatus.Available, boardUpgrade)
+		return fmt.Sprintf("✅ %s is up-to-date (RouterOS: %s, RouterBoard: %s)", host, osStatus.Installed, boardStatus.Installed)
 	}
+
+	var boardUpgrade string
+	if boardUpToDate {
+		if osUpToDate {
+			boardUpgrade = boardStatus.Installed
+		} else {
+			boardUpgrade = fmt.Sprintf("%s → pending", boardStatus.Installed)
+		}
+	} else {
+		boardUpgrade = fmt.Sprintf("%s → %s", boardStatus.Installed, boardStatus.Available)
+	}
+	return fmt.Sprintf("⚠️  %s upgrade available (RouterOS: %s → %s, RouterBoard: %s)", host, osStatus.Installed, osStatus.Available, boardUpgrade)
+}
+
+// formatAndDisplayResult formats and displays the update result
+func formatAndDisplayResult(host string, osStatus UpdateStatus, boardStatus *UpdateStatus) {
+	fmt.Println(formatUpdateResult(host, osStatus, boardStatus))
 }
 
 // Generic update status fetcher for RouterOS and RouterBoard
-func getUpdateStatus(conn core.SshConnection, sshCmd, subSystem string, installedRe, availableRe *regexp.Regexp, skipIfNoRouterBoard bool) (*UpdateStatus, error) {
+func getUpdateStatus(conn core.SshRunner, sshCmd, subSystem string, installedRe, availableRe *regexp.Regexp, skipIfNoRouterBoard bool) (*UpdateStatus, error) {
 	slog.Debug("SSH cmd is " + sshCmd)
 	result, err := conn.Run(sshCmd)
 	if err != nil {
@@ -267,7 +280,7 @@ func getUpdateStatus(conn core.SshConnection, sshCmd, subSystem string, installe
 }
 
 // Generic function to apply updates and wait for router to come back
-func applyUpdate(conn *core.SshConnection, cfg *core.Config, updateCmd, waitMsg string) (*core.SshConnection, error) {
+func applyUpdate(conn core.SshRunner, cfg *core.Config, updateCmd, waitMsg string) (core.SshRunner, error) {
 	_, err := conn.Run(updateCmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to run SSH command: %w", err)
@@ -275,12 +288,12 @@ func applyUpdate(conn *core.SshConnection, cfg *core.Config, updateCmd, waitMsg 
 	conn.Close()
 	fmt.Printf("⏳ %s\n", waitMsg)
 
-	var newConn *core.SshConnection
+	var newConn core.SshRunner
 	for {
 		fmt.Printf("⏳ Waiting for router %v to come back up...\n", cfg.Host)
-		time.Sleep(10 * time.Second)
+		time.Sleep(reconnectDelay)
 
-		newConn, err = core.NewSsh(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
+		newConn, err = sshConnectionFactory(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
 		if err != nil {
 			continue
 		}

@@ -12,6 +12,12 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// SshRunner defines the interface for SSH operations
+type SshRunner interface {
+	Run(cmd string) (string, error)
+	Close() error
+}
+
 type SshConnection struct {
 	client *ssh.Client
 }

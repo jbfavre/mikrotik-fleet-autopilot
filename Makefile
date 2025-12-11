@@ -30,7 +30,6 @@ install: ## Install the binary to $GOPATH/bin
 clean: ## Remove build artifacts
 	@echo "Cleaning..."
 	@rm -rf $(BUILD_DIR)
-	@rm -f coverage.out
 	@$(GO) clean
 
 test: ## Run all tests
@@ -38,28 +37,31 @@ test: ## Run all tests
 	$(GO) test -v ./...
 
 test-coverage: ## Run tests with coverage report
+test-coverage: ## Run tests with coverage report
 	@echo "Running tests with coverage..."
-	@$(GO) test -coverprofile=coverage.out ./...
+	@mkdir -p $(BUILD_DIR)
+	@$(GO) test -coverprofile=$(BUILD_DIR)/coverage.out ./...
 	@echo "\n=== Coverage by Package ==="
-	@$(GO) tool cover -func=coverage.out | grep -v "^mode:"
+	@$(GO) tool cover -func=$(BUILD_DIR)/coverage.out | grep -v "^mode:"
 	@echo "\n=== Total Coverage ==="
-	@$(GO) tool cover -func=coverage.out | grep total
-
 test-coverage-html: ## Generate HTML coverage report and open in browser
 	@echo "Generating HTML coverage report..."
-	@$(GO) test -coverprofile=coverage.out ./...
+	@mkdir -p $(BUILD_DIR)
+	@$(GO) test -coverprofile=$(BUILD_DIR)/coverage.out ./...
+	@$(GO) tool cover -html=$(BUILD_DIR)/coverage.outut ./...
 	@$(GO) tool cover -html=coverage.out
 
 test-verbose: ## Run tests with verbose output
 	@echo "Running tests (verbose)..."
-	$(GO) test -v -race ./...
-
 test-cmd: ## Run tests for a specific subcommand (usage: make test-cmd CMD=updates)
 ifndef CMD
 	@echo "Error: CMD not specified. Usage: make test-cmd CMD=updates"
 	@exit 1
 endif
 	@echo "Running tests for cmd/$(CMD)..."
+	@mkdir -p $(BUILD_DIR)
+	$(GO) test -v -coverprofile=$(BUILD_DIR)/coverage-$(CMD).out ./cmd/$(CMD)/
+	@$(GO) tool cover -func=$(BUILD_DIR)/coverage-$(CMD).out
 	$(GO) test -v -coverprofile=coverage-$(CMD).out ./cmd/$(CMD)/
 	@$(GO) tool cover -func=coverage-$(CMD).out
 

@@ -30,7 +30,7 @@ var Command = []*cli.Command{
 			if err != nil {
 				return err
 			}
-			return updates(ctx, cmd, cfg)
+			return updates(cfg)
 		},
 	},
 }
@@ -42,7 +42,7 @@ type UpdateStatus struct {
 
 func init() {}
 
-func updates(ctx context.Context, cmd *cli.Command, cfg *core.Config) error {
+func updates(cfg *core.Config) error {
 	applyUpdatesFlag := applyUpdates
 	slog.Debug("Apply updates flag from cmd is " + fmt.Sprintf("%v", applyUpdatesFlag))
 
@@ -75,7 +75,6 @@ func checkCurrentStatus(conn *core.SshConnection, cfg *core.Config) (UpdateStatu
 	slog.Info("Checking RouterOS update status")
 	osStatusPtr, err := getUpdateStatus(
 		*conn,
-		cfg,
 		"/system/package/update/check-for-updates",
 		"RouterOS",
 		regexp.MustCompile(`.*installed-version: (\S+)`),
@@ -95,7 +94,6 @@ func checkCurrentStatus(conn *core.SshConnection, cfg *core.Config) (UpdateStatu
 	slog.Info("Checking RouterBoard update status")
 	boardStatus, err := getUpdateStatus(
 		*conn,
-		cfg,
 		"/system/routerboard/print",
 		"RouterBoard",
 		regexp.MustCompile(`.*current-firmware: (\S+)`),
@@ -159,7 +157,6 @@ func applyComponentUpdate(conn *core.SshConnection, cfg *core.Config, component,
 	// Check status after upgrade
 	osStatusPtr, err := getUpdateStatus(
 		*newConn,
-		cfg,
 		"/system/package/update/check-for-updates",
 		"RouterOS",
 		regexp.MustCompile(`.*installed-version: (\S+)`),
@@ -179,7 +176,6 @@ func applyComponentUpdate(conn *core.SshConnection, cfg *core.Config, component,
 	// RouterBoard update - check both OS and Board
 	boardStatus, err2 := getUpdateStatus(
 		*newConn,
-		cfg,
 		"/system/routerboard/print",
 		"RouterBoard",
 		regexp.MustCompile(`.*current-firmware: (\S+)`),
@@ -230,7 +226,7 @@ func formatAndDisplayResult(host string, osStatus UpdateStatus, boardStatus *Upd
 }
 
 // Generic update status fetcher for RouterOS and RouterBoard
-func getUpdateStatus(conn core.SshConnection, cfg *core.Config, sshCmd, subSystem string, installedRe, availableRe *regexp.Regexp, skipIfNoRouterBoard bool) (*UpdateStatus, error) {
+func getUpdateStatus(conn core.SshConnection, sshCmd, subSystem string, installedRe, availableRe *regexp.Regexp, skipIfNoRouterBoard bool) (*UpdateStatus, error) {
 	slog.Debug("SSH cmd is " + sshCmd)
 	result, err := conn.Run(sshCmd)
 	if err != nil {

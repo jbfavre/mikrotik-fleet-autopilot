@@ -44,7 +44,7 @@ var Command = []*cli.Command{
 			// Iterate over all hosts
 			var lastErr error
 			for _, host := range cfg.Hosts {
-				if err := updatesForHost(cfg, host); err != nil {
+				if err := updates(cfg, host); err != nil {
 					lastErr = err
 					// Continue with other hosts even if one fails
 				}
@@ -61,7 +61,7 @@ type UpdateStatus struct {
 
 func init() {}
 
-func updatesForHost(cfg *core.Config, host string) error {
+func updates(cfg *core.Config, host string) error {
 	applyUpdatesFlag := applyUpdates
 	slog.Debug("Subcommand apply-updates flag is " + fmt.Sprintf("%v", applyUpdatesFlag))
 

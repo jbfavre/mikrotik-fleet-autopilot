@@ -13,6 +13,23 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/core"
 )
 
+// parseHostsFlag parses a comma-separated list of hosts and returns a slice of trimmed host strings.
+// Empty strings and whitespace-only entries are filtered out.
+func parseHostsFlag(hostsFlag string) []string {
+	if hostsFlag == "" {
+		return []string{}
+	}
+
+	hosts := []string{}
+	for h := range strings.SplitSeq(hostsFlag, ",") {
+		trimmed := strings.TrimSpace(h)
+		if trimmed != "" {
+			hosts = append(hosts, trimmed)
+		}
+	}
+	return hosts
+}
+
 func main() {
 	var globalConfig core.Config
 	var hostsFlag string
@@ -61,13 +78,7 @@ func main() {
 			// Determine hosts to use
 			if hostsFlag != "" {
 				// Split comma-separated hosts
-				globalConfig.Hosts = []string{}
-				for h := range strings.SplitSeq(hostsFlag, ",") {
-					trimmed := strings.TrimSpace(h)
-					if trimmed != "" {
-						globalConfig.Hosts = append(globalConfig.Hosts, trimmed)
-					}
-				}
+				globalConfig.Hosts = parseHostsFlag(hostsFlag)
 			} else {
 				// Auto-discover routers
 				routers, err := core.DiscoverRouters()

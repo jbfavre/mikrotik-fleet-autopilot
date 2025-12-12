@@ -31,9 +31,14 @@ clean: ## Remove build artifacts
 	@echo "Cleaning..."
 	@rm -rf $(BUILD_DIR)
 	@$(GO) clean
+	@$(GO) clean -testcache
 
 test: ## Run all tests
 	@echo "Running tests..."
+	$(GO) test ./...
+
+test-verbose:
+	@echo "Running tests (verbose)..."
 	$(GO) test -v ./...
 
 test-benchmark: ## Run benchmarks

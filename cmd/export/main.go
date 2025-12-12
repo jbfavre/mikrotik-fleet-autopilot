@@ -44,17 +44,26 @@ var Command = []*cli.Command{
 			if err != nil {
 				return err
 			}
-			return exportConfig(cfg)
+
+			// Iterate over all hosts
+			var lastErr error
+			for _, host := range cfg.Hosts {
+				if err := exportConfigForHost(cfg, host); err != nil {
+					lastErr = err
+					// Continue with other hosts even if one fails
+				}
+			}
+			return lastErr
 		},
 	},
 }
 
 func init() {}
 
-func exportConfig(cfg *core.Config) error {
+func exportConfigForHost(cfg *core.Config, host string) error {
 	// SSH init
 	slog.Info("Initializing SSH connection")
-	conn, err := sshConnectionFactory(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
+	conn, err := sshConnectionFactory(fmt.Sprintf("%v:22", host), cfg.User, cfg.Password)
 	if err != nil {
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
@@ -73,7 +82,7 @@ func exportConfig(cfg *core.Config) error {
 	slog.Info("Exporting router configuration")
 	result, err := conn.Run(sshCmd)
 	if err != nil {
-		fmt.Printf("⚠️  %s export failed: %v\n", cfg.Host, err)
+		fmt.Printf("⚠️  %s export failed: %v\n", host, err)
 		return fmt.Errorf("failed to export configuration: %w", err)
 	}
 
@@ -81,7 +90,7 @@ func exportConfig(cfg *core.Config) error {
 	result = strings.ReplaceAll(result, "\r\n", "\n")
 
 	// Generate output filename: remove domain suffix if present
-	hostname := cfg.Host
+	hostname := host
 	if idx := strings.Index(hostname, "."); idx > 0 {
 		hostname = hostname[:idx]
 	}
@@ -91,11 +100,11 @@ func exportConfig(cfg *core.Config) error {
 	// Write to file
 	slog.Debug("Writing configuration to " + filepath)
 	if err := os.WriteFile(filepath, []byte(result), 0644); err != nil {
-		fmt.Printf("⚠️  %s export failed: could not write file %s\n", cfg.Host, filepath)
+		fmt.Printf("⚠️  %s export failed: could not write file %s\n", host, filepath)
 		return fmt.Errorf("failed to write configuration file: %w", err)
 	}
 
 	// Success message
-	fmt.Printf("✅ %s configuration exported to %s\n", cfg.Host, filename)
+	fmt.Printf("✅ %s configuration exported to %s\n", host, filename)
 	return nil
 }

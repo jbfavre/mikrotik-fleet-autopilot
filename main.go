@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
@@ -14,6 +15,7 @@ import (
 
 func main() {
 	var globalConfig core.Config
+	var hostsFlag string
 	cmd := &cli.Command{
 		Name:    "mikrotik-fleet-autopilot",
 		Version: "0.1.0",
@@ -25,9 +27,9 @@ func main() {
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "host",
-				Value:       "172.16.0.1",
-				Usage:       "MikroTik router hostname or IP address",
-				Destination: &globalConfig.Host,
+				Value:       "",
+				Usage:       "MikroTik router hostname or IP address (comma-separated for multiple routers). If not provided, will auto-discover from router*.rsc files in current directory",
+				Destination: &hostsFlag,
 			},
 			&cli.StringFlag{
 				Name:        "user",
@@ -55,6 +57,31 @@ func main() {
 				core.SetupLogging(slog.LevelDebug)
 			}
 			slog.Info("Starting global")
+
+			// Determine hosts to use
+			if hostsFlag != "" {
+				// Split comma-separated hosts
+				globalConfig.Hosts = []string{}
+				for _, h := range strings.Split(hostsFlag, ",") {
+					trimmed := strings.TrimSpace(h)
+					if trimmed != "" {
+						globalConfig.Hosts = append(globalConfig.Hosts, trimmed)
+					}
+				}
+			} else {
+				// Auto-discover routers
+				routers, err := core.DiscoverRouters()
+				if err != nil {
+					return ctx, fmt.Errorf("failed to discover routers: %w", err)
+				}
+				globalConfig.Hosts = routers
+				slog.Info(fmt.Sprintf("Auto-discovered %d router(s): %v", len(routers), routers))
+			}
+
+			if len(globalConfig.Hosts) == 0 {
+				return ctx, fmt.Errorf("no routers specified or discovered")
+			}
+
 			// Make global config available in context
 			ctx = context.WithValue(ctx, core.ConfigKey, &globalConfig)
 			slog.Debug("globalConfig is available in context with value: " + fmt.Sprintf("%+v", globalConfig))

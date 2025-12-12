@@ -147,17 +147,17 @@ add name=bridge1`,
 
 			// Create config
 			cfg := &core.Config{
-				Host:     tt.host,
+				Hosts:    []string{tt.host},
 				User:     "admin",
 				Password: "password",
 			}
 
 			// Call the function
-			err = exportConfig(cfg)
+			err = exportConfigForHost(cfg, tt.host)
 
 			// Verify error expectations
 			if (err != nil) != tt.wantErr {
-				t.Errorf("exportConfig() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("exportConfigForHost() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			if tt.wantErr {

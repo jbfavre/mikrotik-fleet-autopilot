@@ -561,12 +561,12 @@ func TestApplyUpdate(t *testing.T) {
 			}
 
 			cfg := &core.Config{
-				Host:     "test-router",
+				Hosts:    []string{"test-router"},
 				User:     "admin",
 				Password: "password",
 			}
 
-			newConn, err := applyUpdate(initialMock, cfg, tt.updateCmd, "Test update")
+			newConn, err := applyUpdate(initialMock, cfg, "test-router", tt.updateCmd, "Test update")
 
 			if tt.wantErr {
 				if err == nil {
@@ -771,12 +771,12 @@ func TestApplyComponentUpdate(t *testing.T) {
 			}
 
 			cfg := &core.Config{
-				Host:     "test-router",
+				Hosts:    []string{"test-router"},
 				User:     "admin",
 				Password: "password",
 			}
 
-			err := applyComponentUpdate(initialMock, cfg, tt.component, tt.updateCmd, tt.checkBoth)
+			err := applyComponentUpdate(initialMock, cfg, "test-router", tt.component, tt.updateCmd, tt.checkBoth)
 
 			if tt.wantErr {
 				if err == nil {

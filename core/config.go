@@ -1,7 +1,7 @@
 package core
 
 type Config struct {
-	Host     string
+	Hosts    []string
 	User     string
 	Password string
 	Debug    bool

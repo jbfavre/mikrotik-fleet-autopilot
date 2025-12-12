@@ -50,6 +50,7 @@ func main() {
 		Commands: append(export.Command, updates.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			// Set log level
+			core.SetupLogging(slog.LevelWarn)
 			if globalConfig.Debug {
 				core.SetupLogging(slog.LevelDebug)
 			}

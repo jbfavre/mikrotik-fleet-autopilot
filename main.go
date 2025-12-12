@@ -58,7 +58,7 @@ func main() {
 			// Make global config available in context
 			ctx = context.WithValue(ctx, core.ConfigKey, &globalConfig)
 			slog.Debug("globalConfig is available in context with value: " + fmt.Sprintf("%+v", globalConfig))
-			slog.Info("Starting " + cmd.Args().Get(0) + " command")
+			slog.Info("Starting " + cmd.Args().Get(0) + " subcommand")
 			return ctx, nil
 		},
 	}

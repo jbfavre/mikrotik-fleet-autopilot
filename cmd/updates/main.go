@@ -79,12 +79,12 @@ func updates(cfg *core.Config) error {
 
 	// Step 3: Apply updates if requested and needed
 	if applyUpdatesFlag && applyUpdates {
-		slog.Info("Applying updates if requested and needed")
 		osUpToDate := osStatus.Installed == osStatus.Available
 		boardUpToDate := boardStatus == nil || boardStatus.Installed == boardStatus.Available
 
 		// Apply RouterOS update if needed
 		if !osUpToDate {
+			slog.Info("Applying RouterOS updates")
 			if err := applyComponentUpdate(conn, cfg, "RouterOS", "/system/package/update/install", false); err != nil {
 				return err
 			}
@@ -92,6 +92,7 @@ func updates(cfg *core.Config) error {
 
 		// Apply RouterBoard update if needed (only for physical routers)
 		if !boardUpToDate && boardStatus != nil {
+			slog.Info("Applying RouterBoard updates")
 			if err := applyComponentUpdate(conn, cfg, "RouterBoard", "/system/reboot", true); err != nil {
 				return err
 			}

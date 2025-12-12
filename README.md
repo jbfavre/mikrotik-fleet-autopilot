@@ -1,3 +1,5 @@
+[![Go](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/go.yml/badge.svg)](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/go.yml)
+
 # MikroTik Fleet Autopilot
 
 Automate. Control. Scale. Your MikroTik fleet on autopilot.

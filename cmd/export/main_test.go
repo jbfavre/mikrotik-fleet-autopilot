@@ -109,9 +109,9 @@ add name=bridge1`,
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer os.RemoveAll(tmpDir)
-
-			// Set output directory for this test
+			defer func() {
+				_ = os.RemoveAll(tmpDir)
+			}() // Set output directory for this test
 			originalOutputDir := outputDir
 			outputDir = tmpDir
 			defer func() {

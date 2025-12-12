@@ -54,9 +54,10 @@ func init() {}
 
 func updates(cfg *core.Config) error {
 	applyUpdatesFlag := applyUpdates
-	slog.Debug("Apply updates flag from cmd is " + fmt.Sprintf("%v", applyUpdatesFlag))
+	slog.Debug("Subcommand apply-updates flag is " + fmt.Sprintf("%v", applyUpdatesFlag))
 
 	// SSH init
+	slog.Info("Initializing SSH connection")
 	conn, err := sshConnectionFactory(fmt.Sprintf("%v:22", cfg.Host), cfg.User, cfg.Password)
 	if err != nil {
 		return fmt.Errorf("failed to create SSH connection: %w", err)
@@ -66,17 +67,35 @@ func updates(cfg *core.Config) error {
 	}()
 
 	// Step 1: Check current status
+	slog.Info("Checking current update status")
 	osStatus, boardStatus, err := checkCurrentStatus(conn)
 	if err != nil {
 		return err
 	}
 
 	// Step 2: Display current status
+	slog.Info("Displaying current update status")
 	formatAndDisplayResult(cfg.Host, osStatus, boardStatus)
 
 	// Step 3: Apply updates if requested and needed
 	if applyUpdatesFlag && applyUpdates {
-		return applyUpdatesIfNeeded(conn, cfg, osStatus, boardStatus)
+		slog.Info("Applying updates if requested and needed")
+		osUpToDate := osStatus.Installed == osStatus.Available
+		boardUpToDate := boardStatus == nil || boardStatus.Installed == boardStatus.Available
+
+		// Apply RouterOS update if needed
+		if !osUpToDate {
+			if err := applyComponentUpdate(conn, cfg, "RouterOS", "/system/package/update/install", false); err != nil {
+				return err
+			}
+		}
+
+		// Apply RouterBoard update if needed (only for physical routers)
+		if !boardUpToDate && boardStatus != nil {
+			if err := applyComponentUpdate(conn, cfg, "RouterBoard", "/system/reboot", true); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -97,6 +116,7 @@ func checkCurrentStatus(conn core.SshRunner) (UpdateStatus, *UpdateStatus, error
 		return UpdateStatus{}, nil, err
 	}
 	osStatus := *osStatusPtr
+	slog.Debug("RouterOS status is " + fmt.Sprintf("%+v", osStatus))
 	if osStatus.Installed == osStatus.Available {
 		slog.Info("RouterOS already up to date with RouterOS " + osStatus.Installed)
 	} else {
@@ -119,6 +139,7 @@ func checkCurrentStatus(conn core.SshRunner) (UpdateStatus, *UpdateStatus, error
 	if boardStatus == nil {
 		slog.Info("RouterBoard not present (virtualized RouterOS)")
 	} else {
+		slog.Debug("RouterBoard status is " + fmt.Sprintf("%+v", boardStatus))
 		if boardStatus.Installed == boardStatus.Available {
 			slog.Info("RouterBoard already up to date with RouterBoard " + boardStatus.Installed)
 		} else {
@@ -127,28 +148,6 @@ func checkCurrentStatus(conn core.SshRunner) (UpdateStatus, *UpdateStatus, error
 	}
 
 	return osStatus, boardStatus, nil
-}
-
-// applyUpdatesIfNeeded applies RouterOS and RouterBoard updates if they are needed
-func applyUpdatesIfNeeded(conn core.SshRunner, cfg *core.Config, osStatus UpdateStatus, boardStatus *UpdateStatus) error {
-	osUpToDate := osStatus.Installed == osStatus.Available
-	boardUpToDate := boardStatus == nil || boardStatus.Installed == boardStatus.Available
-
-	// Apply RouterOS update if needed
-	if !osUpToDate {
-		if err := applyComponentUpdate(conn, cfg, "RouterOS", "/system/package/update/install", false); err != nil {
-			return err
-		}
-	}
-
-	// Apply RouterBoard update if needed (only for physical routers)
-	if !boardUpToDate && boardStatus != nil {
-		if err := applyComponentUpdate(conn, cfg, "RouterBoard", "/system/reboot", true); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // applyComponentUpdate applies an update to RouterOS or RouterBoard and displays the result

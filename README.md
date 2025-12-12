@@ -1,4 +1,4 @@
-[![Go](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/go.yml/badge.svg)](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/go.yml)
+[![Go](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/go.yml/badge.svg)](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/go.yml) [![Scorecard supply-chain security](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/scorecard.yml/badge.svg)](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/scorecard.yml) [![CodeQL Advanced](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/codeql.yml/badge.svg)](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/codeql.yml)
 
 # MikroTik Fleet Autopilot
 

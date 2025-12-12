@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"syscall"
@@ -50,7 +51,23 @@ func NewSsh(host, username, password string) (*SshConnection, error) {
 }
 
 func (c *SshConnection) Close() error {
-	return c.client.Close()
+	err := c.client.Close()
+	if err != nil && !IsAlreadyClosedError(err) {
+		slog.Debug("failed to close SSH connection: " + err.Error())
+		return err
+	}
+	// Silently ignore "already closed" errors as they're expected in some scenarios
+	return nil
+}
+
+// IsAlreadyClosedError checks if the error is due to closing an already closed connection
+func IsAlreadyClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "use of closed network connection") ||
+		strings.Contains(errMsg, "connection already closed")
 }
 
 func (c *SshConnection) Run(cmd string) (string, error) {

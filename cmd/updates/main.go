@@ -62,9 +62,7 @@ func updates(cfg *core.Config) error {
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	defer func() {
-		if closeErr := conn.Close(); closeErr != nil {
-			slog.Debug("failed to close SSH connection: " + closeErr.Error())
-		}
+		_ = conn.Close() // Error logging handled inside Close()
 	}()
 
 	// Step 1: Check current status
@@ -167,12 +165,11 @@ func applyComponentUpdate(conn core.SshRunner, cfg *core.Config, component, upda
 		return err
 	}
 	defer func() {
-		// Silently ignore close errors as connection may already be closed
-		_ = newConn.Close()
+		_ = newConn.Close() // Error logging handled inside Close()
 	}()
 
 	// Check status after upgrade
-	osStatusPtr, err := getUpdateStatus(
+	osStatusPtr, osStatusErr := getUpdateStatus(
 		newConn,
 		"/system/package/update/check-for-updates",
 		"RouterOS",
@@ -183,18 +180,18 @@ func applyComponentUpdate(conn core.SshRunner, cfg *core.Config, component, upda
 
 	if !checkBoth {
 		// RouterOS only update
-		if err == nil {
+		if osStatusErr == nil {
 			osStatus := *osStatusPtr
 			formatAndDisplayResult(cfg.Host, osStatus, nil)
 		} else {
-			slog.Warn("Failed to check RouterOS status after update: " + err.Error())
+			slog.Warn("Failed to check RouterOS status after update: " + osStatusErr.Error())
 		}
 		// Post-update check errors are non-fatal - the update itself succeeded
 		return nil
 	}
 
 	// RouterBoard update - check both OS and Board
-	boardStatus, err2 := getUpdateStatus(
+	boardStatus, boardStatusErr := getUpdateStatus(
 		newConn,
 		"/system/routerboard/print",
 		"RouterBoard",
@@ -203,15 +200,15 @@ func applyComponentUpdate(conn core.SshRunner, cfg *core.Config, component, upda
 		true,
 	)
 
-	if err == nil && err2 == nil {
+	if osStatusErr == nil && boardStatusErr == nil {
 		osStatus := *osStatusPtr
 		fmt.Println(formatUpdateResult(cfg.Host, osStatus, boardStatus))
 	} else {
-		if err != nil {
-			slog.Warn("Failed to check RouterOS status after update: " + err.Error())
+		if osStatusErr != nil {
+			slog.Warn("Failed to check RouterOS status after update: " + osStatusErr.Error())
 		}
-		if err2 != nil {
-			slog.Warn("Failed to check RouterBoard status after update: " + err2.Error())
+		if boardStatusErr != nil {
+			slog.Warn("Failed to check RouterBoard status after update: " + boardStatusErr.Error())
 		}
 	}
 
@@ -302,9 +299,7 @@ func applyUpdate(conn core.SshRunner, cfg *core.Config, updateCmd, waitMsg strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to run SSH command: %w", err)
 	}
-	if closeErr := conn.Close(); closeErr != nil {
-		slog.Debug("failed to close SSH connection: " + closeErr.Error())
-	}
+	_ = conn.Close() // Error logging handled inside Close()
 	fmt.Printf("⏳ %s\n", waitMsg)
 
 	var newConn core.SshRunner

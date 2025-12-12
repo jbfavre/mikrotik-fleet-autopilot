@@ -62,7 +62,7 @@ func main() {
 			if hostsFlag != "" {
 				// Split comma-separated hosts
 				globalConfig.Hosts = []string{}
-				for _, h := range strings.Split(hostsFlag, ",") {
+				for h := range strings.SplitSeq(hostsFlag, ",") {
 					trimmed := strings.TrimSpace(h)
 					if trimmed != "" {
 						globalConfig.Hosts = append(globalConfig.Hosts, trimmed)

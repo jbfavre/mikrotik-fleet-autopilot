@@ -11,16 +11,20 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/core"
 )
 
-var applyUpdates bool = true
+var updatesApply bool = true
 
 // reconnectDelay is the delay between reconnection attempts after a router reboot
 // This can be overridden in tests to speed up test execution
 var reconnectDelay = 10 * time.Second
 
 // sshConnectionFactory is the factory function for creating SSH connections
-// This can be overridden in tests to inject mock connections
-var sshConnectionFactory = func(host, user, password string) (core.SshRunner, error) {
-	return core.NewSsh(host, user, password)
+// This can be overridden in tests to inject mock SSH manager
+var sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+	manager, err := core.GetSshManager(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get SSH manager from context: %w", err)
+	}
+	return manager.CreateConnection(fmt.Sprintf("%s:22", host))
 }
 
 var Command = []*cli.Command{
@@ -29,10 +33,10 @@ var Command = []*cli.Command{
 		Usage: "Manages MikroTik router updates",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
-				Name:        "apply-updates",
+				Name:        "updates-apply",
 				Value:       false,
 				Usage:       "Update router packages to the latest version available",
-				Destination: &applyUpdates,
+				Destination: &updatesApply,
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -44,7 +48,7 @@ var Command = []*cli.Command{
 			// Iterate over all hosts
 			var lastErr error
 			for _, host := range cfg.Hosts {
-				if err := updates(cfg, host); err != nil {
+				if err := updates(ctx, host); err != nil {
 					lastErr = err
 					// Continue with other hosts even if one fails
 				}
@@ -59,21 +63,20 @@ type UpdateStatus struct {
 	Available string
 }
 
-func init() {}
-
-func updates(cfg *core.Config, host string) error {
-	applyUpdatesFlag := applyUpdates
-	slog.Debug("Subcommand apply-updates flag is " + fmt.Sprintf("%v", applyUpdatesFlag))
+func updates(ctx context.Context, host string) error {
+	updatesApplyFlag := updatesApply
+	slog.Debug("Subcommand apply-updates flag is " + fmt.Sprintf("%v", updatesApplyFlag))
 
 	// SSH init
 	slog.Info("Initializing SSH connection")
-	conn, err := sshConnectionFactory(fmt.Sprintf("%v:22", host), cfg.User, cfg.Password)
+	conn, err := sshConnectionFactory(ctx, host)
 	if err != nil {
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	defer func() {
 		_ = conn.Close() // Error logging handled inside Close()
 	}()
+	slog.Debug("SSH connection created for host " + host)
 
 	// Step 1: Check current status
 	slog.Info("Checking current update status")
@@ -87,14 +90,14 @@ func updates(cfg *core.Config, host string) error {
 	formatAndDisplayResult(host, osStatus, boardStatus)
 
 	// Step 3: Apply updates if requested and needed
-	if applyUpdatesFlag && applyUpdates {
+	if updatesApplyFlag && updatesApply {
 		osUpToDate := osStatus.Installed == osStatus.Available
 		boardUpToDate := boardStatus == nil || boardStatus.Installed == boardStatus.Available
 
 		// Apply RouterOS update if needed
 		if !osUpToDate {
 			slog.Info("Applying RouterOS updates")
-			if err := applyComponentUpdate(conn, cfg, host, "RouterOS", "/system/package/update/install", false); err != nil {
+			if err := applyComponentUpdate(conn, ctx, host, "RouterOS", "/system/package/update/install", false); err != nil {
 				return err
 			}
 		}
@@ -102,7 +105,7 @@ func updates(cfg *core.Config, host string) error {
 		// Apply RouterBoard update if needed (only for physical routers)
 		if !boardUpToDate && boardStatus != nil {
 			slog.Info("Applying RouterBoard updates")
-			if err := applyComponentUpdate(conn, cfg, host, "RouterBoard", "/system/reboot", true); err != nil {
+			if err := applyComponentUpdate(conn, ctx, host, "RouterBoard", "/system/reboot", true); err != nil {
 				return err
 			}
 		}
@@ -161,7 +164,7 @@ func checkCurrentStatus(conn core.SshRunner) (UpdateStatus, *UpdateStatus, error
 }
 
 // applyComponentUpdate applies an update to RouterOS or RouterBoard and displays the result
-func applyComponentUpdate(conn core.SshRunner, cfg *core.Config, host, component, updateCmd string, checkBoth bool) error {
+func applyComponentUpdate(conn core.SshRunner, ctx context.Context, host, component, updateCmd string, checkBoth bool) error {
 	slog.Info(component + " update needed, applying updates")
 	slog.Debug("Applying " + component + " updates on router " + host)
 
@@ -169,7 +172,7 @@ func applyComponentUpdate(conn core.SshRunner, cfg *core.Config, host, component
 	if component == "RouterBoard" {
 		msgPrefix = "RouterBoard update applied on router"
 	}
-	newConn, err := applyUpdate(conn, cfg, host, updateCmd, msgPrefix+" "+host)
+	newConn, err := applyUpdate(conn, ctx, host, updateCmd, msgPrefix+" "+host)
 	if err != nil {
 		return err
 	}
@@ -303,7 +306,7 @@ func getUpdateStatus(conn core.SshRunner, sshCmd, subSystem string, installedRe,
 }
 
 // Generic function to apply updates and wait for router to come back
-func applyUpdate(conn core.SshRunner, cfg *core.Config, host, updateCmd, waitMsg string) (core.SshRunner, error) {
+func applyUpdate(conn core.SshRunner, ctx context.Context, host, updateCmd, waitMsg string) (core.SshRunner, error) {
 	_, err := conn.Run(updateCmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to run SSH command: %w", err)
@@ -316,7 +319,7 @@ func applyUpdate(conn core.SshRunner, cfg *core.Config, host, updateCmd, waitMsg
 		fmt.Printf("⏳ Waiting for router %v to come back up...\n", host)
 		time.Sleep(reconnectDelay)
 
-		newConn, err = sshConnectionFactory(fmt.Sprintf("%v:22", host), cfg.User, cfg.Password)
+		newConn, err = sshConnectionFactory(ctx, host)
 		if err != nil {
 			continue
 		}

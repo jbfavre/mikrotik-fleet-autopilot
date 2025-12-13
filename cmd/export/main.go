@@ -16,9 +16,13 @@ var showSensitive bool
 var outputDir string
 
 // sshConnectionFactory is the factory function for creating SSH connections
-// This can be overridden in tests to inject mock connections
-var sshConnectionFactory = func(host, user, password string) (core.SshRunner, error) {
-	return core.NewSsh(host, user, password)
+// This can be overridden in tests to inject mock SSH manager
+var sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+	manager, err := core.GetSshManager(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get SSH manager from context: %w", err)
+	}
+	return manager.CreateConnection(fmt.Sprintf("%s:22", host))
 }
 
 var Command = []*cli.Command{
@@ -48,7 +52,7 @@ var Command = []*cli.Command{
 			// Iterate over all hosts
 			var lastErr error
 			for _, host := range cfg.Hosts {
-				if err := exportConfigForHost(cfg, host); err != nil {
+				if err := exportConfigForHost(ctx, host); err != nil {
 					lastErr = err
 					// Continue with other hosts even if one fails
 				}
@@ -58,12 +62,10 @@ var Command = []*cli.Command{
 	},
 }
 
-func init() {}
-
-func exportConfigForHost(cfg *core.Config, host string) error {
+func exportConfigForHost(ctx context.Context, host string) error {
 	// SSH init
 	slog.Info("Initializing SSH connection")
-	conn, err := sshConnectionFactory(fmt.Sprintf("%v:22", host), cfg.User, cfg.Password)
+	conn, err := sshConnectionFactory(ctx, host)
 	if err != nil {
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}

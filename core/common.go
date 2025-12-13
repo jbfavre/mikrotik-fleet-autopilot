@@ -16,6 +16,8 @@ type ContextKey string
 const (
 	// ConfigKey is the context key for storing Config
 	ConfigKey ContextKey = "config"
+	// SshManagerKey is the context key for storing SshManager
+	SshManagerKey ContextKey = "ssh_manager"
 )
 
 // GetConfig extracts *config.Config from context
@@ -27,15 +29,24 @@ func GetConfig(ctx context.Context) (*Config, error) {
 	return cfg, nil
 }
 
+// GetSshManager extracts *SshManager from context
+func GetSshManager(ctx context.Context) (*SshManager, error) {
+	manager, ok := ctx.Value(SshManagerKey).(*SshManager)
+	if !ok {
+		return nil, fmt.Errorf("invalid ssh manager type or not found in context")
+	}
+	return manager, nil
+}
+
 // SetupLogging sets slog default logger to the given level
 func SetupLogging(level slog.Level) {
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	slog.SetDefault(slog.New(handler))
 }
 
-// DiscoverRouters scans the current directory for router*.rsc files
+// DiscoverHosts scans the current directory for router*.rsc files
 // and returns a sorted list of router names (without .rsc extension, with .home appended)
-func DiscoverRouters() ([]string, error) {
+func DiscoverHosts() ([]string, error) {
 	files, err := filepath.Glob("router*.rsc")
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan for router files: %w", err)

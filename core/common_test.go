@@ -18,10 +18,9 @@ func TestGetConfig(t *testing.T) {
 		{
 			name: "valid config in context",
 			ctx: context.WithValue(context.Background(), ConfigKey, &Config{
-				Hosts:    []string{"router1.home", "router2.home"},
-				User:     "admin",
-				Password: "secret",
-				Debug:    true,
+				Hosts: []string{"router1.home", "router2.home"},
+				User:  "admin",
+				Debug: true,
 			}),
 			wantErr:   false,
 			wantHosts: []string{"router1.home", "router2.home"},
@@ -52,7 +51,7 @@ func TestGetConfig(t *testing.T) {
 	}
 }
 
-func TestDiscoverRouters(t *testing.T) {
+func TestDiscoverHosts(t *testing.T) {
 	tests := []struct {
 		name        string
 		setupFiles  []string
@@ -123,21 +122,21 @@ func TestDiscoverRouters(t *testing.T) {
 			}
 
 			// Run the test
-			routers, err := DiscoverRouters()
+			routers, err := DiscoverHosts()
 
 			if (err != nil) != tt.wantErr {
-				t.Errorf("DiscoverRouters() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("DiscoverHosts() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			if !tt.wantErr && !reflect.DeepEqual(routers, tt.wantRouters) {
-				t.Errorf("DiscoverRouters() = %v, want %v", routers, tt.wantRouters)
+				t.Errorf("DiscoverHosts() = %v, want %v", routers, tt.wantRouters)
 			}
 		})
 	}
 }
 
-func TestDiscoverRoutersRealDirectory(t *testing.T) {
+func TestDiscoverHostsRealDirectory(t *testing.T) {
 	// This test checks behavior with actual file system operations
 	tmpDir, err := os.MkdirTemp("", "router-discover-*")
 	if err != nil {
@@ -165,72 +164,14 @@ func TestDiscoverRoutersRealDirectory(t *testing.T) {
 		t.Fatalf("failed to change dir: %v", err)
 	}
 
-	routers, err := DiscoverRouters()
+	routers, err := DiscoverHosts()
 	if err != nil {
-		t.Errorf("DiscoverRouters() unexpected error: %v", err)
+		t.Errorf("DiscoverHosts() unexpected error: %v", err)
 	}
 
 	expected := []string{"router1.home", "router2.home"}
 	if !reflect.DeepEqual(routers, expected) {
-		t.Errorf("DiscoverRouters() = %v, want %v", routers, expected)
-	}
-}
-
-func TestIsAlreadyClosedError(t *testing.T) {
-	tests := []struct {
-		name    string
-		errMsg  string
-		wantRes bool
-	}{
-		{
-			name:    "nil error",
-			errMsg:  "",
-			wantRes: false,
-		},
-		{
-			name:    "use of closed network connection",
-			errMsg:  "use of closed network connection",
-			wantRes: true,
-		},
-		{
-			name:    "connection already closed",
-			errMsg:  "connection already closed",
-			wantRes: true,
-		},
-		{
-			name:    "partial match - closed network",
-			errMsg:  "error: use of closed network connection detected",
-			wantRes: true,
-		},
-		{
-			name:    "partial match - already closed",
-			errMsg:  "ssh: connection already closed by remote",
-			wantRes: true,
-		},
-		{
-			name:    "different error",
-			errMsg:  "connection timeout",
-			wantRes: false,
-		},
-		{
-			name:    "authentication failed",
-			errMsg:  "ssh: unable to authenticate",
-			wantRes: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var err error
-			if tt.errMsg != "" {
-				err = &mockError{msg: tt.errMsg}
-			}
-
-			result := IsAlreadyClosedError(err)
-			if result != tt.wantRes {
-				t.Errorf("IsAlreadyClosedError(%q) = %v, want %v", tt.errMsg, result, tt.wantRes)
-			}
-		})
+		t.Errorf("DiscoverHosts() = %v, want %v", routers, expected)
 	}
 }
 
@@ -241,32 +182,6 @@ type mockError struct {
 
 func (e *mockError) Error() string {
 	return e.msg
-}
-
-func TestConfigStruct(t *testing.T) {
-	// Test Config struct initialization and field access
-	cfg := Config{
-		Hosts:    []string{"router1.home", "router2.home"},
-		User:     "admin",
-		Password: "password123",
-		Debug:    true,
-	}
-
-	if len(cfg.Hosts) != 2 {
-		t.Errorf("Config.Hosts length = %d, want 2", len(cfg.Hosts))
-	}
-
-	if cfg.User != "admin" {
-		t.Errorf("Config.User = %s, want admin", cfg.User)
-	}
-
-	if cfg.Password != "password123" {
-		t.Errorf("Config.Password = %s, want password123", cfg.Password)
-	}
-
-	if !cfg.Debug {
-		t.Error("Config.Debug = false, want true")
-	}
 }
 
 func TestContextKey(t *testing.T) {
@@ -283,7 +198,7 @@ func TestContextKey(t *testing.T) {
 	}
 }
 
-func BenchmarkDiscoverRouters(b *testing.B) {
+func BenchmarkDiscoverHosts(b *testing.B) {
 	// Create temporary directory with test files
 	tmpDir, err := os.MkdirTemp("", "router-bench-*")
 	if err != nil {
@@ -305,29 +220,19 @@ func BenchmarkDiscoverRouters(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = DiscoverRouters()
+		_, _ = DiscoverHosts()
 	}
 }
 
 func BenchmarkGetConfig(b *testing.B) {
 	ctx := context.WithValue(context.Background(), ConfigKey, &Config{
-		Hosts:    []string{"router1.home", "router2.home"},
-		User:     "admin",
-		Password: "secret",
-		Debug:    false,
+		Hosts: []string{"router1.home", "router2.home"},
+		User:  "admin",
+		Debug: false,
 	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = GetConfig(ctx)
-	}
-}
-
-func BenchmarkIsAlreadyClosedError(b *testing.B) {
-	err := &mockError{msg: "use of closed network connection"}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = IsAlreadyClosedError(err)
 	}
 }

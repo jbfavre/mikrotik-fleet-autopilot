@@ -1,58 +1,35 @@
 package core
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
+	"os/user"
+	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
+	"github.com/kevinburke/ssh_config"
 	"golang.org/x/crypto/ssh"
 )
 
 // SshRunner defines the interface for SSH operations
 type SshRunner interface {
-	Run(cmd string) (string, error)
 	Close() error
+	IsAlreadyClosedError(err error) bool
+	Run(cmd string) (string, error)
 }
 
-type SshConnection struct {
-	client *ssh.Client
+type sshConnection struct {
+	client       *ssh.Client
+	clientConfig *ssh.ClientConfig
 }
 
-func NewSsh(host, username, password string) (*SshConnection, error) {
-	// var hostKey ssh.PublicKey
-	// An SSH client is represented with a ClientConn.
-	//
-	// To authenticate with the remote server you must pass at least one
-	// implementation of AuthMethod via the Auth field in ClientConfig,
-	// and provide a HostKeyCallback.
-	config := &ssh.ClientConfig{
-		User: username,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(password),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //ssh.FixedHostKey(hostKey),
-		Timeout:         10 * time.Second,
-	}
-	client, err := ssh.Dial("tcp", host, config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial, %v", err)
-	}
-
-	conn := &SshConnection{
-		client: client,
-	}
-
-	return conn, nil
-}
-
-func (c *SshConnection) Close() error {
+func (c *sshConnection) Close() error {
 	err := c.client.Close()
-	if err != nil && !IsAlreadyClosedError(err) {
+	if err != nil && !c.IsAlreadyClosedError(err) {
 		slog.Debug("failed to close SSH connection: " + err.Error())
 		return err
 	}
@@ -61,7 +38,7 @@ func (c *SshConnection) Close() error {
 }
 
 // IsAlreadyClosedError checks if the error is due to closing an already closed connection
-func IsAlreadyClosedError(err error) bool {
+func (c *sshConnection) IsAlreadyClosedError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -70,7 +47,12 @@ func IsAlreadyClosedError(err error) bool {
 		strings.Contains(errMsg, "connection already closed")
 }
 
-func (c *SshConnection) Run(cmd string) (string, error) {
+func (c *sshConnection) Run(cmd string) (string, error) {
+	// Check if connection is established
+	if c.client == nil {
+		return "", fmt.Errorf("SSH connection not established")
+	}
+
 	// Each ClientConn can support multiple interactive sessions,
 	// represented by a Session.
 	session, err := c.client.NewSession()
@@ -91,7 +73,148 @@ func (c *SshConnection) Run(cmd string) (string, error) {
 	return b.String(), nil
 }
 
-func GetPassword(prompt string) string {
+// newSsh creates a new SSH connection (internal function, use SshManager.CreateConnection instead)
+func newSsh(host, username, password, passphrase string) (*sshConnection, error) {
+	// To authenticate with the remote server you must pass at least one
+	// implementation of AuthMethod via the Auth field in ClientConfig,
+	// and provide a HostKeyCallback.
+	conn := &sshConnection{
+		client:       nil,
+		clientConfig: nil,
+	}
+
+	hostConfig := readSshConfig(host)
+
+	var sshSigner ssh.Signer
+	var authMethod []ssh.AuthMethod
+
+	// Try to load SSH key if passphrase is provided
+	if passphrase != "" {
+		sshSigner = parseSshPrivateKey(hostConfig["IdentityFile"], passphrase)
+		if sshSigner == nil {
+			return nil, fmt.Errorf("failed to parse SSH private key with provided passphrase")
+		}
+	}
+
+	// Build authentication methods
+	if sshSigner != nil && password != "" {
+		// Both key and password available
+		authMethod = []ssh.AuthMethod{
+			ssh.PublicKeys(sshSigner),
+			ssh.Password(password),
+		}
+	} else if sshSigner != nil {
+		// Only key available
+		authMethod = []ssh.AuthMethod{
+			ssh.PublicKeys(sshSigner),
+		}
+	} else if password != "" {
+		// Only password available
+		authMethod = []ssh.AuthMethod{
+			ssh.Password(password),
+		}
+	} else {
+		return nil, fmt.Errorf("no authentication method provided (need password or SSH key with passphrase)")
+	}
+
+	// Build ssh client config
+	config := &ssh.ClientConfig{
+		User: username,
+		Auth: authMethod,
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			return nil
+		},
+		Timeout: 10 * time.Second,
+	}
+	conn.clientConfig = config
+
+	// Establish the SSH connection
+	client, err := ssh.Dial("tcp", host, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial %s: %w", host, err)
+	}
+	conn.client = client
+
+	return conn, nil
+}
+
+func readSshConfig(host string) map[string]string {
+	// Initialize hostConfig with defaults
+	hostConfig := make(map[string]string)
+	hostConfig["Hostname"] = host
+	hostConfig["Port"] = "22"
+	hostConfig["User"] = ""
+	hostConfig["IdentityFile"] = ""
+	hostConfig["IdentitiesOnly"] = ""
+	hostConfig["ForwardAgent"] = ""
+	hostConfig["HostkeyAlgorithms"] = ""
+	hostConfig["PubkeyAcceptedAlgorithms"] = ""
+
+	// Try to read from user's ssh_config
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		// Could not determine home directory - use defaults
+		return hostConfig
+	}
+	sshConfigFile, err := os.Open(filepath.Join(homeDir, ".ssh", "config"))
+	if err != nil {
+		// SSH config file doesn't exist or can't be read - use defaults
+		return hostConfig
+	}
+	defer func() { _ = sshConfigFile.Close() }()
+
+	sshConfig, err := ssh_config.Decode(sshConfigFile)
+	if err != nil || sshConfig == nil {
+		// Failed to decode SSH config - use defaults
+		return hostConfig
+	}
+
+	// Override host's config values with settings from ssh_config
+	if hostname, _ := sshConfig.Get(host, "Hostname"); hostname != "" {
+		hostConfig["Hostname"] = strings.ReplaceAll(hostname, "%h", host)
+	}
+	hostConfig["User"], _ = sshConfig.Get(host, "User")
+	hostConfig["IdentitiesOnly"], _ = sshConfig.Get(host, "IdentitiesOnly")
+	hostConfig["ForwardAgent"], _ = sshConfig.Get(host, "ForwardAgent")
+	hostConfig["HostkeyAlgorithms"], _ = sshConfig.Get(host, "HostkeyAlgorithms")
+	hostConfig["PubkeyAcceptedAlgorithms"], _ = sshConfig.Get(host, "PubkeyAcceptedAlgorithms")
+
+	if port, _ := sshConfig.Get(host, "Port"); port != "" && port != "0" {
+		hostConfig["Port"] = port
+	}
+	hostConfig["IdentityFile"], _ = sshConfig.Get(host, "IdentityFile")
+
+	return hostConfig
+}
+
+func parseSshPrivateKey(identityFile, passphrase string) ssh.Signer {
+	// Get current user's detail
+	user, err := user.Current()
+	if err != nil {
+		slog.Error("unable to get current user: " + fmt.Sprintf("%v", err.Error()))
+		return nil
+	}
+	userHomeDir := user.HomeDir
+	// Expand ~/ IdentityFile with full user's home path
+	if strings.HasPrefix(identityFile, "~/") {
+		identityFile = filepath.Join(userHomeDir, identityFile[2:])
+	}
+
+	// If Identity File found, parse private key and add ssh.PublicKeys(signer) to AuthMethod
+	// Parse private key and build ssh.signer
+	key, err := os.ReadFile(identityFile)
+	if err != nil {
+		slog.Error("unable to read private key: " + fmt.Sprintf("%v", err.Error()))
+	}
+	var signer ssh.Signer
+	signer, err = ssh.ParsePrivateKeyWithPassphrase(key, []byte(passphrase))
+	if err != nil {
+		slog.Warn("unable to parse private key: " + fmt.Sprintf("%v", err.Error()))
+	}
+	return signer
+}
+
+/* func getPassword(prompt string) string {
 	fmt.Print(prompt)
 
 	// Common settings and variables for both stty calls.
@@ -140,4 +263,4 @@ func GetPassword(prompt string) string {
 	}
 
 	return strings.TrimSpace(text)
-}
+} */

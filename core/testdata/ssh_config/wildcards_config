@@ -1,0 +1,17 @@
+# Test wildcard patterns
+
+Host *.example.com
+    User developer
+    Port 22
+    IdentityFile testdata/ssh_keys/test_key
+
+Host dev-*
+    HostName %h.internal.net
+    User devops
+    Port 22
+    IdentityFile testdata/ssh_keys/test_key
+
+Host *
+    User default-user
+    IdentityFile testdata/ssh_keys/test_key
+    Port 22

@@ -61,39 +61,39 @@ func TestParseHostsFlag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseHostsFlag(tt.input)
+			result := parseHosts(tt.input)
 			if !reflect.DeepEqual(result, tt.expected) {
-				t.Errorf("parseHostsFlag(%q) = %v, want %v", tt.input, result, tt.expected)
+				t.Errorf("parseHosts(%q) = %v, want %v", tt.input, result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestParseHostsFlagPerformance(t *testing.T) {
+func TestParseHostsPerformance(t *testing.T) {
 	// Test with a large number of hosts
 	largeInput := strings.Repeat("192.168.1.1,", 1000)
-	result := parseHostsFlag(largeInput)
+	result := parseHosts(largeInput)
 
 	if len(result) != 1000 {
 		t.Errorf("Expected 1000 hosts, got %d", len(result))
 	}
 }
 
-func BenchmarkParseHostsFlag(b *testing.B) {
+func BenchmarkParseHosts(b *testing.B) {
 	input := "192.168.1.1,192.168.1.2,192.168.1.3,router.local"
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		parseHostsFlag(input)
+		parseHosts(input)
 	}
 }
 
-func BenchmarkParseHostsFlagLarge(b *testing.B) {
+func BenchmarkParseHostsLarge(b *testing.B) {
 	// Benchmark with 100 hosts
 	input := strings.Repeat("192.168.1.1,", 100)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		parseHostsFlag(input)
+		parseHosts(input)
 	}
 }

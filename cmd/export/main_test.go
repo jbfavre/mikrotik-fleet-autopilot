@@ -1,6 +1,7 @@
 package export
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,8 +13,23 @@ import (
 
 // MockSshRunner is a mock implementation of SshRunner for testing
 type MockSshRunner struct {
-	RunFunc   func(cmd string) (string, error)
-	CloseFunc func() error
+	CloseFunc                func() error
+	IsAlreadyClosedErrorFunc func(err error) bool
+	RunFunc                  func(cmd string) (string, error)
+}
+
+func (m *MockSshRunner) Close() error {
+	if m.CloseFunc != nil {
+		return m.CloseFunc()
+	}
+	return nil
+}
+
+func (m *MockSshRunner) IsAlreadyClosedError(err error) bool {
+	if m.IsAlreadyClosedErrorFunc != nil {
+		return m.IsAlreadyClosedErrorFunc(err)
+	}
+	return false
 }
 
 func (m *MockSshRunner) Run(cmd string) (string, error) {
@@ -23,11 +39,24 @@ func (m *MockSshRunner) Run(cmd string) (string, error) {
 	return "", nil
 }
 
-func (m *MockSshRunner) Close() error {
-	if m.CloseFunc != nil {
-		return m.CloseFunc()
+// MockSshManager is a mock implementation of SshManager for testing
+type MockSshManager struct {
+	CreateConnectionFunc func(host string) (core.SshRunner, error)
+	GetUserFunc          func() string
+}
+
+func (m *MockSshManager) CreateConnection(host string) (core.SshRunner, error) {
+	if m.CreateConnectionFunc != nil {
+		return m.CreateConnectionFunc(host)
 	}
-	return nil
+	return nil, fmt.Errorf("mock CreateConnection not implemented")
+}
+
+func (m *MockSshManager) GetUser() string {
+	if m.GetUserFunc != nil {
+		return m.GetUserFunc()
+	}
+	return "admin"
 }
 
 func TestExportConfig(t *testing.T) {
@@ -123,7 +152,7 @@ add name=bridge1`,
 
 			// Mock SSH connection using the factory pattern
 			originalFactory := sshConnectionFactory
-			sshConnectionFactory = func(host, user, password string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
 				return &MockSshRunner{
 					RunFunc: func(cmd string) (string, error) {
 						executedCmd = cmd
@@ -145,15 +174,16 @@ add name=bridge1`,
 				showSensitive = originalShowSensitive
 			}()
 
-			// Create config
+			// Create config and context with mock SSH manager
 			cfg := &core.Config{
-				Hosts:    []string{tt.host},
-				User:     "admin",
-				Password: "password",
+				Hosts: []string{tt.host},
+				User:  "admin",
 			}
+			ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+			ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
 
 			// Call the function
-			err = exportConfigForHost(cfg, tt.host)
+			err = exportConfigForHost(ctx, tt.host)
 
 			// Verify error expectations
 			if (err != nil) != tt.wantErr {

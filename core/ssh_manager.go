@@ -1,0 +1,58 @@
+package core
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net"
+)
+
+// SshManager encapsulates SSH credentials and provides SSH connections
+// without exposing credentials to callers
+type SshManager struct {
+	user       string
+	password   string
+	passphrase string
+}
+
+// NewSshManager creates a new SSH manager with the provided credentials
+// Credentials are stored privately and never exposed outside this package
+func NewSshManager(user, password, passphrase string) *SshManager {
+	return &SshManager{
+		user:       user,
+		password:   password,
+		passphrase: passphrase,
+	}
+}
+
+// CreateConnection retrieves the SshManager from context and creates a new SSH connection
+// to the specified host (automatically appending :22 port if not present).
+// This is the standard way to create SSH connections in subcommands.
+func CreateConnection(ctx context.Context, host string) (SshRunner, error) {
+	manager, err := GetSshManager(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get SSH manager from context: %w", err)
+	}
+
+	// Add default port if not specified
+	hostWithPort := host
+	if _, _, err := net.SplitHostPort(host); err != nil {
+		hostWithPort = fmt.Sprintf("%s:22", host)
+	}
+
+	slog.Debug(fmt.Sprintf("Creating SSH connection to %s as user %s", hostWithPort, manager.user))
+
+	// Call the internal newSsh function
+	conn, err := newSsh(hostWithPort, manager.user, manager.password, manager.passphrase)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SSH connection to %s: %w", hostWithPort, err)
+	}
+
+	return conn, nil
+}
+
+// GetUser returns the username (non-sensitive information)
+// This can be useful for logging purposes
+func (m *SshManager) GetUser() string {
+	return m.user
+}

@@ -1,0 +1,6 @@
+Host testhost
+    HostName 192.168.1.100
+    InvalidOption ThisShouldNotCauseErrors
+    User admin
+    Port not-a-number
+    IdentityFile testdata/ssh_keys/test_key

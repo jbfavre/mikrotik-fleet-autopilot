@@ -1,0 +1,23 @@
+# Multiple host configurations with different priorities
+
+Host router1
+    HostName 10.0.0.1
+    User admin
+    Port 22
+    IdentityFile testdata/ssh_keys/test_key
+
+Host router2
+    HostName 10.0.0.2
+    User netadmin
+    Port 8022
+    IdentityFile testdata/ssh_keys/encrypted_key
+
+Host router3
+    HostName 10.0.0.3
+    User operator
+    IdentityFile testdata/ssh_keys/test_key
+
+# Wildcard match - should be less specific
+Host router*
+    User fallback-user
+    Port 9999

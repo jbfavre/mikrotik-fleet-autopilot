@@ -1,0 +1,27 @@
+# Valid SSH config for testing
+Host testhost
+    HostName 192.168.1.100
+    User admin
+    Port 22
+    IdentityFile testdata/ssh_keys/test_key
+    IdentitiesOnly yes
+
+Host encrypted-host
+    HostName 192.168.1.101
+    User root
+    Port 2222
+    IdentityFile testdata/ssh_keys/encrypted_key
+    IdentitiesOnly yes
+    ForwardAgent yes
+
+Host routerTest
+    HostName %h.home
+    User admin
+    Port 22
+    IdentityFile testdata/ssh_keys/test_key
+    IdentitiesOnly yes
+
+Host wildcard-*
+    User testuser
+    Port 22
+    IdentityFile testdata/ssh_keys/test_key

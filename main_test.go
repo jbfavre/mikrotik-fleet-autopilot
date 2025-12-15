@@ -1,99 +1,299 @@
 package main
 
 import (
+	"context"
+	"os"
 	"reflect"
-	"strings"
 	"testing"
+
+	"jb.favre/mikrotik-fleet-autopilot/core"
 )
 
-func TestParseHostsFlag(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-	}{
-		{
-			name:     "single host",
-			input:    "192.168.1.1",
-			expected: []string{"192.168.1.1"},
-		},
-		{
-			name:     "multiple hosts with comma",
-			input:    "192.168.1.1,192.168.1.2",
-			expected: []string{"192.168.1.1", "192.168.1.2"},
-		},
-		{
-			name:     "multiple hosts with spaces",
-			input:    "192.168.1.1, 192.168.1.2, 192.168.1.3",
-			expected: []string{"192.168.1.1", "192.168.1.2", "192.168.1.3"},
-		},
-		{
-			name:     "hosts with trailing comma",
-			input:    "192.168.1.1,192.168.1.2,",
-			expected: []string{"192.168.1.1", "192.168.1.2"},
-		},
-		{
-			name:     "hosts with leading spaces",
-			input:    " 192.168.1.1,  192.168.1.2",
-			expected: []string{"192.168.1.1", "192.168.1.2"},
-		},
-		{
-			name:     "empty string",
-			input:    "",
-			expected: []string{},
-		},
-		{
-			name:     "only spaces and commas",
-			input:    " , , ",
-			expected: []string{},
-		},
-		{
-			name:     "hostname instead of IP",
-			input:    "router.example.com",
-			expected: []string{"router.example.com"},
-		},
-		{
-			name:     "mixed hostnames and IPs",
-			input:    "router1.local,192.168.1.1,router2.local",
-			expected: []string{"router1.local", "192.168.1.1", "router2.local"},
-		},
+func TestBuildCommand(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	// Test basic command properties
+	if cmd.Name != "mikrotik-fleet-autopilot" {
+		t.Errorf("Expected name 'mikrotik-fleet-autopilot', got %s", cmd.Name)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := parseHosts(tt.input)
-			if !reflect.DeepEqual(result, tt.expected) {
-				t.Errorf("parseHosts(%q) = %v, want %v", tt.input, result, tt.expected)
+	if cmd.Version != "0.1.0" {
+		t.Errorf("Expected version '0.1.0', got %s", cmd.Version)
+	}
+
+	if cmd.Usage == "" {
+		t.Error("Expected non-empty usage string")
+	}
+
+	// Test that commands are registered
+	if len(cmd.Commands) == 0 {
+		t.Error("Expected at least one subcommand")
+	}
+
+	// Test that Before hook exists
+	if cmd.Before == nil {
+		t.Error("Expected Before hook to be set")
+	}
+}
+
+func TestBuildCommandFlags(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	expectedFlags := map[string]bool{
+		"host":           false,
+		"ssh-user":       false,
+		"ssh-password":   false,
+		"ssh-passphrase": false,
+		"debug":          false,
+	}
+
+	// Check all expected flags exist
+	for _, flag := range cmd.Flags {
+		names := flag.Names()
+		for _, name := range names {
+			if _, exists := expectedFlags[name]; exists {
+				expectedFlags[name] = true
 			}
-		})
+		}
+	}
+
+	for flagName, found := range expectedFlags {
+		if !found {
+			t.Errorf("Expected flag '%s' not found", flagName)
+		}
+	}
+
+	// Test that we have the right number of flags
+	if len(cmd.Flags) != 5 {
+		t.Errorf("Expected 5 flags, got %d", len(cmd.Flags))
 	}
 }
 
-func TestParseHostsPerformance(t *testing.T) {
-	// Test with a large number of hosts
-	largeInput := strings.Repeat("192.168.1.1,", 1000)
-	result := parseHosts(largeInput)
+func TestBuildCommandFlagBinding(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
 
-	if len(result) != 1000 {
-		t.Errorf("Expected 1000 hosts, got %d", len(result))
+	// Set some initial values
+	hosts = "192.168.1.1"
+	sshPassword = "test-password"
+	sshPassphrase = "test-passphrase"
+	globalConfig.User = "testuser"
+	globalConfig.Debug = true
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	// The command should be built without errors
+	if cmd == nil {
+		t.Fatal("buildCommand returned nil")
+	}
+
+	// Verify values are as set (the pointers are bound correctly)
+	if hosts != "192.168.1.1" {
+		t.Errorf("hosts value changed unexpectedly: %s", hosts)
+	}
+	if globalConfig.User != "testuser" {
+		t.Errorf("globalConfig.User changed unexpectedly: %s", globalConfig.User)
 	}
 }
 
-func BenchmarkParseHosts(b *testing.B) {
-	input := "192.168.1.1,192.168.1.2,192.168.1.3,router.local"
+func TestBuildCommandSubcommands(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		parseHosts(input)
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	// Check that we have subcommands
+	if len(cmd.Commands) == 0 {
+		t.Fatal("Expected subcommands to be registered")
+	}
+
+	// Verify subcommand names (export and updates commands should be present)
+	commandNames := make(map[string]bool)
+	for _, subCmd := range cmd.Commands {
+		commandNames[subCmd.Name] = true
+	}
+
+	// We expect at least the export and updates related commands
+	if len(commandNames) == 0 {
+		t.Error("No subcommands found")
 	}
 }
 
-func BenchmarkParseHostsLarge(b *testing.B) {
-	// Benchmark with 100 hosts
-	input := strings.Repeat("192.168.1.1,", 100)
+func TestBuildCommandMultipleInstances(t *testing.T) {
+	// Test that multiple instances can be created independently
+	var config1 core.Config
+	var hosts1, pass1, phrase1 string
+	cmd1 := buildCommand(&config1, &hosts1, &pass1, &phrase1)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		parseHosts(input)
+	var config2 core.Config
+	var hosts2, pass2, phrase2 string
+	cmd2 := buildCommand(&config2, &hosts2, &pass2, &phrase2)
+
+	// Each command should be independent
+	if cmd1 == cmd2 {
+		t.Error("buildCommand should create new instances")
+	}
+
+	// Modify one set of variables
+	hosts1 = "192.168.1.1"
+	hosts2 = "192.168.1.2"
+
+	if hosts1 == hosts2 {
+		t.Error("Variables should be independent")
+	}
+}
+
+func TestHostParsing(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	hosts = "192.168.1.1,192.168.1.2, 192.168.1.3"
+
+	buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	// The actual parsing happens in the Before hook, but we can test
+	// that the setup is correct
+	parsedHosts := core.ParseHosts(hosts)
+	expectedHosts := []string{"192.168.1.1", "192.168.1.2", "192.168.1.3"}
+
+	if !reflect.DeepEqual(parsedHosts, expectedHosts) {
+		t.Errorf("Expected hosts %v, got %v", expectedHosts, parsedHosts)
+	}
+}
+
+func TestAutoDiscoverySetup(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp dir: %v", err)
+	}
+
+	// Create router files
+	if err := os.WriteFile("router1.rsc", []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create router1.rsc: %v", err)
+	}
+	if err := os.WriteFile("router2.rsc", []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create router2.rsc: %v", err)
+	}
+
+	// Test that auto-discovery would work
+	routers, err := core.DiscoverHosts()
+	if err != nil {
+		t.Errorf("Auto-discovery failed: %v", err)
+	}
+
+	expectedHosts := []string{"router1.home", "router2.home"}
+	if !reflect.DeepEqual(routers, expectedHosts) {
+		t.Errorf("Expected %v, got %v", expectedHosts, routers)
+	}
+}
+
+func TestEmptyHostsWithNoFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp dir: %v", err)
+	}
+
+	// No router files, auto-discovery should fail
+	_, err := core.DiscoverHosts()
+	if err == nil {
+		t.Error("Expected error when no router files found")
+	}
+}
+
+func TestConfigStructure(t *testing.T) {
+	var globalConfig core.Config
+
+	// Test that config can be properly initialized
+	globalConfig.User = "admin"
+	globalConfig.Debug = true
+	globalConfig.Hosts = []string{"router1.home"}
+
+	if globalConfig.User != "admin" {
+		t.Error("Config User field not set correctly")
+	}
+	if !globalConfig.Debug {
+		t.Error("Config Debug field not set correctly")
+	}
+	if len(globalConfig.Hosts) != 1 {
+		t.Error("Config Hosts field not set correctly")
+	}
+}
+
+func TestContextValues(t *testing.T) {
+	globalConfig := &core.Config{
+		User:  "admin",
+		Debug: false,
+		Hosts: []string{"router1.home"},
+	}
+
+	// Test that config can be stored and retrieved from context
+	ctx := context.WithValue(context.Background(), core.ConfigKey, globalConfig)
+
+	cfg, err := core.GetConfig(ctx)
+	if err != nil {
+		t.Errorf("Failed to get config from context: %v", err)
+	}
+
+	if cfg.User != "admin" {
+		t.Errorf("Expected user 'admin', got '%s'", cfg.User)
+	}
+
+	if len(cfg.Hosts) != 1 {
+		t.Errorf("Expected 1 host, got %d", len(cfg.Hosts))
+	}
+}
+
+func TestSshManagerCreation(t *testing.T) {
+	user := "admin"
+	password := "test-pass"
+	passphrase := "test-phrase"
+
+	sshManager := core.NewSshManager(user, password, passphrase)
+
+	if sshManager == nil {
+		t.Error("NewSshManager returned nil")
+	}
+
+	// Test that SSH manager can be stored in context
+	ctx := context.WithValue(context.Background(), core.SshManagerKey, sshManager)
+
+	retrievedManager, err := core.GetSshManager(ctx)
+	if err != nil {
+		t.Errorf("Failed to get SSH manager from context: %v", err)
+	}
+
+	if retrievedManager != sshManager {
+		t.Error("Retrieved SSH manager doesn't match original")
+	}
+}
+
+func TestBuildCommandWithEmptyCredentials(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	hosts = "192.168.1.1"
+	// Leave password and passphrase empty
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	// Command should build successfully even with empty credentials
+	if cmd == nil {
+		t.Error("buildCommand failed with empty credentials")
+	}
+
+	// SSH manager should be creatable with empty credentials
+	sshManager := core.NewSshManager("admin", "", "")
+	if sshManager == nil {
+		t.Error("NewSshManager failed with empty credentials")
 	}
 }

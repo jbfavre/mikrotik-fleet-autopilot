@@ -240,7 +240,7 @@ func TestNewSsh_PassphraseWithoutKey(t *testing.T) {
 	}
 
 	// Should fail because parseSshPrivateKey returns nil
-	expectedErr := "failed to parse SSH private key with provided passphrase"
+	expectedErr := "open : no such file or directory"
 	if err != nil && err.Error() != expectedErr {
 		t.Errorf("newSsh() error = %q, want %q", err.Error(), expectedErr)
 	}
@@ -505,7 +505,7 @@ func TestParseSshPrivateKey_Unencrypted(t *testing.T) {
 	keyPath := filepath.Join(testdataDir, "ssh_keys", "test_key")
 
 	// With empty passphrase, unencrypted keys fail to parse
-	signer := parseSshPrivateKey(keyPath, "")
+	signer, _ := parseSshPrivateKey(keyPath, "")
 
 	// Current implementation returns nil for unencrypted keys with empty passphrase
 	if signer != nil {
@@ -525,7 +525,7 @@ func TestParseSshPrivateKey_Encrypted(t *testing.T) {
 
 	keyPath := filepath.Join(testdataDir, "ssh_keys", "encrypted_key")
 
-	signer := parseSshPrivateKey(keyPath, "testpassphrase")
+	signer, _ := parseSshPrivateKey(keyPath, "testpassphrase")
 
 	if signer == nil {
 		t.Error("parseSshPrivateKey() returned nil for valid encrypted key with correct passphrase")
@@ -541,7 +541,7 @@ func TestParseSshPrivateKey_WrongPassphrase(t *testing.T) {
 
 	keyPath := filepath.Join(testdataDir, "ssh_keys", "encrypted_key")
 
-	signer := parseSshPrivateKey(keyPath, "wrongpassphrase")
+	signer, _ := parseSshPrivateKey(keyPath, "wrongpassphrase")
 
 	if signer != nil {
 		t.Error("parseSshPrivateKey() should return nil for wrong passphrase")
@@ -557,7 +557,7 @@ func TestParseSshPrivateKey_InvalidKey(t *testing.T) {
 
 	keyPath := filepath.Join(testdataDir, "ssh_keys", "invalid_key")
 
-	signer := parseSshPrivateKey(keyPath, "anypassphrase")
+	signer, _ := parseSshPrivateKey(keyPath, "anypassphrase")
 
 	if signer != nil {
 		t.Error("parseSshPrivateKey() should return nil for invalid key file")
@@ -566,7 +566,7 @@ func TestParseSshPrivateKey_InvalidKey(t *testing.T) {
 
 func TestParseSshPrivateKey_NonexistentFile(t *testing.T) {
 	// Test with nonexistent file
-	signer := parseSshPrivateKey("/nonexistent/path/to/key", "passphrase")
+	signer, _ := parseSshPrivateKey("/nonexistent/path/to/key", "passphrase")
 
 	if signer != nil {
 		t.Error("parseSshPrivateKey() should return nil for nonexistent file")
@@ -582,7 +582,7 @@ func TestParseSshPrivateKey_TildeExpansion(t *testing.T) {
 
 	// The function expands ~/ to home directory
 	// We'll test that it doesn't panic with a tilde path
-	signer := parseSshPrivateKey("~/nonexistent_key", "passphrase")
+	signer, _ := parseSshPrivateKey("~/nonexistent_key", "passphrase")
 
 	// Should return nil (file doesn't exist) but shouldn't panic
 	if signer != nil {

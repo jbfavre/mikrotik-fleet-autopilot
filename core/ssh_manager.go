@@ -39,13 +39,12 @@ func CreateConnection(ctx context.Context, host string) (SshRunner, error) {
 	if _, _, err := net.SplitHostPort(host); err != nil {
 		hostWithPort = fmt.Sprintf("%s:22", host)
 	}
-
-	slog.Debug(fmt.Sprintf("Creating SSH connection to %s as user %s", hostWithPort, manager.user))
+	slog.Debug(fmt.Sprintf("Creating SSH connection to %s as user %s", host, manager.user))
 
 	// Call the internal newSsh function
 	conn, err := newSsh(hostWithPort, manager.user, manager.password, manager.passphrase)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create SSH connection to %s: %w", hostWithPort, err)
+		return nil, fmt.Errorf("failed to create SSH connection to %s: %w", host, err)
 	}
 
 	return conn, nil

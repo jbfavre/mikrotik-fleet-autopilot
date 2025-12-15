@@ -84,39 +84,53 @@ func newSsh(host, username, password, passphrase string) (*sshConnection, error)
 	}
 
 	hostConfig := readSshConfig(host)
+	slog.Debug("hostConfig Hostname is " + hostConfig["Hostname"])
+	slog.Debug("hostConfig User is " + hostConfig["User"])
+	slog.Debug("hostConfig IdentityFile is " + hostConfig["IdentityFile"])
 
 	var sshSigner ssh.Signer
 	var authMethod []ssh.AuthMethod
-
 	// Try to load SSH key if passphrase is provided
 	if passphrase != "" {
-		sshSigner = parseSshPrivateKey(hostConfig["IdentityFile"], passphrase)
-		if sshSigner == nil {
-			return nil, fmt.Errorf("failed to parse SSH private key with provided passphrase")
+		slog.Debug("We have a passphrase, trying to unlock private key")
+		var err error
+		sshSigner, err = parseSshPrivateKey(hostConfig["IdentityFile"], passphrase)
+		if err != nil {
+			slog.Debug("failed to parse SSH private key with provided passphrase")
+			return nil, err
 		}
+		if sshSigner == nil {
+			slog.Debug("sshSigner is nil")
+		}
+		slog.Debug("We got a valid " + sshSigner.PublicKey().Type() + " sshSigner")
 	}
+	slog.Debug("We should still have a valid sshSigner, but we've not and I don't understand why")
 
 	// Build authentication methods
 	if sshSigner != nil && password != "" {
+		slog.Debug("We have both a valid key and a passord")
 		// Both key and password available
 		authMethod = []ssh.AuthMethod{
 			ssh.PublicKeys(sshSigner),
 			ssh.Password(password),
 		}
 	} else if sshSigner != nil {
+		slog.Debug("We have a valid key")
 		// Only key available
 		authMethod = []ssh.AuthMethod{
 			ssh.PublicKeys(sshSigner),
 		}
 	} else if password != "" {
+		slog.Debug("We have a password")
 		// Only password available
 		authMethod = []ssh.AuthMethod{
 			ssh.Password(password),
 		}
 	} else {
+		slog.Debug("no authentication method provided (need password or SSH key with passphrase)")
 		return nil, fmt.Errorf("no authentication method provided (need password or SSH key with passphrase)")
 	}
-
+	slog.Debug("We have everything we need to build the ssh.ClientConfig")
 	// Build ssh client config
 	config := &ssh.ClientConfig{
 		User: username,
@@ -187,12 +201,12 @@ func readSshConfig(host string) map[string]string {
 	return hostConfig
 }
 
-func parseSshPrivateKey(identityFile, passphrase string) ssh.Signer {
+func parseSshPrivateKey(identityFile, passphrase string) (ssh.Signer, error) {
 	// Get current user's detail
 	user, err := user.Current()
 	if err != nil {
 		slog.Error("unable to get current user: " + fmt.Sprintf("%v", err.Error()))
-		return nil
+		return nil, err
 	}
 	userHomeDir := user.HomeDir
 	// Expand ~/ IdentityFile with full user's home path
@@ -202,16 +216,23 @@ func parseSshPrivateKey(identityFile, passphrase string) ssh.Signer {
 
 	// If Identity File found, parse private key and add ssh.PublicKeys(signer) to AuthMethod
 	// Parse private key and build ssh.signer
+	slog.Debug("Trying to read " + identityFile)
 	key, err := os.ReadFile(identityFile)
 	if err != nil {
 		slog.Error("unable to read private key: " + fmt.Sprintf("%v", err.Error()))
+		return nil, err
 	}
+	slog.Debug("We got our key from " + identityFile)
+
 	var signer ssh.Signer
+	slog.Debug(("Unlocking private key with provided passphrase"))
 	signer, err = ssh.ParsePrivateKeyWithPassphrase(key, []byte(passphrase))
 	if err != nil {
 		slog.Warn("unable to parse private key: " + fmt.Sprintf("%v", err.Error()))
+		return nil, err
 	}
-	return signer
+	slog.Debug("Private key type is " + signer.PublicKey().Type())
+	return signer, nil
 }
 
 /* func getPassword(prompt string) string {

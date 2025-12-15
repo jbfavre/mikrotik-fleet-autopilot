@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
@@ -13,30 +12,24 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/core"
 )
 
-// parsehosts parses a comma-separated list of hosts and returns a slice of trimmed host strings.
-// Empty strings and whitespace-only entries are filtered out.
-func parseHosts(hosts string) []string {
-	if hosts == "" {
-		return []string{}
-	}
-
-	hostsList := []string{}
-	for h := range strings.SplitSeq(hosts, ",") {
-		trimmed := strings.TrimSpace(h)
-		if trimmed != "" {
-			hostsList = append(hostsList, trimmed)
-		}
-	}
-	return hostsList
-}
-
 func main() {
 	var globalConfig core.Config
 	var hosts string
 	// SSH credentials - kept separate from config for security
 	var sshPassword string
 	var sshPassphrase string
-	cmd := &cli.Command{
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	if err := cmd.Run(context.WithValue(context.Background(), core.ConfigKey, &globalConfig), os.Args); err != nil {
+		slog.Error("command failed: " + err.Error())
+	}
+}
+
+// buildCommand creates and configures the CLI command structure.
+// This function is extracted to make the CLI testable.
+func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *string) *cli.Command {
+	return &cli.Command{
 		Name:    "mikrotik-fleet-autopilot",
 		Version: "0.1.0",
 		Authors: []any{
@@ -50,7 +43,7 @@ func main() {
 				Aliases:     []string{"H"},
 				Value:       "",
 				Usage:       "MikroTik router hostname or IP address (comma-separated for multiple routers). If not provided, will auto-discover from router*.rsc files in current directory",
-				Destination: &hosts,
+				Destination: hosts,
 			},
 			&cli.StringFlag{
 				Name:        "ssh-user",
@@ -66,7 +59,7 @@ func main() {
 				Category:    "ssh",
 				Value:       "",
 				Usage:       "MikroTik router SSH password",
-				Destination: &sshPassword,
+				Destination: sshPassword,
 			},
 			&cli.StringFlag{
 				Name:        "ssh-passphrase",
@@ -74,7 +67,7 @@ func main() {
 				Category:    "ssh",
 				Value:       "",
 				Usage:       "User private SSH key passphrase",
-				Destination: &sshPassphrase,
+				Destination: sshPassphrase,
 			},
 			&cli.BoolFlag{
 				Name:        "debug",
@@ -93,18 +86,14 @@ func main() {
 			}
 			slog.Info("Starting global")
 
-			// Binary called with a subcommand.
-			// If not, do not discover routers
-			if len(os.Args) > 1 {
-				/* // Setup SSH
-				sshClient, err := core.NewSsh(host, globalConfig.User, globalConfig.Password, globalConfig.Passphrase)
-				if err != nil {
-					slog.Error("error when setting up SSH: " + fmt.Sprintf("%v", err.Error))
-				} */
+			// Check if a subcommand was provided
+			// If not, the help will be shown automatically by urfave/cli
+			if cmd.Args().Len() > 0 {
+				slog.Debug("cmd args", "args", cmd.Args())
 				// Setup hosts
-				if hosts != "" {
+				if *hosts != "" {
 					// Split comma-separated hosts
-					globalConfig.Hosts = parseHosts(hosts)
+					globalConfig.Hosts = core.ParseHosts(*hosts)
 				} else {
 					// Auto-discover routers
 					routers, err := core.DiscoverHosts()
@@ -120,18 +109,14 @@ func main() {
 				}
 			}
 			// Create SSH manager with credentials (credentials stay encapsulated)
-			sshManager := core.NewSshManager(globalConfig.User, sshPassword, sshPassphrase)
+			sshManager := core.NewSshManager(globalConfig.User, *sshPassword, *sshPassphrase)
 
 			// Make global config (without credentials) and SSH manager available in context
-			ctx = context.WithValue(ctx, core.ConfigKey, &globalConfig)
+			ctx = context.WithValue(ctx, core.ConfigKey, globalConfig)
 			ctx = context.WithValue(ctx, core.SshManagerKey, sshManager)
-			slog.Debug("globalConfig is available in context with value: " + fmt.Sprintf("%+v", globalConfig))
+			slog.Debug("globalConfig is available in context with value: " + fmt.Sprintf("%+v", *globalConfig))
 			slog.Info("Starting " + cmd.Args().Get(0) + " subcommand")
 			return ctx, nil
 		},
-	}
-
-	if err := cmd.Run(context.WithValue(context.Background(), core.ConfigKey, &globalConfig), os.Args); err != nil {
-		slog.Error("command failed: " + err.Error())
 	}
 }

@@ -17,13 +17,7 @@ var outputDir string
 
 // sshConnectionFactory is the factory function for creating SSH connections
 // This can be overridden in tests to inject mock SSH manager
-var sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
-	manager, err := core.GetSshManager(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get SSH manager from context: %w", err)
-	}
-	return manager.CreateConnection(fmt.Sprintf("%s:22", host))
-}
+var sshConnectionFactory = core.CreateConnection
 
 var Command = []*cli.Command{
 	{
@@ -52,7 +46,7 @@ var Command = []*cli.Command{
 			// Iterate over all hosts
 			var lastErr error
 			for _, host := range cfg.Hosts {
-				if err := exportConfigForHost(ctx, host); err != nil {
+				if err := export(ctx, host); err != nil {
 					lastErr = err
 					// Continue with other hosts even if one fails
 				}
@@ -62,7 +56,7 @@ var Command = []*cli.Command{
 	},
 }
 
-func exportConfigForHost(ctx context.Context, host string) error {
+func export(ctx context.Context, host string) error {
 	// SSH init
 	slog.Info("Initializing SSH connection")
 	conn, err := sshConnectionFactory(ctx, host)

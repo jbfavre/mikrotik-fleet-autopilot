@@ -131,20 +131,6 @@ func main() {
 		},
 	}
 
-	/*
-		// Log init
-		log.SetFlags(log.LstdFlags | log.Lshortfile)
-		log.Printf("%+v", config)
-		// SSH init
-		if &config.Password == "" {
-			&config.Password = getPassword("Enter Mikrotik password: ")
-		}
-		sshClient, err := NewSsh(fmt.Sprintf("%v:22", &config.Host), &config.User, &config.Password)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer sshClient.Close()
-	*/
 	if err := cmd.Run(context.WithValue(context.Background(), core.ConfigKey, &globalConfig), os.Args); err != nil {
 		slog.Error("command failed: " + err.Error())
 	}

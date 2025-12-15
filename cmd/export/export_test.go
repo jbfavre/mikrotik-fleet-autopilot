@@ -183,11 +183,11 @@ add name=bridge1`,
 			ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
 
 			// Call the function
-			err = exportConfigForHost(ctx, tt.host)
+			err = export(ctx, tt.host)
 
 			// Verify error expectations
 			if (err != nil) != tt.wantErr {
-				t.Errorf("exportConfigForHost() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("export() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			if tt.wantErr {

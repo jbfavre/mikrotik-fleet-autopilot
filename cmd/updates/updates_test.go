@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +57,260 @@ func (m *MockSshManager) GetUser() string {
 		return m.GetUserFunc()
 	}
 	return "admin"
+}
+
+func TestUpdates(t *testing.T) {
+	tests := []struct {
+		name               string
+		host               string
+		applyUpdates       bool
+		osInstalled        string
+		osAvailable        string
+		boardInstalled     string
+		boardAvailable     string
+		hasBoard           bool
+		checkForUpdatesOut string
+		routerboardOut     string
+		sshError           error
+		wantErr            bool
+		errContains        string
+		expectOsUpdate     bool
+		expectBoardUpdate  bool
+	}{
+		{
+			name:         "RouterOS up to date, no board, check only",
+			host:         "router1.example.com",
+			applyUpdates: false,
+			osInstalled:  "7.12.1",
+			osAvailable:  "7.12.1",
+			hasBoard:     false,
+			checkForUpdatesOut: `  status: Updated
+  installed-version: 7.12.1
+  latest-version: 7.12.1`,
+			routerboardOut: `  routerboard: no`,
+			wantErr:        false,
+		},
+		{
+			name:         "RouterOS update available, no board, check only",
+			host:         "router2.example.com",
+			applyUpdates: false,
+			osInstalled:  "7.11.3",
+			osAvailable:  "7.12.1",
+			hasBoard:     false,
+			checkForUpdatesOut: `  status: New version available
+  installed-version: 7.11.3
+  latest-version: 7.12.1`,
+			routerboardOut: `  routerboard: no`,
+			wantErr:        false,
+		},
+		{
+			name:           "RouterOS and RouterBoard up to date, check only",
+			host:           "router3.example.com",
+			applyUpdates:   false,
+			osInstalled:    "7.12.1",
+			osAvailable:    "7.12.1",
+			hasBoard:       true,
+			boardInstalled: "7.12.1",
+			boardAvailable: "7.12.1",
+			checkForUpdatesOut: `  status: Updated
+  installed-version: 7.12.1
+  latest-version: 7.12.1`,
+			routerboardOut: `  routerboard: yes
+  current-firmware: 7.12.1
+  upgrade-firmware: 7.12.1`,
+			wantErr: false,
+		},
+		{
+			name:         "RouterOS update available, apply enabled, should update",
+			host:         "router4.example.com",
+			applyUpdates: true,
+			osInstalled:  "7.11.3",
+			osAvailable:  "7.12.1",
+			hasBoard:     false,
+			checkForUpdatesOut: `  status: New version available
+  installed-version: 7.11.3
+  latest-version: 7.12.1`,
+			routerboardOut: `  routerboard: no`,
+			expectOsUpdate: true,
+			wantErr:        false,
+		},
+		{
+			name:           "RouterBoard update available, apply enabled, should update",
+			host:           "router5.example.com",
+			applyUpdates:   true,
+			osInstalled:    "7.12.1",
+			osAvailable:    "7.12.1",
+			hasBoard:       true,
+			boardInstalled: "7.11.3",
+			boardAvailable: "7.12.1",
+			checkForUpdatesOut: `  status: Updated
+  installed-version: 7.12.1
+  latest-version: 7.12.1`,
+			routerboardOut: `  routerboard: yes
+  current-firmware: 7.11.3
+  upgrade-firmware: 7.12.1`,
+			expectBoardUpdate: true,
+			wantErr:           false,
+		},
+		{
+			name:           "Both updates available, apply enabled",
+			host:           "router6.example.com",
+			applyUpdates:   true,
+			osInstalled:    "7.11.3",
+			osAvailable:    "7.12.1",
+			hasBoard:       true,
+			boardInstalled: "7.11.3",
+			boardAvailable: "7.12.1",
+			checkForUpdatesOut: `  status: New version available
+  installed-version: 7.11.3
+  latest-version: 7.12.1`,
+			routerboardOut: `  routerboard: yes
+  current-firmware: 7.11.3
+  upgrade-firmware: 7.12.1`,
+			expectOsUpdate:    true,
+			expectBoardUpdate: false, // Board update happens after OS, not in same call
+			wantErr:           false,
+		},
+		{
+			name:         "SSH connection failure",
+			host:         "router7.example.com",
+			applyUpdates: false,
+			sshError:     fmt.Errorf("connection timeout"),
+			wantErr:      true,
+			errContains:  "failed to create SSH connection",
+		},
+		{
+			name:         "Check for updates command fails",
+			host:         "router8.example.com",
+			applyUpdates: false,
+			checkForUpdatesOut: `  status: ERROR
+  message: Could not download package list`,
+			routerboardOut: `  routerboard: no`,
+			wantErr:        true,
+			errContains:    "ERROR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore original values
+			originalApply := updatesApply
+			originalFactory := sshConnectionFactory
+			originalReconnectDelay := reconnectDelay
+			defer func() {
+				updatesApply = originalApply
+				sshConnectionFactory = originalFactory
+				reconnectDelay = originalReconnectDelay
+			}()
+
+			// Set test values
+			updatesApply = tt.applyUpdates
+			reconnectDelay = 10 * time.Millisecond // Speed up tests
+
+			// Track commands executed
+			var executedCommands []string
+			var connectionCount int
+
+			// Mock SSH connection factory
+			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+				connectionCount++
+
+				if tt.sshError != nil {
+					return nil, tt.sshError
+				}
+
+				return &MockSshRunner{
+					RunFunc: func(cmd string) (string, error) {
+						executedCommands = append(executedCommands, cmd)
+
+						// Route commands to appropriate responses
+						if cmd == "/system/package/update/check-for-updates" {
+							return tt.checkForUpdatesOut, nil
+						}
+						if cmd == "/system/routerboard/print" {
+							return tt.routerboardOut, nil
+						}
+						if cmd == "/system/package/update/install" {
+							return "System will reboot", nil
+						}
+						if cmd == "/system/reboot" {
+							return "System is rebooting", nil
+						}
+
+						return "", nil
+					},
+					CloseFunc: func() error {
+						return nil
+					},
+				}, nil
+			}
+
+			// Create context with mock manager
+			cfg := &core.Config{
+				Hosts: []string{tt.host},
+				User:  "admin",
+			}
+			ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+			ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
+
+			// Execute the function
+			err := updates(ctx, tt.host)
+
+			// Verify error expectations
+			if (err != nil) != tt.wantErr {
+				t.Errorf("updates() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr {
+				if tt.errContains != "" && (err == nil || !strings.Contains(err.Error(), tt.errContains)) {
+					t.Errorf("updates() error = %v, want error containing %q", err, tt.errContains)
+				}
+				return
+			}
+
+			// Verify update commands were executed when expected
+			if tt.expectOsUpdate {
+				found := false
+				for _, cmd := range executedCommands {
+					if cmd == "/system/package/update/install" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("updates() expected RouterOS update command to be executed, but it wasn't. Commands: %v", executedCommands)
+				}
+			}
+
+			if tt.expectBoardUpdate {
+				found := false
+				for _, cmd := range executedCommands {
+					if cmd == "/system/reboot" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("updates() expected RouterBoard update (reboot) command to be executed, but it wasn't. Commands: %v", executedCommands)
+				}
+			}
+
+			// Verify check commands were always executed (unless SSH failed)
+			if tt.sshError == nil {
+				checkFound := false
+				for _, cmd := range executedCommands {
+					if cmd == "/system/package/update/check-for-updates" {
+						checkFound = true
+						break
+					}
+				}
+				if !checkFound {
+					t.Errorf("updates() expected check-for-updates command to be executed, but it wasn't")
+				}
+			}
+		})
+	}
 }
 
 func TestGetUpdateStatus(t *testing.T) {

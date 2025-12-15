@@ -19,13 +19,7 @@ var reconnectDelay = 10 * time.Second
 
 // sshConnectionFactory is the factory function for creating SSH connections
 // This can be overridden in tests to inject mock SSH manager
-var sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
-	manager, err := core.GetSshManager(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get SSH manager from context: %w", err)
-	}
-	return manager.CreateConnection(fmt.Sprintf("%s:22", host))
-}
+var sshConnectionFactory = core.CreateConnection
 
 var Command = []*cli.Command{
 	{

@@ -44,6 +44,23 @@ func SetupLogging(level slog.Level) {
 	slog.SetDefault(slog.New(handler))
 }
 
+// ParseHosts parses a comma-separated list of hosts and returns a slice of trimmed host strings.
+// Empty strings and whitespace-only entries are filtered out.
+func ParseHosts(hosts string) []string {
+	if hosts == "" {
+		return []string{}
+	}
+
+	hostsList := []string{}
+	for h := range strings.SplitSeq(hosts, ",") {
+		trimmed := strings.TrimSpace(h)
+		if trimmed != "" {
+			hostsList = append(hostsList, trimmed)
+		}
+	}
+	return hostsList
+}
+
 // DiscoverHosts scans the current directory for router*.rsc files
 // and returns a sorted list of router names (without .rsc extension, with .home appended)
 func DiscoverHosts() ([]string, error) {

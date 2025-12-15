@@ -4,7 +4,7 @@ go 1.25.4
 
 require github.com/urfave/cli/v3 v3.6.1
 
-require github.com/kevinburke/ssh_config v1.4.0 // indirect
+require github.com/kevinburke/ssh_config v1.4.0
 
 require (
 	golang.org/x/crypto v0.46.0

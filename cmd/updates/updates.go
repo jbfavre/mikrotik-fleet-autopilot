@@ -43,7 +43,7 @@ var Command = []*cli.Command{
 			var lastErr error
 			for _, host := range cfg.Hosts {
 				if err := updates(ctx, host); err != nil {
-					lastErr = err
+					fmt.Println(fmt.Sprintf("❓ %s is unreachable", host))
 					// Continue with other hosts even if one fails
 				}
 			}

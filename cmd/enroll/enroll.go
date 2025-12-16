@@ -145,7 +145,9 @@ func applyConfigFile(conn core.SshRunner, filePath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open config file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	// Parse and execute commands line by line
 	scanner := bufio.NewScanner(file)

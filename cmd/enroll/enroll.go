@@ -24,6 +24,14 @@ var outputDir string
 // This can be overridden in tests to inject mock SSH manager
 var sshConnectionFactory = core.CreateConnection
 
+// applyUpdatesFunc is the function for applying updates
+// This can be overridden in tests to inject mock behavior
+var applyUpdatesFunc = updates.ApplyUpdates
+
+// exportConfigFunc is the function for exporting configuration
+// This can be overridden in tests to inject mock behavior
+var exportConfigFunc = export.ExportConfig
+
 var Command = []*cli.Command{
 	{
 		Name:  "enroll",
@@ -112,7 +120,7 @@ func enroll(ctx context.Context, host string) error {
 	if !skipUpdates {
 		slog.Info("Step 4: Checking and applying updates")
 		fmt.Println("⏳ Checking for updates...")
-		if err := updates.ApplyUpdates(ctx, host); err != nil {
+		if err := applyUpdatesFunc(ctx, host); err != nil {
 			slog.Warn("Failed to apply updates: " + err.Error())
 			fmt.Printf("⚠️  Update check failed (non-fatal): %v\n", err)
 		}
@@ -125,7 +133,7 @@ func enroll(ctx context.Context, host string) error {
 	if !skipExport {
 		slog.Info("Step 5: Exporting final configuration")
 		fmt.Println("⏳ Exporting configuration...")
-		if err := export.ExportConfig(ctx, host, outputDir, false); err != nil {
+		if err := exportConfigFunc(ctx, host, outputDir, false); err != nil {
 			slog.Warn("Failed to export configuration: " + err.Error())
 			fmt.Printf("⚠️  Export failed (non-fatal): %v\n", err)
 		}

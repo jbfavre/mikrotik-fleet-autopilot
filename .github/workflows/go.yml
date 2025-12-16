@@ -10,6 +10,9 @@ on:
     branches: [ "main" ]
   pull_request:
     types:
+      - opened
+      - synchronize
+      - reopened
       - ready_for_review
     branches: [ "main" ]
 
@@ -17,6 +20,7 @@ jobs:
 
   ci:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
     steps:
     - name: Harden the runner (Audit all outbound calls)
       uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -36,6 +40,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
     steps:
     - name: Harden the runner (Audit all outbound calls)
       uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -54,6 +59,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
     steps:
     - name: Harden the runner (Audit all outbound calls)
       uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0

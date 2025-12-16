@@ -16,6 +16,9 @@ on:
     branches: [ "main" ]
   pull_request:
     types:
+      - opened
+      - synchronize
+      - reopened
       - ready_for_review
     branches: [ "main" ]
   schedule:
@@ -33,6 +36,7 @@ jobs:
     #   - https://gh.io/using-larger-runners (GitHub.com only)
     # Consider using larger runners or machines with greater resources for possible analysis time improvements.
     runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    if: github.event.pull_request.draft == false || github.event_name != 'pull_request'
     permissions:
       # required for all workflows
       security-events: write

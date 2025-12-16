@@ -1,0 +1,136 @@
+# This workflow allows code owners to trigger CI runs via PR comments
+name: Comment Trigger
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  trigger-tests:
+    runs-on: ubuntu-latest
+    # Only run on PR comments (not issues)
+    if: github.event.issue.pull_request
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
+        with:
+          egress-policy: audit
+
+      - name: Check if commenter is a code owner
+        id: check_permission
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const comment = context.payload.comment.body.trim();
+            const commenter = context.payload.comment.user.login;
+            
+            // Check if comment matches trigger pattern
+            if (!comment.match(/^\/do-tests\s*$/i)) {
+              console.log('Comment does not match /do-tests pattern');
+              return false;
+            }
+            
+            // Get PR details
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            
+            // Check if commenter has write permission or is a collaborator
+            try {
+              const permission = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: commenter
+              });
+              
+              const hasPermission = ['admin', 'write', 'maintain'].includes(permission.data.permission);
+              
+              if (hasPermission) {
+                console.log(`User ${commenter} has ${permission.data.permission} permission`);
+                return true;
+              } else {
+                console.log(`User ${commenter} does not have sufficient permissions`);
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: `@${commenter} You don't have permission to trigger tests. Only code owners and collaborators can use this command.`
+                });
+                return false;
+              }
+            } catch (error) {
+              console.log(`Error checking permissions: ${error}`);
+              return false;
+            }
+          result-encoding: string
+
+      - name: Add reaction to comment
+        if: steps.check_permission.outputs.result == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket'
+            });
+
+      - name: Checkout PR
+        if: steps.check_permission.outputs.result == 'true'
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+
+      - name: Set up Go
+        if: steps.check_permission.outputs.result == 'true'
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: '1.25.4'
+
+      - name: Run CI
+        if: steps.check_permission.outputs.result == 'true'
+        run: make ci
+
+      - name: Run Build
+        if: steps.check_permission.outputs.result == 'true'
+        run: make build
+
+      - name: Run Tests
+        if: steps.check_permission.outputs.result == 'true'
+        run: make test
+
+      - name: Comment on success
+        if: steps.check_permission.outputs.result == 'true' && success()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '✅ Tests triggered by `/do-tests` command completed successfully!'
+            });
+
+      - name: Comment on failure
+        if: steps.check_permission.outputs.result == 'true' && failure()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '❌ Tests triggered by `/do-tests` command failed. Please check the workflow logs.'
+            });

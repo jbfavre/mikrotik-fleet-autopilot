@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -327,5 +328,47 @@ func BenchmarkParseHostsLarge(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ParseHosts(input)
+	}
+}
+func TestSetupLogging(t *testing.T) {
+	// Test different log levels
+	tests := []struct {
+		name  string
+		level int
+	}{
+		{
+			name:  "debug level",
+			level: -4, // slog.LevelDebug
+		},
+		{
+			name:  "info level",
+			level: 0, // slog.LevelInfo
+		},
+		{
+			name:  "warn level",
+			level: 4, // slog.LevelWarn
+		},
+		{
+			name:  "error level",
+			level: 8, // slog.LevelError
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// SetupLogging should not panic
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("SetupLogging() panicked: %v", r)
+				}
+			}()
+
+			// Call SetupLogging with the test level
+			SetupLogging(slog.Level(tt.level))
+
+			// Verify that slog is configured by attempting to log
+			slog.Debug("test debug message")
+			slog.Info("test info message")
+		})
 	}
 }

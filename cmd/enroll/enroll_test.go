@@ -224,6 +224,8 @@ func TestEnroll(t *testing.T) {
 		skipExportValue  bool
 		connectionError  error
 		commandErrors    map[string]error
+		updatesError     error
+		exportError      error
 		wantErr          bool
 		errContains      string
 	}{
@@ -282,6 +284,36 @@ func TestEnroll(t *testing.T) {
 				return configFile
 			},
 			wantErr: false,
+		},
+		{
+			name:             "updates failure (non-fatal)",
+			host:             "192.168.1.50",
+			hostnameValue:    "test-router",
+			skipUpdatesValue: false,
+			skipExportValue:  true,
+			setupConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-enroll-updatefail.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=test"), 0644)
+				return configFile
+			},
+			updatesError: fmt.Errorf("update check failed"),
+			wantErr:      false, // Updates failure is non-fatal
+		},
+		{
+			name:             "export failure (non-fatal)",
+			host:             "192.168.1.50",
+			hostnameValue:    "test-router",
+			skipUpdatesValue: true,
+			skipExportValue:  false,
+			setupConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-enroll-exportfail.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=test"), 0644)
+				return configFile
+			},
+			exportError: fmt.Errorf("export failed"),
+			wantErr:     false, // Export failure is non-fatal
 		},
 		{
 			name:             "connection failure",
@@ -354,6 +386,9 @@ func TestEnroll(t *testing.T) {
 			updatesCallCount := 0
 			applyUpdatesFunc = func(ctx context.Context, host string) error {
 				updatesCallCount++
+				if tt.updatesError != nil {
+					return tt.updatesError
+				}
 				return nil
 			}
 			defer func() { applyUpdatesFunc = originalUpdatesFunc }()
@@ -363,6 +398,9 @@ func TestEnroll(t *testing.T) {
 			exportCallCount := 0
 			exportConfigFunc = func(ctx context.Context, host string, outputDir string, showSensitive bool) error {
 				exportCallCount++
+				if tt.exportError != nil {
+					return tt.exportError
+				}
 				return nil
 			}
 			defer func() { exportConfigFunc = originalExportFunc }()

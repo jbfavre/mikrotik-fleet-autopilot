@@ -43,7 +43,7 @@ var Command = []*cli.Command{
 			var lastErr error
 			for _, host := range cfg.Hosts {
 				if err := updates(ctx, host); err != nil {
-					fmt.Println(fmt.Sprintf("❓ %s is unreachable", host))
+					fmt.Printf("❓ %s is unreachable\n", host)
 					// Continue with other hosts even if one fails
 				}
 			}
@@ -55,6 +55,17 @@ var Command = []*cli.Command{
 type UpdateStatus struct {
 	Installed string
 	Available string
+}
+
+// ApplyUpdates is a public wrapper that applies updates to a single host
+// This function is intended to be called from other subcommands like enroll
+func ApplyUpdates(ctx context.Context, host string) error {
+	// Temporarily enable auto-apply for programmatic calls
+	originalApplyFlag := updatesApply
+	updatesApply = true
+	defer func() { updatesApply = originalApplyFlag }()
+
+	return updates(ctx, host)
 }
 
 func updates(ctx context.Context, host string) error {

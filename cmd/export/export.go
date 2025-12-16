@@ -56,6 +56,22 @@ var Command = []*cli.Command{
 	},
 }
 
+// ExportConfig is a public wrapper that exports configuration for a single host
+// This function is intended to be called from other subcommands like enroll
+func ExportConfig(ctx context.Context, host string, exportOutputDir string, exportShowSensitive bool) error {
+	// Temporarily override package-level flags for programmatic calls
+	originalOutputDir := outputDir
+	originalShowSensitive := showSensitive
+	outputDir = exportOutputDir
+	showSensitive = exportShowSensitive
+	defer func() {
+		outputDir = originalOutputDir
+		showSensitive = originalShowSensitive
+	}()
+
+	return export(ctx, host)
+}
+
 func export(ctx context.Context, host string) error {
 	// SSH init
 	slog.Info("Initializing SSH connection")

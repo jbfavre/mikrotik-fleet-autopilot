@@ -41,13 +41,13 @@ func (m *MockSshRunner) Run(cmd string) (string, error) {
 
 // MockSshManager is a mock implementation of SshManager for testing
 type MockSshManager struct {
-	CreateConnectionFunc func(host string) (core.SshRunner, error)
+	CreateConnectionFunc func(ctx context.Context, host string) (core.SshRunner, error)
 	GetUserFunc          func() string
 }
 
-func (m *MockSshManager) CreateConnection(host string) (core.SshRunner, error) {
+func (m *MockSshManager) CreateConnection(ctx context.Context, host string) (core.SshRunner, error) {
 	if m.CreateConnectionFunc != nil {
-		return m.CreateConnectionFunc(host)
+		return m.CreateConnectionFunc(ctx, host)
 	}
 	return nil, fmt.Errorf("mock CreateConnection not implemented")
 }

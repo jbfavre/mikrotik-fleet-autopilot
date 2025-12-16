@@ -16,14 +16,15 @@ Automate. Control. Scale. Your MikroTik fleet on autopilot.
 
 Available for all commands:
 
-- `--host <hosts>` - MikroTik router hostname or IP address (comma-separated for multiple routers). If not provided, will auto-discover from `router*.rsc` files in current directory
-- `--user <username>` - MikroTik router username (default: `admin`)
-- `--password <password>` - MikroTik router password
+- `--host <host>`, `-H <host>`  MikroTik router hostname or IP address (comma-separated for multiple routers). If not provided, will auto-discover from `router*.rsc` files in current directory
+- `--ssh-user <username>`, `-u <username>` - MikroTik router SSH username (default: "admin")
+- `--ssh-password <password>`, `-p <password>` - MikroTik router SSH password
+- `--ssh-passphrase <passphrase>`, `-P <passphrase>` - User private SSH key passphrase
 - `--debug` - Enable debug logging
 
 **Example:**
 ```bash
-mikrotik-fleet-autopilot --host router1.local,192.168.1.1 --user admin --password secret --debug export
+mikrotik-fleet-autopilot --host router1.local,192.168.1.1 --ssh-user admin --ssh-password secret --debug export
 ```
 
 ### Available Commands
@@ -59,7 +60,7 @@ mikrotik-fleet-autopilot updates [options]
 ```
 
 **Options:**
-- `--apply-updates` - Automatically download and install available updates (default: false, check only)
+- `--updates-apply` - Automatically download and install available updates (default: false, check only)
 
 **Examples:**
 ```bash
@@ -67,10 +68,10 @@ mikrotik-fleet-autopilot updates [options]
 mikrotik-fleet-autopilot updates
 
 # Check and apply updates
-mikrotik-fleet-autopilot updates --apply-updates
+mikrotik-fleet-autopilot updates --updates-apply
 
 # Update specific routers
-mikrotik-fleet-autopilot --host 192.168.1.1 updates --apply-updates
+mikrotik-fleet-autopilot --host 192.168.1.1 updates --updates-apply
 ```
 
 ## Building

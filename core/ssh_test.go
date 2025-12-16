@@ -262,49 +262,6 @@ func TestNewSsh_BothPasswordAndPassphrase_ConnectionFails(t *testing.T) {
 	}
 }
 
-func TestSetupLogging(t *testing.T) {
-	// Test different log levels
-	tests := []struct {
-		name  string
-		level int
-	}{
-		{
-			name:  "debug level",
-			level: -4, // slog.LevelDebug
-		},
-		{
-			name:  "info level",
-			level: 0, // slog.LevelInfo
-		},
-		{
-			name:  "warn level",
-			level: 4, // slog.LevelWarn
-		},
-		{
-			name:  "error level",
-			level: 8, // slog.LevelError
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// SetupLogging should not panic
-			defer func() {
-				if r := recover(); r != nil {
-					t.Errorf("SetupLogging() panicked: %v", r)
-				}
-			}()
-
-			// Import slog to use proper Level type
-			var level interface{} = tt.level
-			// Convert to slog.Level if we import log/slog
-			// For now, just verify it doesn't crash
-			_ = level
-			// SetupLogging should be safe to call multiple times
-		})
-	}
-}
-
 func TestReadSshConfig_NoConfigFile(t *testing.T) {
 	// Test with default HOME that doesn't have .ssh/config
 	// This simulates CI environment

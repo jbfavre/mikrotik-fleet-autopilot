@@ -245,3 +245,112 @@ add name=bridge1`,
 		})
 	}
 }
+
+func TestExportConfigWrapper(t *testing.T) {
+	tests := []struct {
+		name                string
+		host                string
+		exportOutputDir     string
+		exportShowSensitive bool
+		sshOutput           string
+		sshError            error
+		wantErr             bool
+		errContains         string
+	}{
+		{
+			name:                "Successful export with wrapper",
+			host:                "192.168.1.1",
+			exportOutputDir:     t.TempDir(),
+			exportShowSensitive: false,
+			sshOutput: `/interface bridge
+add name=bridge1
+/system identity
+set name=test-router`,
+			wantErr: false,
+		},
+		{
+			name:                "Successful export with sensitive data",
+			host:                "192.168.1.2",
+			exportOutputDir:     t.TempDir(),
+			exportShowSensitive: true,
+			sshOutput: `/interface bridge
+add name=bridge1
+/user
+add name=admin password=secret`,
+			wantErr: false,
+		},
+		{
+			name:                "SSH connection error",
+			host:                "192.168.1.3",
+			exportOutputDir:     t.TempDir(),
+			exportShowSensitive: false,
+			sshError:            fmt.Errorf("connection refused"),
+			wantErr:             true,
+			errContains:         "failed to create SSH connection",
+		},
+		{
+			name:                "Export command error",
+			host:                "192.168.1.4",
+			exportOutputDir:     t.TempDir(),
+			exportShowSensitive: false,
+			sshError:            fmt.Errorf("export failed"),
+			wantErr:             true,
+			errContains:         "failed to export configuration",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Mock SSH connection factory
+			originalFactory := sshConnectionFactory
+			defer func() { sshConnectionFactory = originalFactory }()
+
+			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+				if tt.sshError != nil && strings.Contains(tt.sshError.Error(), "connection refused") {
+					return nil, tt.sshError
+				}
+
+				return &MockSshRunner{
+					RunFunc: func(cmd string) (string, error) {
+						if tt.sshError != nil {
+							return "", tt.sshError
+						}
+						return tt.sshOutput, nil
+					},
+					CloseFunc: func() error {
+						return nil
+					},
+				}, nil
+			}
+
+			// Call the wrapper function
+			ctx := context.Background()
+			err := ExportConfig(ctx, tt.host, tt.exportOutputDir, tt.exportShowSensitive)
+
+			// Verify error expectations
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ExportConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr && tt.errContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("ExportConfig() error = %v, should contain %q", err, tt.errContains)
+				}
+			}
+
+			// Verify file was created on success
+			if !tt.wantErr {
+				// Extract hostname (remove domain suffix)
+				hostname := tt.host
+				if idx := strings.Index(hostname, "."); idx > 0 {
+					hostname = hostname[:idx]
+				}
+				expectedFile := filepath.Join(tt.exportOutputDir, hostname+".rsc")
+				if _, err := os.Stat(expectedFile); os.IsNotExist(err) {
+					t.Errorf("Expected file %s was not created", expectedFile)
+				}
+			}
+		})
+	}
+}

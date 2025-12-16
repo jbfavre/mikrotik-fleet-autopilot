@@ -195,6 +195,62 @@ func TestAutoDiscoverySetup(t *testing.T) {
 	}
 }
 
+func TestAutoDiscoveryWithBeforeHook(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp dir: %v", err)
+	}
+
+	// Create router files for auto-discovery
+	if err := os.WriteFile("router1.rsc", []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create router1.rsc: %v", err)
+	}
+	if err := os.WriteFile("router2.rsc", []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create router2.rsc: %v", err)
+	}
+
+	// Build command with empty hosts to trigger auto-discovery
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+	globalConfig.User = "testuser"
+	sshPassword = "testpass"
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	// Test the complete flow by running the command with a subcommand argument
+	// This simulates: mikrotik-fleet-autopilot export config
+	testArgs := []string{"mikrotik-fleet-autopilot", "export", "config"}
+
+	err := cmd.Run(context.Background(), testArgs)
+
+	// The command will fail because we don't have real routers to connect to,
+	// but we can check that hosts were auto-discovered in globalConfig
+	if err == nil {
+		// If it succeeds, hosts should be set
+		expectedHosts := []string{"router1.home", "router2.home"}
+		if !reflect.DeepEqual(globalConfig.Hosts, expectedHosts) {
+			t.Errorf("Expected hosts %v, got %v", expectedHosts, globalConfig.Hosts)
+		}
+		if len(globalConfig.Hosts) != 2 {
+			t.Errorf("Expected 2 hosts, got %d", len(globalConfig.Hosts))
+		}
+	} else {
+		// Even if command fails (expected since no real routers),
+		// hosts should have been discovered and set by the Before hook
+		expectedHosts := []string{"router1.home", "router2.home"}
+		if !reflect.DeepEqual(globalConfig.Hosts, expectedHosts) {
+			t.Errorf("Expected hosts %v, got %v", expectedHosts, globalConfig.Hosts)
+		}
+		if len(globalConfig.Hosts) != 2 {
+			t.Errorf("Expected 2 hosts in globalConfig after Before hook, got %d", len(globalConfig.Hosts))
+		}
+		// The error is expected (no real SSH connection), but auto-discovery should have worked
+		t.Logf("Command failed as expected (no real routers): %v", err)
+	}
+}
+
 func TestEmptyHostsWithNoFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()

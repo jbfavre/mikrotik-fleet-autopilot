@@ -1,4 +1,3 @@
-
   [![Go](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/go.yml/badge.svg)](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/go.yml)
   [![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/jbfavre/mikrotik-fleet-autopilot?label=OpenSSF+Scorecard&style=flat-square)](https://scorecard.dev/viewer/?uri=github.com/jbfavre/mikrotik-fleet-autopilot)
   [![CodeQL Advanced](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/codeql.yml/badge.svg)](https://github.com/jbfavre/mikrotik-fleet-autopilot/actions/workflows/codeql.yml)

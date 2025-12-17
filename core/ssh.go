@@ -104,7 +104,6 @@ func newSsh(host, username, password, passphrase string) (*sshConnection, error)
 		}
 		slog.Debug("We got a valid " + sshSigner.PublicKey().Type() + " sshSigner")
 	}
-	slog.Debug("We should still have a valid sshSigner, but we've not and I don't understand why")
 
 	// Build authentication methods
 	if sshSigner != nil && password != "" {

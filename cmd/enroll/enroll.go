@@ -15,7 +15,8 @@ import (
 )
 
 var hostname string
-var configFile string
+var preEnrollScript string
+var postEnrollScript string
 var skipUpdates bool
 var skipExport bool
 var outputDir string
@@ -45,11 +46,16 @@ var Command = []*cli.Command{
 				Required:    true,
 			},
 			&cli.StringFlag{
-				Name:        "config-file",
-				Value:       "",
+				Name:        "pre-enroll-script",
+				Value:       "./pre-enroll.rsc",
 				Usage:       "Path to RouterOS commands file to apply",
-				Destination: &configFile,
-				Required:    true,
+				Destination: &preEnrollScript,
+			},
+			&cli.StringFlag{
+				Name:        "post-enroll-script",
+				Value:       "./post-enroll.rsc",
+				Usage:       "Path to RouterOS commands file to apply",
+				Destination: &postEnrollScript,
 			},
 			&cli.BoolFlag{
 				Name:        "skip-updates",
@@ -102,12 +108,12 @@ func enroll(ctx context.Context, host string) error {
 	}()
 	fmt.Printf("✅ Connected to %s\n", host)
 
-	// Step 2: Apply configuration file
-	slog.Info("Step 2: Applying configuration file")
-	if err := applyConfigFile(conn, configFile); err != nil {
-		return fmt.Errorf("failed to apply configuration file: %w", err)
+	// Step 2: Apply pre-enroll configuration file
+	slog.Info("Step 2: Applying pre-enroll configuration file")
+	if err := applyConfigFile(conn, preEnrollScript); err != nil {
+		return fmt.Errorf("failed to apply pre-enroll configuration file: %w", err)
 	}
-	fmt.Println("✅ Configuration file applied")
+	fmt.Println("✅ Pre enroll configuration file applied")
 
 	// Step 3: Set router identity
 	slog.Info("Step 3: Setting router identity")
@@ -130,17 +136,35 @@ func enroll(ctx context.Context, host string) error {
 	}
 
 	// Step 5: Export configuration (unless skipped)
+	// Export properly manages its own SSH connection
 	if !skipExport {
 		slog.Info("Step 5: Exporting final configuration")
 		fmt.Println("⏳ Exporting configuration...")
 		if err := exportConfigFunc(ctx, host, outputDir, false); err != nil {
 			slog.Warn("Failed to export configuration: " + err.Error())
 			fmt.Printf("⚠️  Export failed (non-fatal): %v\n", err)
+		} else {
+			// Export closes its SSH connection, invalidating our SSH connection
+			// Recreate the connection to ensure subsequent steps work properly
+			slog.Info("Recreating SSH connection after export")
+			_ = conn.Close()
+			conn, err = sshConnectionFactory(ctx, host)
+			if err != nil {
+				return fmt.Errorf("failed to reconnect after export: %w", err)
+			}
+			fmt.Println("✅ Reconnected after export")
 		}
 	} else {
 		slog.Info("Step 5: Skipping export")
 		fmt.Println("⏭️  Skipping export")
 	}
+
+	// Step 6: Apply post-enroll configuration file
+	slog.Info("Step 6: Applying post-enroll configuration file")
+	if err := applyConfigFile(conn, postEnrollScript); err != nil {
+		return fmt.Errorf("failed to apply post-enroll configuration file: %w", err)
+	}
+	fmt.Println("✅ Post enroll configuration file applied")
 
 	fmt.Printf("\n🎉 Enrollment completed successfully for %s\n", host)
 	return nil

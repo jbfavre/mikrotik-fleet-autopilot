@@ -219,7 +219,8 @@ func TestEnroll(t *testing.T) {
 		name             string
 		host             string
 		hostnameValue    string
-		setupConfig      func() string
+		setupPreConfig   func() string
+		setupPostConfig  func() string
 		skipUpdatesValue bool
 		skipExportValue  bool
 		connectionError  error
@@ -235,10 +236,16 @@ func TestEnroll(t *testing.T) {
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  true,
-			setupConfig: func() string {
+			setupPreConfig: func() string {
 				tmpDir := os.TempDir()
-				configFile := filepath.Join(tmpDir, "test-enroll-success.rsc")
-				_ = os.WriteFile(configFile, []byte("/system note set note=test"), 0644)
+				configFile := filepath.Join(tmpDir, "test-pre-enroll-success.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=pre-test"), 0644)
+				return configFile
+			},
+			setupPostConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-post-enroll-success.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=post-test"), 0644)
 				return configFile
 			},
 			wantErr: false,
@@ -249,10 +256,16 @@ func TestEnroll(t *testing.T) {
 			hostnameValue:    "test-router",
 			skipUpdatesValue: false,
 			skipExportValue:  true,
-			setupConfig: func() string {
+			setupPreConfig: func() string {
 				tmpDir := os.TempDir()
-				configFile := filepath.Join(tmpDir, "test-enroll-with-updates.rsc")
-				_ = os.WriteFile(configFile, []byte("/system note set note=test"), 0644)
+				configFile := filepath.Join(tmpDir, "test-pre-enroll-with-updates.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=pre-test"), 0644)
+				return configFile
+			},
+			setupPostConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-post-enroll-with-updates.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=post-test"), 0644)
 				return configFile
 			},
 			wantErr: false,
@@ -263,10 +276,16 @@ func TestEnroll(t *testing.T) {
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  false,
-			setupConfig: func() string {
+			setupPreConfig: func() string {
 				tmpDir := os.TempDir()
-				configFile := filepath.Join(tmpDir, "test-enroll-with-export.rsc")
-				_ = os.WriteFile(configFile, []byte("/system note set note=test"), 0644)
+				configFile := filepath.Join(tmpDir, "test-pre-enroll-with-export.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=pre-test"), 0644)
+				return configFile
+			},
+			setupPostConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-post-enroll-with-export.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=post-test"), 0644)
 				return configFile
 			},
 			wantErr: false,
@@ -277,10 +296,16 @@ func TestEnroll(t *testing.T) {
 			hostnameValue:    "test-router",
 			skipUpdatesValue: false,
 			skipExportValue:  false,
-			setupConfig: func() string {
+			setupPreConfig: func() string {
 				tmpDir := os.TempDir()
-				configFile := filepath.Join(tmpDir, "test-enroll-full.rsc")
-				_ = os.WriteFile(configFile, []byte("/system note set note=test"), 0644)
+				configFile := filepath.Join(tmpDir, "test-pre-enroll-full.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=pre-test"), 0644)
+				return configFile
+			},
+			setupPostConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-post-enroll-full.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=post-test"), 0644)
 				return configFile
 			},
 			wantErr: false,
@@ -291,10 +316,16 @@ func TestEnroll(t *testing.T) {
 			hostnameValue:    "test-router",
 			skipUpdatesValue: false,
 			skipExportValue:  true,
-			setupConfig: func() string {
+			setupPreConfig: func() string {
 				tmpDir := os.TempDir()
-				configFile := filepath.Join(tmpDir, "test-enroll-updatefail.rsc")
-				_ = os.WriteFile(configFile, []byte("/system note set note=test"), 0644)
+				configFile := filepath.Join(tmpDir, "test-pre-enroll-updatefail.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=pre-test"), 0644)
+				return configFile
+			},
+			setupPostConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-post-enroll-updatefail.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=post-test"), 0644)
 				return configFile
 			},
 			updatesError: fmt.Errorf("update check failed"),
@@ -306,10 +337,16 @@ func TestEnroll(t *testing.T) {
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  false,
-			setupConfig: func() string {
+			setupPreConfig: func() string {
 				tmpDir := os.TempDir()
-				configFile := filepath.Join(tmpDir, "test-enroll-exportfail.rsc")
-				_ = os.WriteFile(configFile, []byte("/system note set note=test"), 0644)
+				configFile := filepath.Join(tmpDir, "test-pre-enroll-exportfail.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=pre-test"), 0644)
+				return configFile
+			},
+			setupPostConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-post-enroll-exportfail.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=post-test"), 0644)
 				return configFile
 			},
 			exportError: fmt.Errorf("export failed"),
@@ -322,32 +359,44 @@ func TestEnroll(t *testing.T) {
 			connectionError:  fmt.Errorf("connection refused"),
 			skipUpdatesValue: true,
 			skipExportValue:  true,
-			setupConfig: func() string {
+			setupPreConfig: func() string {
 				tmpDir := os.TempDir()
-				configFile := filepath.Join(tmpDir, "test-enroll-connfail.rsc")
-				_ = os.WriteFile(configFile, []byte("/system note set note=test"), 0644)
+				configFile := filepath.Join(tmpDir, "test-pre-enroll-connfail.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=pre-test"), 0644)
+				return configFile
+			},
+			setupPostConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-post-enroll-connfail.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=post-test"), 0644)
 				return configFile
 			},
 			wantErr:     true,
 			errContains: "failed to connect to host",
 		},
 		{
-			name:             "config file application error",
+			name:             "pre-enroll config file application error",
 			host:             "192.168.1.50",
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  true,
-			setupConfig: func() string {
+			setupPreConfig: func() string {
 				tmpDir := os.TempDir()
-				configFile := filepath.Join(tmpDir, "test-enroll-configerr.rsc")
+				configFile := filepath.Join(tmpDir, "test-pre-enroll-configerr.rsc")
 				_ = os.WriteFile(configFile, []byte("/invalid command"), 0644)
+				return configFile
+			},
+			setupPostConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-post-enroll-configerr.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=post-test"), 0644)
 				return configFile
 			},
 			commandErrors: map[string]error{
 				"/invalid command": fmt.Errorf("syntax error"),
 			},
 			wantErr:     true,
-			errContains: "failed to apply configuration file",
+			errContains: "failed to apply pre-enroll configuration file",
 		},
 		{
 			name:             "identity set error",
@@ -355,10 +404,16 @@ func TestEnroll(t *testing.T) {
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  true,
-			setupConfig: func() string {
+			setupPreConfig: func() string {
 				tmpDir := os.TempDir()
-				configFile := filepath.Join(tmpDir, "test-enroll-identityerr.rsc")
-				_ = os.WriteFile(configFile, []byte("/system note set note=test"), 0644)
+				configFile := filepath.Join(tmpDir, "test-pre-enroll-identityerr.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=pre-test"), 0644)
+				return configFile
+			},
+			setupPostConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-post-enroll-identityerr.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=post-test"), 0644)
 				return configFile
 			},
 			commandErrors: map[string]error{
@@ -367,15 +422,77 @@ func TestEnroll(t *testing.T) {
 			wantErr:     true,
 			errContains: "failed to set router identity",
 		},
+		{
+			name:             "post-enroll config file application error",
+			host:             "192.168.1.50",
+			hostnameValue:    "test-router",
+			skipUpdatesValue: true,
+			skipExportValue:  true,
+			setupPreConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-pre-enroll-post-configerr.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=pre-test"), 0644)
+				return configFile
+			},
+			setupPostConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-post-enroll-post-configerr.rsc")
+				_ = os.WriteFile(configFile, []byte("/invalid post command"), 0644)
+				return configFile
+			},
+			commandErrors: map[string]error{
+				"/invalid post command": fmt.Errorf("syntax error"),
+			},
+			wantErr:     true,
+			errContains: "failed to apply post-enroll configuration file",
+		},
+		{
+			name:             "missing post-enroll config file",
+			host:             "192.168.1.50",
+			hostnameValue:    "test-router",
+			skipUpdatesValue: true,
+			skipExportValue:  true,
+			setupPreConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-pre-enroll-missing-post.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=pre-test"), 0644)
+				return configFile
+			},
+			setupPostConfig: func() string {
+				return "/nonexistent/post-enroll-file.rsc"
+			},
+			wantErr:     true,
+			errContains: "failed to apply post-enroll configuration file",
+		},
+		{
+			name:             "missing pre-enroll config file",
+			host:             "192.168.1.50",
+			hostnameValue:    "test-router",
+			skipUpdatesValue: true,
+			skipExportValue:  true,
+			setupPreConfig: func() string {
+				return "/nonexistent/pre-enroll-file.rsc"
+			},
+			setupPostConfig: func() string {
+				tmpDir := os.TempDir()
+				configFile := filepath.Join(tmpDir, "test-post-enroll-missing-pre.rsc")
+				_ = os.WriteFile(configFile, []byte("/system note set note=post-test"), 0644)
+				return configFile
+			},
+			wantErr:     true,
+			errContains: "failed to apply pre-enroll configuration file",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup
-			configFile = tt.setupConfig()
+			// Setup - set all package variables
+			preEnrollScript = tt.setupPreConfig()
+			postEnrollScript = tt.setupPostConfig()
 			hostname = tt.hostnameValue
 			skipUpdates = tt.skipUpdatesValue
 			skipExport = tt.skipExportValue
+			outputDir = "."
 
 			// Mock SSH connection factory
 			originalFactory := sshConnectionFactory
@@ -405,7 +522,9 @@ func TestEnroll(t *testing.T) {
 			}
 			defer func() { exportConfigFunc = originalExportFunc }()
 
+			connectionCount := 0
 			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+				connectionCount++
 				if tt.connectionError != nil {
 					return nil, tt.connectionError
 				}
@@ -459,6 +578,19 @@ func TestEnroll(t *testing.T) {
 			} else if !tt.wantErr && tt.skipExportValue {
 				if exportCallCount != 0 {
 					t.Errorf("Expected export not to be called, got %d calls", exportCallCount)
+				}
+			}
+
+			// Verify connection count
+			// Initial connection: 1
+			// Reconnection after successful export (before post-enroll): +1
+			if !tt.wantErr {
+				expectedConnections := 1
+				if !tt.skipExportValue && tt.exportError == nil {
+					expectedConnections = 2 // Initial + reconnection after export
+				}
+				if connectionCount != expectedConnections {
+					t.Errorf("Expected %d connection(s), got %d", expectedConnections, connectionCount)
 				}
 			}
 		})

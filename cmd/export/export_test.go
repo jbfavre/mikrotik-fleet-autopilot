@@ -351,3 +351,202 @@ add name=admin password=secret`,
 		})
 	}
 }
+
+// TestExport_FilenameEdgeCases tests filename generation with various host formats
+func TestExport_FilenameEdgeCases(t *testing.T) {
+	tests := []struct {
+		name              string
+		host              string
+		preferredFilename string
+		expectedFilename  string
+		showSensitive     bool
+	}{
+		{
+			name:              "IP address",
+			host:              "192.168.1.1",
+			preferredFilename: "",
+			expectedFilename:  "192.168.1.1.rsc",
+			showSensitive:     false,
+		},
+		{
+			name:              "Hostname with FQDN",
+			host:              "router.example.com",
+			preferredFilename: "",
+			expectedFilename:  "router.rsc",
+			showSensitive:     false,
+		},
+		{
+			name:              "Preferred filename specified",
+			host:              "router.example.com",
+			preferredFilename: "custom-router",
+			expectedFilename:  "custom-router.rsc",
+			showSensitive:     false,
+		},
+		{
+			name:              "IPv6 address",
+			host:              "2001:db8::1",
+			preferredFilename: "",
+			expectedFilename:  "2001:db8::1.rsc",
+			showSensitive:     false,
+		},
+		{
+			name:              "Hostname with port",
+			host:              "router:2222",
+			preferredFilename: "",
+			expectedFilename:  "router.rsc",
+			showSensitive:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temporary directory
+			tmpDir, err := os.MkdirTemp("", "export-filename-test-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				_ = os.RemoveAll(tmpDir)
+			}()
+
+			// Mock SSH connection
+			originalFactory := sshConnectionFactory
+			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+				return &MockSshRunner{
+					RunFunc: func(cmd string) (string, error) {
+						return "/interface bridge\nadd name=bridge1", nil
+					},
+					CloseFunc: func() error {
+						return nil
+					},
+				}, nil
+			}
+			defer func() {
+				sshConnectionFactory = originalFactory
+			}()
+
+			// Set output directory
+			originalOutputDir := outputDir
+			outputDir = tmpDir
+			defer func() {
+				outputDir = originalOutputDir
+			}()
+
+			// Set showSensitive flag
+			originalShowSensitive := showSensitive
+			showSensitive = tt.showSensitive
+			defer func() {
+				showSensitive = originalShowSensitive
+			}()
+
+			// Create config and context
+			cfg := &core.Config{
+				Hosts: []string{tt.host},
+				User:  "admin",
+			}
+			ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+			ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
+
+			// Call export
+			err = export(ctx, tt.host, tt.preferredFilename)
+			if err != nil {
+				t.Fatalf("export() failed: %v", err)
+			}
+
+			// Verify file was created with expected name
+			expectedPath := filepath.Join(tmpDir, tt.expectedFilename)
+			if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+				// List files to help debug
+				files, _ := os.ReadDir(tmpDir)
+				var fileNames []string
+				for _, f := range files {
+					fileNames = append(fileNames, f.Name())
+				}
+				t.Errorf("Expected file %s not found. Files present: %v", tt.expectedFilename, fileNames)
+			}
+		})
+	}
+}
+
+// TestExport_SSHConnectionFactoryError tests error handling when SSH connection fails
+func TestExport_SSHConnectionFactoryError(t *testing.T) {
+	// Mock SSH connection factory to return error
+	originalFactory := sshConnectionFactory
+	sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+		return nil, fmt.Errorf("SSH connection failed: timeout")
+	}
+	defer func() {
+		sshConnectionFactory = originalFactory
+	}()
+
+	// Create config and context
+	cfg := &core.Config{
+		Hosts: []string{"test-host"},
+		User:  "admin",
+	}
+	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+	ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
+
+	// Call export - should fail
+	err := export(ctx, "test-host", "")
+	if err == nil {
+		t.Error("export() should fail when SSH connection cannot be established")
+	}
+
+	if !strings.Contains(err.Error(), "failed to create SSH connection") {
+		t.Errorf("error message should mention SSH connection failure, got: %v", err)
+	}
+}
+
+// TestExport_CloseError tests that close errors are handled gracefully
+func TestExport_CloseError(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "export-close-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
+
+	closeCalled := false
+
+	// Mock SSH connection with close error
+	originalFactory := sshConnectionFactory
+	sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+		return &MockSshRunner{
+			RunFunc: func(cmd string) (string, error) {
+				return "/interface bridge\nadd name=bridge1", nil
+			},
+			CloseFunc: func() error {
+				closeCalled = true
+				return fmt.Errorf("close error")
+			},
+		}, nil
+	}
+	defer func() {
+		sshConnectionFactory = originalFactory
+	}()
+
+	originalOutputDir := outputDir
+	outputDir = tmpDir
+	defer func() {
+		outputDir = originalOutputDir
+	}()
+
+	cfg := &core.Config{
+		Hosts: []string{"test-host"},
+		User:  "admin",
+	}
+	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+	ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
+
+	// Export should succeed even if close fails (error is silently ignored)
+	err = export(ctx, "test-host", "")
+	if err != nil {
+		t.Errorf("export() should succeed even with close error, got: %v", err)
+	}
+
+	if !closeCalled {
+		t.Error("Close() was not called")
+	}
+}

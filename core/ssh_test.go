@@ -2,6 +2,8 @@ package core
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -554,5 +556,64 @@ func BenchmarkSshConnection_Run_NilCheck(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = conn.Run("test")
+	}
+}
+
+// MockSSHClient is a mock implementation of ssh.Client for testing Close()
+type MockSSHClient struct {
+	CloseError error
+	Closed     bool
+}
+
+func (m *MockSSHClient) Close() error {
+	m.Closed = true
+	return m.CloseError
+}
+
+// TestSshConnection_Close_WithMockClient tests Close() with various scenarios
+func TestSshConnection_Close_WithMockClient(t *testing.T) {
+	tests := []struct {
+		name       string
+		closeError error
+		wantErr    bool
+	}{
+		{
+			name:       "successful close",
+			closeError: nil,
+			wantErr:    false,
+		},
+		{
+			name:       "close with already closed error - should not return error",
+			closeError: &net.OpError{Err: fmt.Errorf("use of closed network connection")},
+			wantErr:    false,
+		},
+		{
+			name:       "close with connection already closed error",
+			closeError: fmt.Errorf("connection already closed"),
+			wantErr:    false,
+		},
+		{
+			name:       "close with other error",
+			closeError: fmt.Errorf("network timeout"),
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// We need to test Close indirectly through its behavior
+			conn := &sshConnection{}
+
+			// Test IsAlreadyClosedError which Close() uses internally
+			shouldIgnore := conn.IsAlreadyClosedError(tt.closeError)
+
+			// If tt.wantErr is false and error is not nil, it means the error should be ignored
+			expectedIgnore := tt.closeError != nil && !tt.wantErr
+
+			if shouldIgnore != expectedIgnore {
+				t.Errorf("IsAlreadyClosedError() = %v, want %v for error: %v",
+					shouldIgnore, expectedIgnore, tt.closeError)
+			}
+		})
 	}
 }

@@ -85,6 +85,7 @@ func newSsh(host, username, password, passphrase string) (*sshConnection, error)
 
 	hostConfig := readSshConfig(host)
 	slog.Debug("hostConfig Hostname is " + hostConfig["Hostname"])
+	slog.Debug("hostConfig Port is " + hostConfig["Port"])
 	slog.Debug("hostConfig User is " + hostConfig["User"])
 	slog.Debug("hostConfig IdentityFile is " + hostConfig["IdentityFile"])
 
@@ -142,12 +143,15 @@ func newSsh(host, username, password, passphrase string) (*sshConnection, error)
 	conn.clientConfig = config
 
 	// Establish the SSH connection
-	client, err := ssh.Dial("tcp", host, config)
+	slog.Debug("Dialing " + net.JoinHostPort(hostConfig["Hostname"], hostConfig["Port"]))
+	client, err := ssh.Dial("tcp", net.JoinHostPort(hostConfig["Hostname"], hostConfig["Port"]), config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial %s: %w", host, err)
+		slog.Debug(fmt.Sprintf("failed to dial %s: %v", net.JoinHostPort(hostConfig["Hostname"], hostConfig["Port"]), err.Error()))
+		return nil, fmt.Errorf("failed to dial %s: %v", net.JoinHostPort(hostConfig["Hostname"], hostConfig["Port"]), err.Error())
 	}
 	conn.client = client
 
+	slog.Debug("We have our SSH connection")
 	return conn, nil
 }
 

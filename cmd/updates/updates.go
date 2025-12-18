@@ -43,6 +43,7 @@ var Command = []*cli.Command{
 			var lastErr error
 			for _, host := range cfg.Hosts {
 				if err := updates(ctx, host); err != nil {
+					slog.Debug(fmt.Sprintf("Error when checking updates on %s: %v", host, err.Error()))
 					fmt.Printf("❓ %s is unreachable\n", host)
 					// Continue with other hosts even if one fails
 				}
@@ -76,6 +77,7 @@ func updates(ctx context.Context, host string) error {
 	slog.Info("Initializing SSH connection")
 	conn, err := sshConnectionFactory(ctx, host)
 	if err != nil {
+		slog.Debug(fmt.Sprintf("Failed to create SSH connection to %s: %v", host, err.Error()))
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	defer func() {

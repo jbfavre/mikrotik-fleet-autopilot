@@ -34,10 +34,10 @@ func CreateConnection(ctx context.Context, host string) (SshRunner, error) {
 	}
 
 	// Call the internal newSsh function
-	slog.Debug(fmt.Sprintf("Creating SSH connection to %s as user %s", host, manager.user))
+	slog.Debug("creating SSH connection", "host", host, "user", manager.user)
 	conn, err := newSsh(host, manager.user, manager.password, manager.passphrase)
 	if err != nil {
-		slog.Debug(fmt.Sprintf("Failed to create SSH connection to %s: %v", host, err.Error()))
+		slog.Error("failed to create SSH connection", "host", host, "error", err)
 		return nil, fmt.Errorf("failed to create SSH connection to %s: %w", host, err)
 	}
 

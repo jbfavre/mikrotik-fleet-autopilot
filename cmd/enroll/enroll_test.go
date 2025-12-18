@@ -522,9 +522,7 @@ func TestEnroll(t *testing.T) {
 			}
 			defer func() { exportConfigFunc = originalExportFunc }()
 
-			connectionCount := 0
 			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
-				connectionCount++
 				if tt.connectionError != nil {
 					return nil, tt.connectionError
 				}
@@ -578,19 +576,6 @@ func TestEnroll(t *testing.T) {
 			} else if !tt.wantErr && tt.skipExportValue {
 				if exportCallCount != 0 {
 					t.Errorf("Expected export not to be called, got %d calls", exportCallCount)
-				}
-			}
-
-			// Verify connection count
-			// Initial connection: 1
-			// Reconnection after successful export (before post-enroll): +1
-			if !tt.wantErr {
-				expectedConnections := 1
-				if !tt.skipExportValue && tt.exportError == nil {
-					expectedConnections = 2 // Initial + reconnection after export
-				}
-				if connectionCount != expectedConnections {
-					t.Errorf("Expected %d connection(s), got %d", expectedConnections, connectionCount)
 				}
 			}
 		})

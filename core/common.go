@@ -78,9 +78,9 @@ func DiscoverHosts() ([]string, error) {
 
 	var routers []string
 	for _, file := range files {
-		// Remove .rsc extension and add .home
+		// Remove .rsc extension (let ssh_config handle domain expansion)
 		basename := strings.TrimSuffix(file, ".rsc")
-		routers = append(routers, basename+".home")
+		routers = append(routers, basename)
 	}
 
 	return routers, nil

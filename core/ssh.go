@@ -86,12 +86,14 @@ func newSsh(host, username, password, passphrase string) (*sshConnection, error)
 		clientConfig: nil,
 	}
 
-	hostConfig := readSshConfig(host)
+	hostInfo := readSshConfig(host)
 	slog.Debug("SSH host configuration",
-		"hostname", hostConfig["Hostname"],
-		"port", hostConfig["Port"],
-		"user", hostConfig["User"],
-		"identityFile", hostConfig["IdentityFile"])
+		"original", hostInfo.Original,
+		"type", hostInfo.Type,
+		"hostname", hostInfo.Hostname,
+		"port", hostInfo.Port,
+		"user", hostInfo.User,
+		"identityFile", hostInfo.IdentityFile)
 
 	var sshSigner ssh.Signer
 	var authMethod []ssh.AuthMethod
@@ -99,12 +101,12 @@ func newSsh(host, username, password, passphrase string) (*sshConnection, error)
 	if passphrase != "" {
 		slog.Debug("attempting to unlock private key with passphrase")
 		var err error
-		sshSigner, err = parseSshPrivateKey(hostConfig["IdentityFile"], passphrase)
+		sshSigner, err = parseSshPrivateKey(hostInfo.IdentityFile, passphrase)
 		if err != nil {
 			slog.Warn("failed to parse SSH private key with provided passphrase", "error", err)
 			return nil, err
 		}
-		slog.Debug("successfully parsed SSH private key", "file", hostConfig["IdentityFile"], "keyType", sshSigner.PublicKey().Type())
+		slog.Debug("successfully parsed SSH private key", "file", hostInfo.IdentityFile, "keyType", sshSigner.PublicKey().Type())
 	}
 
 	// Build authentication methods
@@ -131,10 +133,20 @@ func newSsh(host, username, password, passphrase string) (*sshConnection, error)
 		slog.Debug("no authentication method provided (need password or SSH key with passphrase)")
 		return nil, fmt.Errorf("no authentication method provided (need password or SSH key with passphrase)")
 	}
-	slog.Debug("SSH client configuration ready")
+
+	// Determine which username to use: ssh_config takes precedence over command-line
+	finalUsername := username
+	if hostInfo.User != "" {
+		slog.Debug("using username from ssh_config", "user", hostInfo.User)
+		finalUsername = hostInfo.User
+	} else {
+		slog.Debug("using username from command line", "user", username)
+	}
+
+	slog.Debug("SSH client configuration ready", "user", finalUsername)
 	// Build ssh client config
 	config := &ssh.ClientConfig{
-		User: username,
+		User: finalUsername,
 		Auth: authMethod,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			return nil
@@ -144,7 +156,7 @@ func newSsh(host, username, password, passphrase string) (*sshConnection, error)
 	conn.clientConfig = config
 
 	// Establish the SSH connection
-	address := net.JoinHostPort(hostConfig["Hostname"], hostConfig["Port"])
+	address := net.JoinHostPort(hostInfo.Hostname, hostInfo.Port)
 	slog.Debug("establishing SSH connection", "address", address)
 	client, err := ssh.Dial("tcp", address, config)
 	if err != nil {
@@ -157,58 +169,55 @@ func newSsh(host, username, password, passphrase string) (*sshConnection, error)
 	return conn, nil
 }
 
-func readSshConfig(host string) map[string]string {
-	// Initialize hostConfig with defaults
-	hostConfig := make(map[string]string)
-	hostConfig["Hostname"] = host
-	hostConfig["Port"] = "22"
-	hostConfig["User"] = ""
-	hostConfig["IdentityFile"] = ""
-	hostConfig["IdentitiesOnly"] = ""
-	hostConfig["ForwardAgent"] = ""
-	hostConfig["HostkeyAlgorithms"] = ""
-	hostConfig["PubkeyAcceptedAlgorithms"] = ""
+func readSshConfig(host string) *HostInfo {
+	// Step 1: Parse user input into HostInfo (the reference)
+	hostInfo := ParseHost(host)
 
-	// Try to read from user's ssh_config
+	// Step 2: Try to read from user's ssh_config for ALL host types (including IPs)
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		// Could not determine home directory - use defaults
-		return hostConfig
+		return hostInfo
 	}
 	sshConfigFile, err := os.Open(filepath.Join(homeDir, ".ssh", "config"))
 	if err != nil {
 		slog.Debug("SSH config file doesn't exist or can't be read - using defaults")
-		return hostConfig
+		return hostInfo
 	}
 	defer func() { _ = sshConfigFile.Close() }()
 
 	sshConfig, err := ssh_config.Decode(sshConfigFile)
 	if err != nil || sshConfig == nil {
 		slog.Debug("Failed to decode SSH config - using defaults")
-		return hostConfig
+		return hostInfo
 	}
 
-	// Override host's config values with settings from ssh_config
+	// Step 3: Merge ssh_config values into HostInfo (enrich, not override)
 	if hostname, _ := sshConfig.Get(host, "Hostname"); hostname != "" {
-		hostConfig["Hostname"] = strings.ReplaceAll(hostname, "%h", host)
+		hostInfo.Hostname = strings.ReplaceAll(hostname, "%h", host)
 	}
-	hostConfig["User"], _ = sshConfig.Get(host, "User")
-	hostConfig["IdentitiesOnly"], _ = sshConfig.Get(host, "IdentitiesOnly")
-	hostConfig["ForwardAgent"], _ = sshConfig.Get(host, "ForwardAgent")
-	hostConfig["HostkeyAlgorithms"], _ = sshConfig.Get(host, "HostkeyAlgorithms")
-	hostConfig["PubkeyAcceptedAlgorithms"], _ = sshConfig.Get(host, "PubkeyAcceptedAlgorithms")
+
+	if user, _ := sshConfig.Get(host, "User"); user != "" {
+		hostInfo.User = user
+	}
 
 	if port, _ := sshConfig.Get(host, "Port"); port != "" && port != "0" {
-		hostConfig["Port"] = port
+		hostInfo.Port = port
 	}
-	hostConfig["IdentityFile"], _ = sshConfig.Get(host, "IdentityFile")
+
+	hostInfo.IdentityFile, _ = sshConfig.Get(host, "IdentityFile")
+	hostInfo.IdentitiesOnly, _ = sshConfig.Get(host, "IdentitiesOnly")
+	hostInfo.ForwardAgent, _ = sshConfig.Get(host, "ForwardAgent")
+	hostInfo.HostkeyAlgorithms, _ = sshConfig.Get(host, "HostkeyAlgorithms")
+	hostInfo.PubkeyAcceptedAlgorithms, _ = sshConfig.Get(host, "PubkeyAcceptedAlgorithms")
+
 	slog.Debug("ssh_config found",
 		"host", host,
-		"hostname", hostConfig["Hostname"],
-		"port", hostConfig["Port"],
-		"user", hostConfig["User"],
-		"identityfile", hostConfig["IdentityFile"])
-	return hostConfig
+		"hostname", hostInfo.Hostname,
+		"port", hostInfo.Port,
+		"user", hostInfo.User,
+		"identityfile", hostInfo.IdentityFile)
+	return hostInfo
 }
 
 func parseSshPrivateKey(identityFile, passphrase string) (ssh.Signer, error) {

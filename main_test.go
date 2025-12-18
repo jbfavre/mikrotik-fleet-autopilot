@@ -189,7 +189,7 @@ func TestAutoDiscoverySetup(t *testing.T) {
 		t.Errorf("Auto-discovery failed: %v", err)
 	}
 
-	expectedHosts := []string{"router1.home", "router2.home"}
+	expectedHosts := []string{"router1", "router2"}
 	if !reflect.DeepEqual(routers, expectedHosts) {
 		t.Errorf("Expected %v, got %v", expectedHosts, routers)
 	}
@@ -229,7 +229,7 @@ func TestAutoDiscoveryWithBeforeHook(t *testing.T) {
 	// but we can check that hosts were auto-discovered in globalConfig
 	if err == nil {
 		// If it succeeds, hosts should be set
-		expectedHosts := []string{"router1.home", "router2.home"}
+		expectedHosts := []string{"router1", "router2"}
 		if !reflect.DeepEqual(globalConfig.Hosts, expectedHosts) {
 			t.Errorf("Expected hosts %v, got %v", expectedHosts, globalConfig.Hosts)
 		}
@@ -239,7 +239,7 @@ func TestAutoDiscoveryWithBeforeHook(t *testing.T) {
 	} else {
 		// Even if command fails (expected since no real routers),
 		// hosts should have been discovered and set by the Before hook
-		expectedHosts := []string{"router1.home", "router2.home"}
+		expectedHosts := []string{"router1", "router2"}
 		if !reflect.DeepEqual(globalConfig.Hosts, expectedHosts) {
 			t.Errorf("Expected hosts %v, got %v", expectedHosts, globalConfig.Hosts)
 		}

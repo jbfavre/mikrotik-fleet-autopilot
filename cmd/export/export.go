@@ -47,7 +47,7 @@ var Command = []*cli.Command{
 			// Iterate over all hosts
 			var lastErr error
 			for _, host := range cfg.Hosts {
-				if err := export(ctx, host); err != nil {
+				if err := export(ctx, host, ""); err != nil { // Empty string = derive from host
 					lastErr = err
 					// Continue with other hosts even if one fails
 				}
@@ -59,7 +59,7 @@ var Command = []*cli.Command{
 
 // ExportConfig is a public wrapper that exports configuration for a single host
 // This function is intended to be called from other subcommands like enroll
-func ExportConfig(ctx context.Context, host string, exportOutputDir string, exportShowSensitive bool) error {
+func ExportConfig(ctx context.Context, host string, exportOutputDir string, exportShowSensitive bool, preferredFilename string) error {
 	// Temporarily override package-level flags for programmatic calls
 	originalOutputDir := outputDir
 	originalShowSensitive := showSensitive
@@ -70,10 +70,10 @@ func ExportConfig(ctx context.Context, host string, exportOutputDir string, expo
 		showSensitive = originalShowSensitive
 	}()
 
-	return export(ctx, host)
+	return export(ctx, host, preferredFilename)
 }
 
-func export(ctx context.Context, host string) error {
+func export(ctx context.Context, host string, preferredFilename string) error {
 	slog.Info("exporting configuration", "host", host)
 
 	slog.Debug("initializing SSH connection", "host", host)
@@ -102,12 +102,16 @@ func export(ctx context.Context, host string) error {
 	// Clean up Windows line endings (CRLF -> LF)
 	result = strings.ReplaceAll(result, "\r\n", "\n")
 
-	// Generate output filename: remove domain suffix if present
-	hostname := host
-	if idx := strings.Index(hostname, "."); idx > 0 {
-		hostname = hostname[:idx]
+	// Generate output filename
+	var filename string
+	if preferredFilename != "" {
+		// Use provided name (from enroll's --hostname)
+		filename = fmt.Sprintf("%s.rsc", preferredFilename)
+	} else {
+		// Derive from host using HostInfo
+		hostInfo := core.ParseHost(host)
+		filename = fmt.Sprintf("%s.rsc", hostInfo.ShortName)
 	}
-	filename := fmt.Sprintf("%s.rsc", hostname)
 	filepath := filepath.Join(outputDir, filename)
 
 	slog.Debug("writing configuration", "file", filepath, "size", len(result))

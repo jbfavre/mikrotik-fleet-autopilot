@@ -284,23 +284,20 @@ func TestReadSshConfig_NoConfigFile(t *testing.T) {
 		t.Fatal("readSshConfig() returned nil")
 	}
 
-	// Should have all expected keys with defaults
-	expectedKeys := []string{"Hostname", "User", "Port", "IdentityFile"}
-	for _, key := range expectedKeys {
-		if _, exists := config[key]; !exists {
-			t.Errorf("readSshConfig() missing expected key: %s", key)
-		}
+	// Verify HostInfo is not nil and has expected values
+	if config == nil {
+		t.Fatal("readSshConfig() returned nil")
 	}
 
 	// Verify defaults
-	if config["Hostname"] != "test-host" {
-		t.Errorf("Hostname = %q, want %q", config["Hostname"], "test-host")
+	if config.Hostname != "test-host" {
+		t.Errorf("Hostname = %q, want %q", config.Hostname, "test-host")
 	}
-	if config["Port"] != "22" {
-		t.Errorf("Port = %q, want %q", config["Port"], "22")
+	if config.Port != "22" {
+		t.Errorf("Port = %q, want %q", config.Port, "22")
 	}
-	if config["User"] != "" {
-		t.Errorf("User = %q, want empty string", config["User"])
+	if config.User != "" {
+		t.Errorf("User = %q, want empty string", config.User)
 	}
 }
 
@@ -433,17 +430,17 @@ func TestReadSshConfig_WithFixtures(t *testing.T) {
 				t.Fatal("readSshConfig() returned nil")
 			}
 
-			if config["Hostname"] != tt.expectedHost {
-				t.Errorf("Hostname = %q, want %q", config["Hostname"], tt.expectedHost)
+			if config.Hostname != tt.expectedHost {
+				t.Errorf("Hostname = %q, want %q", config.Hostname, tt.expectedHost)
 			}
-			if config["User"] != tt.expectedUser {
-				t.Errorf("User = %q, want %q", config["User"], tt.expectedUser)
+			if config.User != tt.expectedUser {
+				t.Errorf("User = %q, want %q", config.User, tt.expectedUser)
 			}
-			if config["Port"] != tt.expectedPort {
-				t.Errorf("Port = %q, want %q", config["Port"], tt.expectedPort)
+			if config.Port != tt.expectedPort {
+				t.Errorf("Port = %q, want %q", config.Port, tt.expectedPort)
 			}
-			if config["IdentityFile"] != tt.expectedIdFile {
-				t.Errorf("IdentityFile = %q, want %q", config["IdentityFile"], tt.expectedIdFile)
+			if config.IdentityFile != tt.expectedIdFile {
+				t.Errorf("IdentityFile = %q, want %q", config.IdentityFile, tt.expectedIdFile)
 			}
 		})
 	}

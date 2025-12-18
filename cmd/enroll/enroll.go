@@ -112,7 +112,8 @@ func enroll(ctx context.Context, host string) error {
 	conn, err := sshConnectionFactory(ctx, host)
 	if err != nil {
 		slog.Error("Failed to connect to router: " + err.Error())
-		return err
+		fmt.Printf("❌ Failed to connect to router: %v\n", err)
+		return fmt.Errorf("failed to connect to router: %w", err)
 	}
 	defer func() {
 		_ = conn.Close()
@@ -124,7 +125,7 @@ func enroll(ctx context.Context, host string) error {
 	if err := applyConfigFile(conn, preEnrollScript); err != nil {
 		slog.Error("Failed to apply pre-enroll configuration file: " + err.Error())
 		fmt.Printf("❌ Failed to apply pre-enroll configuration file: %v\n", err)
-		return err
+		return fmt.Errorf("failed to apply pre-enroll configuration file: %w", err)
 	}
 	slog.Debug("Pre enroll configuration file applied")
 	fmt.Printf("✅ Pre enroll configuration successfully applied for %s\n", host)
@@ -134,7 +135,7 @@ func enroll(ctx context.Context, host string) error {
 	if err := setRouterIdentity(conn, hostname); err != nil {
 		slog.Error("Failed to set router identity: " + err.Error())
 		fmt.Printf("❌ Failed to set router identity: %v\n", err)
-		return err
+		return fmt.Errorf("failed to set router identity: %w", err)
 	}
 	slog.Debug("Router identity for " + host + "set to: " + hostname)
 	fmt.Printf("✅ Router identity set for %s\n", host)
@@ -167,8 +168,7 @@ func enroll(ctx context.Context, host string) error {
 			_ = conn.Close()
 			if conn, err = sshConnectionFactory(ctx, host); err != nil {
 				slog.Error("Failed to reconnect after export: " + err.Error())
-				fmt.Printf("❌ Failed to reconnect after export: %v\n", err)
-				return err
+				return fmt.Errorf("failed to reconnect after export: %w", err)
 			}
 			slog.Debug("Reconnected after export")
 		}
@@ -181,9 +181,9 @@ func enroll(ctx context.Context, host string) error {
 	// Step 5: Apply post-enroll configuration file
 	slog.Debug("Applying post-enroll configuration file")
 	if err := applyConfigFile(conn, postEnrollScript); err != nil {
-		slog.Debug("failed to apply post-enroll configuration file: " + err.Error())
+		slog.Debug("Failed to apply post-enroll configuration file: " + err.Error())
 		fmt.Printf("❌ Failed to apply post-enroll configuration file: %v\n", err)
-		return err
+		return fmt.Errorf("failed to apply post-enroll configuration file: %w", err)
 	}
 	slog.Debug("Post enroll configuration file applied")
 	fmt.Printf("✅ Post enroll configuration successfully applied for %s\n", host)

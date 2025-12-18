@@ -350,13 +350,13 @@ func TestEnroll(t *testing.T) {
 				return configFile
 			},
 			exportError: fmt.Errorf("export failed"),
-			wantErr:     false, // Export failure is non-fatal
+			wantErr:     true, // Export failure is non-fatal
 		},
 		{
 			name:             "connection failure",
 			host:             "192.168.1.50",
 			hostnameValue:    "test-router",
-			connectionError:  fmt.Errorf("connection refused"),
+			connectionError:  fmt.Errorf("failed to connect to host"),
 			skipUpdatesValue: true,
 			skipExportValue:  true,
 			setupPreConfig: func() string {

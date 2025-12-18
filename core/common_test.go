@@ -63,19 +63,19 @@ func TestDiscoverHosts(t *testing.T) {
 		{
 			name:        "single router file",
 			setupFiles:  []string{"router1.rsc"},
-			wantRouters: []string{"router1.home"},
+			wantRouters: []string{"router1"},
 			wantErr:     false,
 		},
 		{
 			name:        "multiple router files",
 			setupFiles:  []string{"router1.rsc", "router2.rsc", "router3.rsc"},
-			wantRouters: []string{"router1.home", "router2.home", "router3.home"},
+			wantRouters: []string{"router1", "router2", "router3"},
 			wantErr:     false,
 		},
 		{
 			name:        "router files with different prefixes (sorted)",
 			setupFiles:  []string{"router10.rsc", "router2.rsc", "router1.rsc"},
-			wantRouters: []string{"router1.home", "router10.home", "router2.home"},
+			wantRouters: []string{"router1", "router10", "router2"},
 			wantErr:     false,
 		},
 		{
@@ -91,7 +91,7 @@ func TestDiscoverHosts(t *testing.T) {
 		{
 			name:        "mixed files",
 			setupFiles:  []string{"router-main.rsc", "config.txt", "router-backup.rsc"},
-			wantRouters: []string{"router-backup.home", "router-main.home"},
+			wantRouters: []string{"router-backup", "router-main"},
 			wantErr:     false,
 		},
 	}
@@ -171,7 +171,7 @@ func TestDiscoverHostsRealDirectory(t *testing.T) {
 		t.Errorf("DiscoverHosts() unexpected error: %v", err)
 	}
 
-	expected := []string{"router1.home", "router2.home"}
+	expected := []string{"router1", "router2"}
 	if !reflect.DeepEqual(routers, expected) {
 		t.Errorf("DiscoverHosts() = %v, want %v", routers, expected)
 	}

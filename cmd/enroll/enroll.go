@@ -157,7 +157,7 @@ func enroll(ctx context.Context, host string) error {
 	// Export properly manages its own SSH connection
 	if !skipExport {
 		slog.Debug("exporting final configuration", "host", host)
-		if err := exportConfigFunc(ctx, host, outputDir, false); err != nil {
+		if err := exportConfigFunc(ctx, host, outputDir, false, hostname); err != nil {
 			slog.Error("failed to export configuration", "host", host, "error", err)
 			return fmt.Errorf("failed to export configuration: %w", err)
 		}

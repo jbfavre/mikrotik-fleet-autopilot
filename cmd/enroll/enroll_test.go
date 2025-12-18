@@ -513,7 +513,7 @@ func TestEnroll(t *testing.T) {
 			// Mock export function
 			originalExportFunc := exportConfigFunc
 			exportCallCount := 0
-			exportConfigFunc = func(ctx context.Context, host string, outputDir string, showSensitive bool) error {
+			exportConfigFunc = func(ctx context.Context, host string, outputDir string, showSensitive bool, preferredFilename string) error {
 				exportCallCount++
 				if tt.exportError != nil {
 					return tt.exportError

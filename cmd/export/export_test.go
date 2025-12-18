@@ -183,7 +183,7 @@ add name=bridge1`,
 			ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
 
 			// Call the function
-			err = export(ctx, tt.host)
+			err = export(ctx, tt.host, "")
 
 			// Verify error expectations
 			if (err != nil) != tt.wantErr {
@@ -325,7 +325,7 @@ add name=admin password=secret`,
 
 			// Call the wrapper function
 			ctx := context.Background()
-			err := ExportConfig(ctx, tt.host, tt.exportOutputDir, tt.exportShowSensitive)
+			err := ExportConfig(ctx, tt.host, tt.exportOutputDir, tt.exportShowSensitive, "")
 
 			// Verify error expectations
 			if (err != nil) != tt.wantErr {
@@ -341,12 +341,9 @@ add name=admin password=secret`,
 
 			// Verify file was created on success
 			if !tt.wantErr {
-				// Extract hostname (remove domain suffix)
-				hostname := tt.host
-				if idx := strings.Index(hostname, "."); idx > 0 {
-					hostname = hostname[:idx]
-				}
-				expectedFile := filepath.Join(tt.exportOutputDir, hostname+".rsc")
+				// Use smart filename extraction based on host type
+				hostInfo := core.ParseHost(tt.host)
+				expectedFile := filepath.Join(tt.exportOutputDir, hostInfo.ShortName+".rsc")
 				if _, err := os.Stat(expectedFile); os.IsNotExist(err) {
 					t.Errorf("Expected file %s was not created", expectedFile)
 				}

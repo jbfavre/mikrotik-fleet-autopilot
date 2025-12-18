@@ -23,7 +23,7 @@ func main() {
 	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
 
 	if err := cmd.Run(context.WithValue(context.Background(), core.ConfigKey, &globalConfig), os.Args); err != nil {
-		slog.Error("command failed: " + err.Error())
+		slog.Error("command failed", "error", err)
 	}
 }
 
@@ -102,10 +102,11 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 						return ctx, fmt.Errorf("failed to discover routers: %w", err)
 					}
 					globalConfig.Hosts = routers
-					slog.Info(fmt.Sprintf("Auto-discovered %d router(s): %v", len(routers), routers))
+					slog.Info("auto-discovered routers", "count", len(routers), "routers", routers)
 				}
 
 				if len(globalConfig.Hosts) == 0 {
+					slog.Error("no routers specified or discovered")
 					return ctx, fmt.Errorf("no routers specified or discovered")
 				}
 			}
@@ -115,8 +116,8 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 			// Make global config (without credentials) and SSH manager available in context
 			ctx = context.WithValue(ctx, core.ConfigKey, globalConfig)
 			ctx = context.WithValue(ctx, core.SshManagerKey, sshManager)
-			slog.Debug("globalConfig is available in context with value: " + fmt.Sprintf("%+v", *globalConfig))
-			slog.Info("Starting " + cmd.Args().Get(0) + " subcommand")
+			slog.Debug("global config available in context", "config", *globalConfig)
+			slog.Info("starting subcommand", "subcommand", cmd.Args().Get(0))
 			return ctx, nil
 		},
 	}

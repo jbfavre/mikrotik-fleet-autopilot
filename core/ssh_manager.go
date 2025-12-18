@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 )
 
 // SshManager encapsulates SSH credentials and provides SSH connections
@@ -34,16 +33,11 @@ func CreateConnection(ctx context.Context, host string) (SshRunner, error) {
 		return nil, fmt.Errorf("failed to get SSH manager from context: %w", err)
 	}
 
-	// Add default port if not specified
-	hostWithPort := host
-	if _, _, err := net.SplitHostPort(host); err != nil {
-		hostWithPort = fmt.Sprintf("%s:22", host)
-	}
-	slog.Debug(fmt.Sprintf("Creating SSH connection to %s as user %s", host, manager.user))
-
 	// Call the internal newSsh function
-	conn, err := newSsh(hostWithPort, manager.user, manager.password, manager.passphrase)
+	slog.Debug(fmt.Sprintf("Creating SSH connection to %s as user %s", host, manager.user))
+	conn, err := newSsh(host, manager.user, manager.password, manager.passphrase)
 	if err != nil {
+		slog.Debug(fmt.Sprintf("Failed to create SSH connection to %s: %v", host, err.Error()))
 		return nil, fmt.Errorf("failed to create SSH connection to %s: %w", host, err)
 	}
 

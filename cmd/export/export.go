@@ -40,6 +40,7 @@ var Command = []*cli.Command{
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			cfg, err := core.GetConfig(ctx)
 			if err != nil {
+				slog.Debug("failed to get global config", "error", err)
 				return err
 			}
 
@@ -73,28 +74,28 @@ func ExportConfig(ctx context.Context, host string, exportOutputDir string, expo
 }
 
 func export(ctx context.Context, host string) error {
-	// SSH init
-	slog.Info("Initializing SSH connection")
+	slog.Info("exporting configuration", "host", host)
+
+	slog.Debug("initializing SSH connection", "host", host)
 	conn, err := sshConnectionFactory(ctx, host)
 	if err != nil {
+		slog.Error("failed to create SSH connection", "host", host, "error", err)
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	defer func() {
-		_ = conn.Close() // Error logging handled inside Close()
+		_ = conn.Close()
 	}()
 
-	// Build Mikrotik command line
 	sshCmd := "/export terse"
 	if showSensitive {
 		sshCmd += " show-sensitive"
 	}
-	slog.Debug("SSH cmd is " + sshCmd)
+	slog.Debug("executing export command", "command", sshCmd, "show-sensitive", showSensitive)
 
-	// Export configuration
-	slog.Info("Exporting router configuration")
 	result, err := conn.Run(sshCmd)
 	if err != nil {
-		fmt.Printf("⚠️  %s export failed: %v\n", host, err)
+		slog.Error("failed to export configuration", "host", host, "error", err)
+		fmt.Printf("❌ %s: Export failed\n", host)
 		return fmt.Errorf("failed to export configuration: %w", err)
 	}
 
@@ -109,14 +110,14 @@ func export(ctx context.Context, host string) error {
 	filename := fmt.Sprintf("%s.rsc", hostname)
 	filepath := filepath.Join(outputDir, filename)
 
-	// Write to file
-	slog.Debug("Writing configuration to " + filepath)
+	slog.Debug("writing configuration", "file", filepath, "size", len(result))
 	if err := os.WriteFile(filepath, []byte(result), 0644); err != nil {
-		fmt.Printf("⚠️  %s export failed: could not write file %s\n", host, filepath)
+		slog.Error("failed to write configuration file", "host", host, "file", filepath, "error", err)
+		fmt.Printf("❌ %s: Export failed\n", host)
 		return fmt.Errorf("failed to write configuration file: %w", err)
 	}
 
-	// Success message
-	fmt.Printf("✅ %s configuration exported to %s\n", host, filename)
+	slog.Info("configuration exported successfully", "host", host, "file", filename)
+	fmt.Printf("✅ %s: Configuration exported to %s\n", host, filename)
 	return nil
 }

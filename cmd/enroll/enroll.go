@@ -79,94 +79,115 @@ var Command = []*cli.Command{
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			cfg, err := core.GetConfig(ctx)
 			if err != nil {
+				slog.Debug("Failed to get global config: " + err.Error())
 				return err
 			}
 
 			// Enroll command should only work with a single host
 			if len(cfg.Hosts) != 1 {
+				slog.Debug("Enroll command requires exactly one host, got " + fmt.Sprint(len(cfg.Hosts)))
 				return fmt.Errorf("enroll command requires exactly one host, got %d", len(cfg.Hosts))
 			}
 
 			host := cfg.Hosts[0]
-			return enroll(ctx, host)
+			if err := enroll(ctx, host); err != nil {
+				slog.Error("Enrollment failed for " + host + ": " + err.Error())
+				fmt.Printf("❌ Enrollment failed for %s: %v\n", host, err)
+			} else {
+				slog.Info("Enrollment completed successfully for " + host)
+				fmt.Printf("✅ Enrollment completed successfully for %s\n", host)
+			}
+
+			return err
 		},
 	},
 }
 
 // enroll performs the enrollment workflow for a single router
 func enroll(ctx context.Context, host string) error {
-	fmt.Printf("🚀 Starting enrollment for router at %s\n", host)
+	slog.Info("Starting enrollment for " + host + "\n")
 
-	// Step 1: Connect to router
-	slog.Info("Step 1: Connecting to router")
+	// Connect to router
+	slog.Debug("Connecting to router")
 	conn, err := sshConnectionFactory(ctx, host)
 	if err != nil {
-		return fmt.Errorf("failed to connect to host %s: %w", host, err)
+		slog.Error("Failed to connect to router: " + err.Error())
+		return err
 	}
 	defer func() {
 		_ = conn.Close()
 	}()
-	fmt.Printf("✅ Connected to %s\n", host)
+	slog.Debug("Connected to " + host + "\n")
 
-	// Step 2: Apply pre-enroll configuration file
-	slog.Info("Step 2: Applying pre-enroll configuration file")
+	// Step 1: Apply pre-enroll configuration file
+	slog.Debug("Applying pre-enroll configuration file")
 	if err := applyConfigFile(conn, preEnrollScript); err != nil {
-		return fmt.Errorf("failed to apply pre-enroll configuration file: %w", err)
+		slog.Error("Failed to apply pre-enroll configuration file: " + err.Error())
+		fmt.Printf("❌ Failed to apply pre-enroll configuration file: %v\n", err)
+		return err
 	}
-	fmt.Println("✅ Pre enroll configuration file applied")
+	slog.Debug("Pre enroll configuration file applied")
+	fmt.Printf("✅ Pre enroll configuration successfully applied for %s\n", host)
 
-	// Step 3: Set router identity
-	slog.Info("Step 3: Setting router identity")
+	// Step 2: Set router identity
+	slog.Debug("Setting router identity")
 	if err := setRouterIdentity(conn, hostname); err != nil {
-		return fmt.Errorf("failed to set router identity: %w", err)
+		slog.Error("Failed to set router identity: " + err.Error())
+		fmt.Printf("❌ Failed to set router identity: %v\n", err)
+		return err
 	}
-	fmt.Printf("✅ Router identity set to: %s\n", hostname)
+	slog.Debug("Router identity for " + host + "set to: " + hostname)
+	fmt.Printf("✅ Router identity set for %s\n", host)
 
-	// Step 4: Apply updates (unless skipped)
+	// Step 3: Apply updates (unless skipped)
 	if !skipUpdates {
-		slog.Info("Step 4: Checking and applying updates")
-		fmt.Println("⏳ Checking for updates...")
+		slog.Debug("Checking and applying updates")
 		if err := applyUpdatesFunc(ctx, host); err != nil {
-			slog.Warn("Failed to apply updates: " + err.Error())
-			fmt.Printf("⚠️  Update check failed (non-fatal): %v\n", err)
+			slog.Error("Failed to apply updates: " + err.Error())
+			fmt.Printf("❌ Update check failed: %v\n", err)
+			// Non fatal error, no return
 		}
+		// No need for a specific status here since it's already managed by the updates subcommand
 	} else {
-		slog.Info("Step 4: Skipping updates")
-		fmt.Println("⏭️  Skipping updates")
+		slog.Debug("Skipping updates")
+		fmt.Printf("❓ Update check skipped\n")
 	}
 
-	// Step 5: Export configuration (unless skipped)
+	// Step 4: Export configuration (unless skipped)
 	// Export properly manages its own SSH connection
 	if !skipExport {
-		slog.Info("Step 5: Exporting final configuration")
-		fmt.Println("⏳ Exporting configuration...")
+		slog.Debug("Exporting final configuration")
 		if err := exportConfigFunc(ctx, host, outputDir, false); err != nil {
-			slog.Warn("Failed to export configuration: " + err.Error())
-			fmt.Printf("⚠️  Export failed (non-fatal): %v\n", err)
+			slog.Error("Failed to export configuration (non-fatal): " + err.Error())
+			return err
 		} else {
 			// Export closes its SSH connection, invalidating our SSH connection
 			// Recreate the connection to ensure subsequent steps work properly
-			slog.Info("Recreating SSH connection after export")
+			slog.Debug("Recreating SSH connection after export")
 			_ = conn.Close()
-			conn, err = sshConnectionFactory(ctx, host)
-			if err != nil {
-				return fmt.Errorf("failed to reconnect after export: %w", err)
+			if conn, err = sshConnectionFactory(ctx, host); err != nil {
+				slog.Error("Failed to reconnect after export: " + err.Error())
+				fmt.Printf("❌ Failed to reconnect after export: %v\n", err)
+				return err
 			}
-			fmt.Println("✅ Reconnected after export")
+			slog.Debug("Reconnected after export")
 		}
+		// No need for a specific status here since it's already managed by the export subcommand
 	} else {
-		slog.Info("Step 5: Skipping export")
-		fmt.Println("⏭️  Skipping export")
+		slog.Debug("Skipping export")
+		fmt.Printf("❓ Export skipped\n")
 	}
 
-	// Step 6: Apply post-enroll configuration file
-	slog.Info("Step 6: Applying post-enroll configuration file")
+	// Step 5: Apply post-enroll configuration file
+	slog.Debug("Applying post-enroll configuration file")
 	if err := applyConfigFile(conn, postEnrollScript); err != nil {
-		return fmt.Errorf("failed to apply post-enroll configuration file: %w", err)
+		slog.Debug("failed to apply post-enroll configuration file: " + err.Error())
+		fmt.Printf("❌ Failed to apply post-enroll configuration file: %v\n", err)
+		return err
 	}
-	fmt.Println("✅ Post enroll configuration file applied")
+	slog.Debug("Post enroll configuration file applied")
+	fmt.Printf("✅ Post enroll configuration successfully applied for %s\n", host)
 
-	fmt.Printf("\n🎉 Enrollment completed successfully for %s\n", host)
 	return nil
 }
 

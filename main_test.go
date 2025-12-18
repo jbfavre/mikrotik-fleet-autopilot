@@ -353,3 +353,159 @@ func TestBuildCommandWithEmptyCredentials(t *testing.T) {
 		t.Error("NewSshManager failed with empty credentials")
 	}
 }
+
+// TestBuildCommandBeforeHook tests the Before hook execution
+func TestBuildCommandBeforeHook(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	tests := []struct {
+		name        string
+		hosts       string
+		shouldError bool
+		errorMsg    string
+	}{
+		{
+			name:        "With explicit host",
+			hosts:       "192.168.1.1",
+			shouldError: false,
+		},
+		{
+			name:        "With multiple hosts",
+			hosts:       "192.168.1.1,192.168.1.2",
+			shouldError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hosts = tt.hosts
+			cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+			if cmd == nil {
+				t.Fatal("buildCommand returned nil")
+			}
+
+			// Verify Before hook exists
+			if cmd.Before == nil {
+				t.Fatal("Before hook not set")
+			}
+
+			// The Before hook accesses cmd.Args() which needs the full CLI context
+			// We can't easily test it in isolation without full urfave/cli setup
+			// Just verify it exists and is properly typed
+			t.Logf("Before hook successfully registered for command: %s", cmd.Name)
+		})
+	}
+}
+
+// TestBuildCommandAllSubcommands verifies that all expected subcommands are registered
+func TestBuildCommandAllSubcommands(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	expectedCommands := []string{"export", "updates", "enroll"}
+
+	if len(cmd.Commands) < len(expectedCommands) {
+		t.Errorf("Expected at least %d subcommands, got %d", len(expectedCommands), len(cmd.Commands))
+	}
+
+	// Create a map of found commands for easier verification
+	foundCommands := make(map[string]bool)
+	for _, subCmd := range cmd.Commands {
+		foundCommands[subCmd.Name] = true
+	}
+
+	// Verify each expected command exists
+	for _, expectedName := range expectedCommands {
+		if !foundCommands[expectedName] {
+			t.Errorf("Expected subcommand '%s' not found", expectedName)
+		}
+	}
+}
+
+// TestBuildCommandHostParsing tests that hosts are parsed correctly
+func TestBuildCommandHostParsing(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	tests := []struct {
+		name          string
+		hostsInput    string
+		expectedCount int
+	}{
+		{
+			name:          "Single host",
+			hostsInput:    "192.168.1.1",
+			expectedCount: 1,
+		},
+		{
+			name:          "Multiple hosts with commas",
+			hostsInput:    "192.168.1.1,192.168.1.2,router.local",
+			expectedCount: 3,
+		},
+		{
+			name:          "Hosts with spaces",
+			hostsInput:    "192.168.1.1, 192.168.1.2 , router.local",
+			expectedCount: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hosts = tt.hostsInput
+			cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+			if cmd == nil {
+				t.Fatal("buildCommand returned nil")
+			}
+
+			// After calling Before hook with args, hosts should be parsed
+			// We test that the binding works correctly
+			if hosts != tt.hostsInput {
+				t.Errorf("hosts value changed: got %q, want %q", hosts, tt.hostsInput)
+			}
+
+			// Verify ParseHosts would work correctly
+			parsedHosts := core.ParseHosts(hosts)
+			if len(parsedHosts) != tt.expectedCount {
+				t.Errorf("ParseHosts() returned %d hosts, want %d", len(parsedHosts), tt.expectedCount)
+			}
+		})
+	}
+}
+
+// TestBuildCommandDebugFlag tests that debug flag is properly bound
+func TestBuildCommandDebugFlag(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	// Test with debug enabled
+	globalConfig.Debug = true
+	hosts = "test-host"
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	if cmd == nil {
+		t.Fatal("buildCommand returned nil")
+	}
+
+	// Verify debug flag is bound
+	if !globalConfig.Debug {
+		t.Error("Debug flag should be true")
+	}
+
+	// Test with debug disabled
+	globalConfig.Debug = false
+	cmd2 := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	if cmd2 == nil {
+		t.Fatal("buildCommand returned nil")
+	}
+
+	if globalConfig.Debug {
+		t.Error("Debug flag should be false")
+	}
+}

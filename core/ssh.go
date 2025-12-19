@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -77,7 +78,7 @@ func (c *sshConnection) Run(cmd string) (string, error) {
 }
 
 // newSsh creates a new SSH connection (internal function, use SshManager.CreateConnection instead)
-func newSsh(host, username, password, passphrase string) (*sshConnection, error) {
+func newSsh(ctx context.Context, host, username, password, passphrase string) (*sshConnection, error) {
 	// To authenticate with the remote server you must pass at least one
 	// implementation of AuthMethod via the Auth field in ClientConfig,
 	// and provide a HostKeyCallback.
@@ -149,7 +150,45 @@ func newSsh(host, username, password, passphrase string) (*sshConnection, error)
 		User: finalUsername,
 		Auth: authMethod,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			return nil
+			// Check if user wants to skip host key verification (INSECURE)
+			cfg, err := GetConfig(ctx)
+			if err == nil && cfg.SkipHostKeyCheck {
+				slog.Warn("⚠️  HOST KEY VERIFICATION DISABLED - INSECURE!")
+				return nil
+			}
+
+			// Check if host key exists for this host
+			if HostKeyExists(host) {
+				// Host key exists - always verify
+				if err := VerifyHostKey(host, key); err != nil {
+					fp := GetHostKeyFingerprint(key)
+					slog.Error("host key verification failed",
+						"host", host,
+						"fingerprint", fp,
+						"error", err)
+					return fmt.Errorf("host key verification failed: %w", err)
+				}
+				slog.Debug("host key verified successfully", "host", host)
+				return nil
+			}
+
+			// No host key exists - check if we're in enrollment mode
+			if IsEnrollmentMode(ctx) {
+				// Enrollment mode - capture the host key
+				fp := GetHostKeyFingerprint(key)
+				slog.Info("capturing host key for first time",
+					"host", host,
+					"algorithm", key.Type(),
+					"fingerprint", fp)
+				if err := CaptureHostKey(host, key); err != nil {
+					return fmt.Errorf("failed to capture host key: %w", err)
+				}
+				return nil
+			}
+
+			// Not in enrollment mode and no host key - fail securely
+			slog.Error("no host key found", "host", host)
+			return fmt.Errorf("no host key found for %s - run 'enroll' first or use '--update-hostkey'", host)
 		},
 		Timeout: 10 * time.Second,
 	}

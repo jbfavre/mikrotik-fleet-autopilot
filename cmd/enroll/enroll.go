@@ -45,7 +45,6 @@ var Command = []*cli.Command{
 				Value:       "",
 				Usage:       "Router hostname/identity to set (e.g., router1)",
 				Destination: &hostname,
-				Required:    false,
 			},
 			&cli.StringFlag{
 				Name:        "pre-enroll-script",

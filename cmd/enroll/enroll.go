@@ -38,7 +38,7 @@ var exportConfigFunc = export.ExportConfig
 var Command = []*cli.Command{
 	{
 		Name:  "enroll",
-		Usage: "Enroll a bare MikroTik router with initial configuration or update its SSH host key",
+		Usage: "Enroll a bare MikroTik router with initial configuration",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "hostname",

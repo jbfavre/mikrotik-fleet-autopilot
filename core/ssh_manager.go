@@ -33,9 +33,9 @@ func CreateConnection(ctx context.Context, host string) (SshRunner, error) {
 		return nil, fmt.Errorf("failed to get SSH manager from context: %w", err)
 	}
 
-	// Call the internal newSsh function
+	// Call the internal newSsh function with context
 	slog.Debug("creating SSH connection", "host", host, "user", manager.user)
-	conn, err := newSsh(host, manager.user, manager.password, manager.passphrase)
+	conn, err := newSsh(ctx, host, manager.user, manager.password, manager.passphrase)
 	if err != nil {
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
 		return nil, fmt.Errorf("failed to create SSH connection to %s: %w", host, err)

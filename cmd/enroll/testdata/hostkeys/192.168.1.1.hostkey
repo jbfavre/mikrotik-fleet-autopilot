@@ -1,0 +1,7 @@
+{
+  "host": "192.168.1.1",
+  "algorithm": "ssh-rsa",
+  "fingerprint": "SHA256:old123fingerprint",
+  "publicKey": "AAAAB3NzaC1yc2EAAAADAQABAAABAQDTrDWfO6uK7Q6/91/ErnGLnsv84x9Y5mLnz2305Dxl+ZISKtSsumMST5TvbPWjb8AGIoO8eaZoMAF3EWDCv09IScN2KaI+3A2xfIE8GZdUvzg/2AJqxZM4hJUMT3kbFHgHytcFPC+8sj6UZA1w0hBgILr8aHi6t46ZU2TXQc2dw6MXo2eDWx3CRyXeAuz9xx6Ot/V2BeVe8kfDuA6Ip4UfWzSzWQxt4yxUv5KgxJ6MjiQCTXXJMsIvRBKNmLaRfDY0i/Gr1taSeYVpem2Cx6QqTS+MgsXKmA1HEun0qHELUfOCJBBEbFIhPrrK2ubHZddTg3K8epjIi4x6xdb3Yalv",
+  "capturedAt": "2025-12-01T10:00:00Z"
+}

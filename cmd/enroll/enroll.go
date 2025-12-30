@@ -327,7 +327,8 @@ func setRouterIdentity(conn core.SshRunner, hostname string) error {
 	return nil
 }
 
-// updateHostKey updates only the SSH host key without performing full enrollment
+// updateHostKey captures the SSH host key for the first time or updates an existing one,
+// without performing full enrollment.
 func updateHostKey(ctx context.Context, host string) (string, error) {
 	slog.Info("starting host key update", "host", host)
 

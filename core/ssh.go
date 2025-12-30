@@ -188,7 +188,7 @@ func newSsh(ctx context.Context, host, username, password, passphrase string) (*
 
 			// Not in enrollment mode and no host key - fail securely
 			slog.Error("no host key found", "host", host)
-			return fmt.Errorf("no host key found for %s - run 'enroll' first or use '--update-hostkey'", host)
+			return fmt.Errorf("no host key found for %s - run 'enroll' first or use '--update-hostkey-only'", host)
 		},
 		Timeout: 10 * time.Second,
 	}

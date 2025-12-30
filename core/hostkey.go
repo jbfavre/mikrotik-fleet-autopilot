@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -110,20 +111,13 @@ func VerifyHostKey(host string, remoteKey ssh.PublicKey) error {
 		return fmt.Errorf("failed to load stored host key: %w", err)
 	}
 
-	// Compare marshaled keys (this is the standard way to compare SSH keys)
+	// Compare marshaled keys with bytes.Equal for correctness and simplicity
 	storedBytes := storedKey.Marshal()
 	remoteBytes := remoteKey.Marshal()
-
-	if len(storedBytes) != len(remoteBytes) {
-		return fmt.Errorf("host key mismatch: different key sizes")
-	}
-
-	for i := range storedBytes {
-		if storedBytes[i] != remoteBytes[i] {
-			storedFp := GetHostKeyFingerprint(storedKey)
-			remoteFp := GetHostKeyFingerprint(remoteKey)
-			return fmt.Errorf("host key mismatch: stored=%s remote=%s", storedFp, remoteFp)
-		}
+	if !bytes.Equal(storedBytes, remoteBytes) {
+		storedFp := GetHostKeyFingerprint(storedKey)
+		remoteFp := GetHostKeyFingerprint(remoteKey)
+		return fmt.Errorf("host key mismatch: stored=%s remote=%s", storedFp, remoteFp)
 	}
 
 	return nil

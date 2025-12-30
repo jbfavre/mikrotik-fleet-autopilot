@@ -69,7 +69,7 @@ func TestBuildCommandFlags(t *testing.T) {
 		}
 	}
 
-	// Test that we have the right number of flags (host, ssh-user, ssh-password, ssh-passphrase, skip-hostkey-check, debug)
+	// Test that we have the right number of flags
 	if len(cmd.Flags) != 6 {
 		t.Errorf("Expected 6 flags, got %d", len(cmd.Flags))
 	}

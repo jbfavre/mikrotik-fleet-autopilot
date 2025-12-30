@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -206,7 +207,8 @@ func TestSshConnection_Run_NilClient(t *testing.T) {
 
 func TestNewSsh_NoAuthenticationMethods(t *testing.T) {
 	// Test that newSsh returns error when no authentication is provided
-	_, err := newSsh("test-host:22", "admin", "", "")
+	ctx := context.Background()
+	_, err := newSsh(ctx, "test-host:22", "admin", "", "")
 
 	if err == nil {
 		t.Error("newSsh() expected error for no authentication, got nil")
@@ -220,7 +222,8 @@ func TestNewSsh_NoAuthenticationMethods(t *testing.T) {
 
 func TestNewSsh_PasswordOnly_ConnectionFails(t *testing.T) {
 	// Test newSsh with password - should fail to connect but validates auth setup
-	_, err := newSsh("invalid-host-that-does-not-exist.local:22", "admin", "password123", "")
+	ctx := context.Background()
+	_, err := newSsh(ctx, "invalid-host-that-does-not-exist.local:22", "admin", "password123", "")
 
 	if err == nil {
 		t.Error("newSsh() expected connection error for invalid host, got nil")
@@ -235,7 +238,8 @@ func TestNewSsh_PasswordOnly_ConnectionFails(t *testing.T) {
 func TestNewSsh_PassphraseWithoutKey(t *testing.T) {
 	// Test newSsh with passphrase but no valid key file
 	// This should fail during key parsing
-	_, err := newSsh("test-host:22", "admin", "", "passphrase123")
+	ctx := context.Background()
+	_, err := newSsh(ctx, "test-host:22", "admin", "", "passphrase123")
 
 	if err == nil {
 		t.Error("newSsh() expected error for invalid key, got nil")
@@ -251,7 +255,8 @@ func TestNewSsh_PassphraseWithoutKey(t *testing.T) {
 func TestNewSsh_BothPasswordAndPassphrase_ConnectionFails(t *testing.T) {
 	// Test newSsh with both password and passphrase
 	// Should prepare both auth methods but fail to connect
-	_, err := newSsh("invalid.host:22", "admin", "password123", "passphrase456")
+	ctx := context.Background()
+	_, err := newSsh(ctx, "invalid.host:22", "admin", "password123", "passphrase456")
 
 	if err == nil {
 		t.Error("newSsh() expected error, got nil")

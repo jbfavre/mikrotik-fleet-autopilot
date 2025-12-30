@@ -70,8 +70,8 @@ func TestBuildCommandFlags(t *testing.T) {
 	}
 
 	// Test that we have the right number of flags
-	if len(cmd.Flags) != 5 {
-		t.Errorf("Expected 5 flags, got %d", len(cmd.Flags))
+	if len(cmd.Flags) != 6 {
+		t.Errorf("Expected 6 flags, got %d", len(cmd.Flags))
 	}
 }
 

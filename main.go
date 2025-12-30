@@ -71,6 +71,13 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Destination: sshPassphrase,
 			},
 			&cli.BoolFlag{
+				Name:        "skip-hostkey-check",
+				Category:    "ssh",
+				Value:       false,
+				Usage:       "⚠️  INSECURE: Skip host key verification (for testing only)",
+				Destination: &globalConfig.SkipHostKeyCheck,
+			},
+			&cli.BoolFlag{
 				Name:        "debug",
 				Aliases:     []string{"d"},
 				Category:    "log",

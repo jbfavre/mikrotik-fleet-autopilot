@@ -18,6 +18,8 @@ const (
 	ConfigKey ContextKey = "config"
 	// SshManagerKey is the context key for storing SshManager
 	SshManagerKey ContextKey = "ssh_manager"
+	// EnrollmentModeKey is the context key for storing enrollment mode
+	EnrollmentModeKey ContextKey = "enrollment_mode"
 )
 
 // GetConfig extracts *config.Config from context
@@ -36,6 +38,12 @@ func GetSshManager(ctx context.Context) (*SshManager, error) {
 		return nil, fmt.Errorf("invalid ssh manager type or not found in context")
 	}
 	return manager, nil
+}
+
+// IsEnrollmentMode checks if the context is in enrollment mode
+func IsEnrollmentMode(ctx context.Context) bool {
+	mode, ok := ctx.Value(EnrollmentModeKey).(bool)
+	return ok && mode
 }
 
 // SetupLogging sets slog default logger to the given level

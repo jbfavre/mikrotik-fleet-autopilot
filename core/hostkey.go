@@ -145,30 +145,6 @@ func DeleteHostKey(host string) error {
 	return nil
 }
 
-// BackupHostKey creates a backup of the host key file
-func BackupHostKey(host string) error {
-	path := HostKeyFilePath(host)
-	backupPath := path + ".backup"
-
-	if !HostKeyExists(host) {
-		return fmt.Errorf("host key file does not exist: %s", path)
-	}
-
-	// Read original file
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("failed to read host key file: %w", err)
-	}
-
-	// Write backup
-	if err := os.WriteFile(backupPath, data, 0600); err != nil {
-		return fmt.Errorf("failed to write backup file: %w", err)
-	}
-
-	slog.Info("host key backed up", "host", host, "backup", backupPath)
-	return nil
-}
-
 // LoadHostKeyInfo returns the full HostKeyInfo from disk
 func LoadHostKeyInfo(host string) (*HostKeyInfo, error) {
 	path := HostKeyFilePath(host)

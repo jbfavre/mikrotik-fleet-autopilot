@@ -163,7 +163,11 @@ func newSsh(ctx context.Context, host, username, password, passphrase string) (*
 						"algorithm", key.Type(),
 						"fingerprint", fp)
 					if err := CaptureHostKey(host, key); err != nil {
-						return fmt.Errorf("failed to capture host key: %w", err)
+						slog.Error("failed to capture host key while SkipHostKeyCheck is enabled",
+							"host", host,
+							"algorithm", key.Type(),
+							"fingerprint", fp,
+							"error", err)
 					}
 				}
 				return nil

@@ -43,7 +43,7 @@ var Command = []*cli.Command{
 			&cli.StringFlag{
 				Name:        "hostname",
 				Value:       "",
-				Usage:       "Router hostname/identity to set (e.g., router1)",
+				Usage:       "Router hostname/identity to set (e.g., router1). Required for enrollment, not needed when using --update-hostkey-only.",
 				Destination: &hostname,
 			},
 			&cli.StringFlag{

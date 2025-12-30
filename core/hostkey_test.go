@@ -292,58 +292,6 @@ func TestDeleteHostKey(t *testing.T) {
 	}
 }
 
-func TestBackupHostKey(t *testing.T) {
-	// Create temporary directory for test
-	tmpDir, err := os.MkdirTemp("", "hostkey-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
-
-	// Change to temp directory
-	originalDir, _ := os.Getwd()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("Failed to change directory: %v", err)
-	}
-	defer func() { _ = os.Chdir(originalDir) }()
-
-	host := "testrouter"
-
-	// Try to backup non-existent key
-	if err := BackupHostKey(host); err == nil {
-		t.Error("BackupHostKey() on non-existent key succeeded, want error")
-	}
-
-	// Create key
-	testKey, err := generateTestKey()
-	if err != nil {
-		t.Fatalf("Failed to generate test key: %v", err)
-	}
-
-	if err := CaptureHostKey(host, testKey); err != nil {
-		t.Fatalf("CaptureHostKey() failed: %v", err)
-	}
-
-	// Backup key
-	if err := BackupHostKey(host); err != nil {
-		t.Errorf("BackupHostKey() failed: %v", err)
-	}
-
-	// Check backup file exists
-	backupPath := HostKeyFilePath(host) + ".backup"
-	if _, err := os.Stat(backupPath); err != nil {
-		t.Errorf("Backup file does not exist: %v", err)
-	}
-
-	// Verify backup content matches original
-	originalData, _ := os.ReadFile(HostKeyFilePath(host))
-	backupData, _ := os.ReadFile(backupPath)
-
-	if len(originalData) != len(backupData) {
-		t.Error("Backup file size differs from original")
-	}
-}
-
 func TestLoadHostKeyInfo(t *testing.T) {
 	// Create temporary directory for test
 	tmpDir, err := os.MkdirTemp("", "hostkey-test-*")

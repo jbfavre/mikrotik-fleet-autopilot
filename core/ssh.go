@@ -154,6 +154,18 @@ func newSsh(ctx context.Context, host, username, password, passphrase string) (*
 			cfg, err := GetConfig(ctx)
 			if err == nil && cfg.SkipHostKeyCheck {
 				slog.Warn("⚠️  HOST KEY VERIFICATION DISABLED - INSECURE!")
+
+				// Even when skipping verification, still capture the host key during enrollment
+				if !HostKeyExists(host) && IsEnrollmentMode(ctx) {
+					fp := GetHostKeyFingerprint(key)
+					slog.Info("capturing host key for first time (verification skipped)",
+						"host", host,
+						"algorithm", key.Type(),
+						"fingerprint", fp)
+					if err := CaptureHostKey(host, key); err != nil {
+						return fmt.Errorf("failed to capture host key: %w", err)
+					}
+				}
 				return nil
 			}
 

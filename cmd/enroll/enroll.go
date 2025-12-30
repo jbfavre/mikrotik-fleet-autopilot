@@ -387,7 +387,8 @@ func deleteExistingEnrollment(host string) error {
 	}
 
 	// Delete config file
-	configFile := fmt.Sprintf("%s.rsc", host)
+	parsedHost := core.ParseHost(host)
+	configFile := fmt.Sprintf("%s.rsc", parsedHost.ShortName)
 	if _, err := os.Stat(configFile); err == nil {
 		slog.Debug("deleting config file", "file", configFile)
 		if err := os.Remove(configFile); err != nil {

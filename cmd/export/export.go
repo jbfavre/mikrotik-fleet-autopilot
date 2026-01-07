@@ -74,6 +74,11 @@ func ExportConfig(ctx context.Context, host string, exportOutputDir string, expo
 }
 
 func export(ctx context.Context, host string, preferredFilename string) error {
+	// Check if context is already cancelled
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled: %w", err)
+	}
+
 	slog.Info("exporting configuration", "host", host)
 
 	slog.Debug("initializing SSH connection", "host", host)

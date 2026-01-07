@@ -193,6 +193,11 @@ var Command = []*cli.Command{
 }
 
 func enroll(ctx context.Context, host string) error {
+	// Check if context is already cancelled
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled: %w", err)
+	}
+
 	slog.Info("starting enrollment", "host", host)
 
 	// Connect to router
@@ -330,6 +335,11 @@ func setRouterIdentity(conn core.SshRunner, hostname string) error {
 // updateHostKey captures the SSH host key for the first time or updates an existing one,
 // without performing full enrollment.
 func updateHostKey(ctx context.Context, host string) (string, error) {
+	// Check if context is already cancelled
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("context cancelled: %w", err)
+	}
+
 	slog.Info("starting host key update", "host", host)
 
 	// Load existing host key info if it exists

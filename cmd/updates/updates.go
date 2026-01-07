@@ -70,6 +70,11 @@ func ApplyUpdates(ctx context.Context, host string) error {
 }
 
 func updates(ctx context.Context, host string) error {
+	// Check if context is already cancelled
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled: %w", err)
+	}
+
 	updatesApplyFlag := updatesApply
 	slog.Debug("subcommand apply-updates flag", "value", updatesApplyFlag)
 
@@ -323,6 +328,11 @@ func applyUpdate(conn core.SshRunner, ctx context.Context, host, updateCmd, wait
 
 	var newConn core.SshRunner
 	for {
+		// Check if context was cancelled during reconnection
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("context cancelled during reconnection: %w", err)
+		}
+
 		fmt.Printf("⏳ Waiting for router %v to come back up...\n", host)
 		time.Sleep(reconnectDelay)
 

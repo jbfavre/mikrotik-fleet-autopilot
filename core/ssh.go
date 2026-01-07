@@ -79,6 +79,11 @@ func (c *sshConnection) Run(cmd string) (string, error) {
 
 // newSsh creates a new SSH connection (internal function, use SshManager.CreateConnection instead)
 func newSsh(ctx context.Context, host, username, password, passphrase string) (*sshConnection, error) {
+	// Check if context is already cancelled
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled before connection: %w", err)
+	}
+
 	// To authenticate with the remote server you must pass at least one
 	// implementation of AuthMethod via the Auth field in ClientConfig,
 	// and provide a HostKeyCallback.
@@ -210,14 +215,34 @@ func newSsh(ctx context.Context, host, username, password, passphrase string) (*
 	}
 	conn.clientConfig = config
 
-	// Establish the SSH connection
+	// Establish the SSH connection with context awareness
 	address := net.JoinHostPort(hostInfo.Hostname, hostInfo.Port)
 	slog.Debug("establishing SSH connection", "address", address)
-	client, err := ssh.Dial("tcp", address, config)
+
+	// Check context before dialing
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled before dial: %w", err)
+	}
+
+	// Create a dialer that respects context
+	dialer := net.Dialer{
+		Timeout: config.Timeout,
+	}
+	netConn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		slog.Error("failed to dial", "address", address, "error", err)
-		return nil, fmt.Errorf("failed to dial %s: %v", address, err.Error())
+		return nil, fmt.Errorf("failed to dial %s: %w", address, err)
 	}
+
+	// Perform SSH handshake
+	c, chans, reqs, err := ssh.NewClientConn(netConn, address, config)
+	if err != nil {
+		netConn.Close()
+		slog.Error("SSH handshake failed", "address", address, "error", err)
+		return nil, fmt.Errorf("SSH handshake failed for %s: %w", address, err)
+	}
+
+	client := ssh.NewClient(c, chans, reqs)
 	conn.client = client
 
 	slog.Debug("SSH connection established")
@@ -308,54 +333,3 @@ func parseSshPrivateKey(identityFile, passphrase string) (ssh.Signer, error) {
 	slog.Debug("private key parsed successfully", "keyType", signer.PublicKey().Type())
 	return signer, nil
 }
-
-/* func getPassword(prompt string) string {
-	fmt.Print(prompt)
-
-	// Common settings and variables for both stty calls.
-	attrs := syscall.ProcAttr{
-		Dir:   "",
-		Env:   []string{},
-		Files: []uintptr{os.Stdin.Fd(), os.Stdout.Fd(), os.Stderr.Fd()},
-		Sys:   nil}
-	var ws syscall.WaitStatus
-
-	// Disable echoing.
-	pid, err := syscall.ForkExec(
-		"/bin/stty",
-		[]string{"stty", "-echo"},
-		&attrs)
-	if err != nil {
-		panic(err)
-	}
-
-	// Wait for the stty process to complete.
-	_, err = syscall.Wait4(pid, &ws, 0, nil)
-	if err != nil {
-		panic(err)
-	}
-
-	// Echo is disabled, now grab the data.
-	reader := bufio.NewReader(os.Stdin)
-	text, err := reader.ReadString('\n')
-	if err != nil {
-		panic(err)
-	}
-
-	// Re-enable echo.
-	pid, err = syscall.ForkExec(
-		"/bin/stty",
-		[]string{"stty", "echo"},
-		&attrs)
-	if err != nil {
-		panic(err)
-	}
-
-	// Wait for the stty process to complete.
-	_, err = syscall.Wait4(pid, &ws, 0, nil)
-	if err != nil {
-		panic(err)
-	}
-
-	return strings.TrimSpace(text)
-} */

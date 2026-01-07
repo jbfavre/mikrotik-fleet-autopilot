@@ -12,6 +12,7 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
 	"jb.favre/mikrotik-fleet-autopilot/core"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
 )
 
 var hostname string
@@ -398,7 +399,7 @@ func deleteExistingEnrollment(host string) error {
 	}
 
 	// Delete config file
-	parsedHost := core.ParseHost(host)
+	parsedHost := sshpkg.ParseHost(host)
 	configFile := fmt.Sprintf("%s.rsc", parsedHost.ShortName)
 	if _, err := os.Stat(configFile); err == nil {
 		slog.Debug("deleting config file", "file", configFile)

@@ -16,7 +16,7 @@ type DefaultConfigReader struct{}
 // ReadConfig reads SSH configuration for a host
 func (r *DefaultConfigReader) ReadConfig(host string) (*HostInfo, error) {
 	// Step 1: Parse user input into HostInfo
-	hostInfo := parseHost(host)
+	hostInfo := ParseHost(host)
 
 	// Step 2: Try to read from user's ssh_config
 	homeDir, err := os.UserHomeDir()
@@ -66,8 +66,11 @@ func (r *DefaultConfigReader) ReadConfig(host string) (*HostInfo, error) {
 	return hostInfo, nil
 }
 
-// parseHost analyzes a host string and returns initial HostInfo
-func parseHost(host string) *HostInfo {
+// ParseHost analyzes a host string and returns initial HostInfo.
+// This is the reference that will be enriched by ssh_config.
+// It parses the host input to determine if it's an IP address, FQDN, or hostname,
+// and extracts port information if provided.
+func ParseHost(host string) *HostInfo {
 	info := &HostInfo{
 		Original: host,
 		Port:     "22", // Default port
@@ -84,7 +87,7 @@ func parseHost(host string) *HostInfo {
 	}
 
 	// Determine host type and set initial values
-	if isIPAddress(hostPart) {
+	if IsIPAddress(hostPart) {
 		info.Type = "ip"
 		info.Hostname = hostPart
 		info.ShortName = hostPart
@@ -105,7 +108,7 @@ func parseHost(host string) *HostInfo {
 	return info
 }
 
-// isIPAddress checks if string is valid IPv4/IPv6
-func isIPAddress(host string) bool {
+// IsIPAddress checks if string is valid IPv4/IPv6
+func IsIPAddress(host string) bool {
 	return net.ParseIP(host) != nil
 }

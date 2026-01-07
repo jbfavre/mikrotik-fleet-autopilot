@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
 )
 
 // SshManager encapsulates SSH credentials and provides SSH connections
@@ -33,9 +35,20 @@ func CreateConnection(ctx context.Context, host string) (SshRunner, error) {
 		return nil, fmt.Errorf("failed to get SSH manager from context: %w", err)
 	}
 
-	// Call the internal newSsh function with context
+	// Use the ssh package directly for better separation of concerns
 	slog.Debug("creating SSH connection", "host", host, "user", manager.user)
-	conn, err := newSsh(ctx, host, manager.user, manager.password, manager.passphrase)
+
+	// Create the connection builder
+	configReader := &sshpkg.DefaultConfigReader{}
+	authProvider := &sshpkg.DefaultAuthProvider{}
+	builder := sshpkg.NewConnectionBuilder(configReader, authProvider)
+
+	// Create host key callback using the adapter
+	hostKeyManager := GetHostKeyManager()
+	hostKeyCallback := sshpkg.BuildHostKeyCallback(ctx, host, hostKeyManager)
+
+	// Build the connection
+	conn, err := builder.Build(ctx, host, manager.user, manager.password, manager.passphrase, hostKeyCallback)
 	if err != nil {
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
 		return nil, fmt.Errorf("failed to create SSH connection to %s: %w", host, err)

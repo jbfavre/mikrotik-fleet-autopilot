@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"jb.favre/mikrotik-fleet-autopilot/core"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
 )
 
 // MockSshRunner is a mock implementation of SshRunner for testing
@@ -342,7 +343,7 @@ add name=admin password=secret`,
 			// Verify file was created on success
 			if !tt.wantErr {
 				// Use smart filename extraction based on host type
-				hostInfo := core.ParseHost(tt.host)
+				hostInfo := sshpkg.ParseHost(tt.host)
 				expectedFile := filepath.Join(tt.exportOutputDir, hostInfo.ShortName+".rsc")
 				if _, err := os.Stat(expectedFile); os.IsNotExist(err) {
 					t.Errorf("Expected file %s was not created", expectedFile)

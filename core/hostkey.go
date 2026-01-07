@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
 )
 
 // HostKeyInfo stores information about a captured SSH host key
@@ -24,7 +25,7 @@ type HostKeyInfo struct {
 
 // HostKeyFilePath returns the path to the host key file for a given host
 func HostKeyFilePath(host string) string {
-	hostInfo := ParseHost(host)
+	hostInfo := sshpkg.ParseHost(host)
 	return fmt.Sprintf("%s.hostkey", hostInfo.ShortName)
 }
 

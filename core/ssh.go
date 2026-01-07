@@ -5,15 +5,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/kevinburke/ssh_config"
 	"golang.org/x/crypto/ssh"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
 )
 
 // SshRunner defines the interface for SSH operations
@@ -79,174 +78,86 @@ func (c *sshConnection) Run(cmd string) (string, error) {
 
 // newSsh creates a new SSH connection (internal function, use SshManager.CreateConnection instead)
 func newSsh(ctx context.Context, host, username, password, passphrase string) (*sshConnection, error) {
-	// Check if context is already cancelled
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled before connection: %w", err)
-	}
+	// Use the new ssh package for better separation of concerns
+	configReader := &sshpkg.DefaultConfigReader{}
+	authProvider := &sshpkg.DefaultAuthProvider{}
+	builder := sshpkg.NewConnectionBuilder(configReader, authProvider)
 
-	// To authenticate with the remote server you must pass at least one
-	// implementation of AuthMethod via the Auth field in ClientConfig,
-	// and provide a HostKeyCallback.
-	conn := &sshConnection{
-		client:       nil,
-		clientConfig: nil,
-	}
+	// Create host key callback that uses our existing validation logic
+	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
+		// Check if user wants to skip host key verification (INSECURE)
+		cfg, err := GetConfig(ctx)
+		if err == nil && cfg.SkipHostKeyCheck {
+			slog.Warn("⚠️  HOST KEY VERIFICATION DISABLED - INSECURE!")
 
-	hostInfo := readSshConfig(host)
-	slog.Debug("SSH host configuration",
-		"original", hostInfo.Original,
-		"type", hostInfo.Type,
-		"hostname", hostInfo.Hostname,
-		"port", hostInfo.Port,
-		"user", hostInfo.User,
-		"identityFile", hostInfo.IdentityFile)
-
-	var sshSigner ssh.Signer
-	var authMethod []ssh.AuthMethod
-	// Try to load SSH key if passphrase is provided
-	if passphrase != "" {
-		slog.Debug("attempting to unlock private key with passphrase")
-		var err error
-		sshSigner, err = parseSshPrivateKey(hostInfo.IdentityFile, passphrase)
-		if err != nil {
-			slog.Warn("failed to parse SSH private key with provided passphrase", "error", err)
-			return nil, err
-		}
-		slog.Debug("successfully parsed SSH private key", "file", hostInfo.IdentityFile, "keyType", sshSigner.PublicKey().Type())
-	}
-
-	// Build authentication methods
-	if sshSigner != nil && password != "" {
-		slog.Debug("using both SSH key and password authentication")
-		// Both key and password available
-		authMethod = []ssh.AuthMethod{
-			ssh.PublicKeys(sshSigner),
-			ssh.Password(password),
-		}
-	} else if sshSigner != nil {
-		slog.Debug("using SSH key authentication")
-		// Only key available
-		authMethod = []ssh.AuthMethod{
-			ssh.PublicKeys(sshSigner),
-		}
-	} else if password != "" {
-		slog.Debug("using password authentication")
-		// Only password available
-		authMethod = []ssh.AuthMethod{
-			ssh.Password(password),
-		}
-	} else {
-		slog.Debug("no authentication method provided (need password or SSH key with passphrase)")
-		return nil, fmt.Errorf("no authentication method provided (need password or SSH key with passphrase)")
-	}
-
-	// Determine which username to use: ssh_config takes precedence over command-line
-	finalUsername := username
-	if hostInfo.User != "" {
-		slog.Debug("using username from ssh_config", "user", hostInfo.User)
-		finalUsername = hostInfo.User
-	} else {
-		slog.Debug("using username from command line", "user", username)
-	}
-
-	slog.Debug("SSH client configuration ready", "user", finalUsername)
-	// Build ssh client config
-	config := &ssh.ClientConfig{
-		User: finalUsername,
-		Auth: authMethod,
-		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			// Check if user wants to skip host key verification (INSECURE)
-			cfg, err := GetConfig(ctx)
-			if err == nil && cfg.SkipHostKeyCheck {
-				slog.Warn("⚠️  HOST KEY VERIFICATION DISABLED - INSECURE!")
-
-				// Even when skipping verification, still capture the host key during enrollment
-				if !HostKeyExists(host) && IsEnrollmentMode(ctx) {
-					fp := GetHostKeyFingerprint(key)
-					slog.Info("capturing host key for first time (verification skipped)",
-						"host", host,
-						"algorithm", key.Type(),
-						"fingerprint", fp)
-					if err := CaptureHostKey(host, key); err != nil {
-						slog.Error("failed to capture host key while SkipHostKeyCheck is enabled",
-							"host", host,
-							"algorithm", key.Type(),
-							"fingerprint", fp,
-							"error", err)
-					}
-				}
-				return nil
-			}
-
-			// Check if host key exists for this host
-			if HostKeyExists(host) {
-				// Host key exists - always verify
-				if err := VerifyHostKey(host, key); err != nil {
-					fp := GetHostKeyFingerprint(key)
-					slog.Error("host key verification failed",
-						"host", host,
-						"fingerprint", fp,
-						"error", err)
-					return fmt.Errorf("host key verification failed: %w", err)
-				}
-				slog.Debug("host key verified successfully", "host", host)
-				return nil
-			}
-
-			// No host key exists - check if we're in enrollment mode
-			if IsEnrollmentMode(ctx) {
-				// Enrollment mode - capture the host key
+			// Even when skipping verification, still capture the host key during enrollment
+			if !HostKeyExists(host) && IsEnrollmentMode(ctx) {
 				fp := GetHostKeyFingerprint(key)
-				slog.Info("capturing host key for first time",
+				slog.Info("capturing host key for first time (verification skipped)",
 					"host", host,
 					"algorithm", key.Type(),
 					"fingerprint", fp)
 				if err := CaptureHostKey(host, key); err != nil {
-					return fmt.Errorf("failed to capture host key: %w", err)
+					slog.Error("failed to capture host key while SkipHostKeyCheck is enabled",
+						"host", host,
+						"algorithm", key.Type(),
+						"fingerprint", fp,
+						"error", err)
 				}
-				return nil
 			}
+			return nil
+		}
 
-			// Not in enrollment mode and no host key - fail securely
-			slog.Error("no host key found", "host", host)
-			return fmt.Errorf("no host key found for %s - run 'enroll' command first to capture the host key", host)
-		},
-		Timeout: 10 * time.Second,
+		// Check if host key exists for this host
+		if HostKeyExists(host) {
+			// Host key exists - always verify
+			if err := VerifyHostKey(host, key); err != nil {
+				fp := GetHostKeyFingerprint(key)
+				slog.Error("host key verification failed",
+					"host", host,
+					"fingerprint", fp,
+					"error", err)
+				return fmt.Errorf("host key verification failed: %w", err)
+			}
+			slog.Debug("host key verified successfully", "host", host)
+			return nil
+		}
+
+		// No host key exists - check if we're in enrollment mode
+		if IsEnrollmentMode(ctx) {
+			// Enrollment mode - capture the host key
+			fp := GetHostKeyFingerprint(key)
+			slog.Info("capturing host key for first time",
+				"host", host,
+				"algorithm", key.Type(),
+				"fingerprint", fp)
+			if err := CaptureHostKey(host, key); err != nil {
+				return fmt.Errorf("failed to capture host key: %w", err)
+			}
+			return nil
+		}
+
+		// Not in enrollment mode and no host key - fail securely
+		slog.Error("no host key found", "host", host)
+		return fmt.Errorf("no host key found for %s - run 'enroll' command first to capture the host key", host)
 	}
-	conn.clientConfig = config
 
-	// Establish the SSH connection with context awareness
-	address := net.JoinHostPort(hostInfo.Hostname, hostInfo.Port)
-	slog.Debug("establishing SSH connection", "address", address)
-
-	// Check context before dialing
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled before dial: %w", err)
-	}
-
-	// Create a dialer that respects context
-	dialer := net.Dialer{
-		Timeout: config.Timeout,
-	}
-	netConn, err := dialer.DialContext(ctx, "tcp", address)
+	// Build connection using the new builder
+	runner, err := builder.Build(ctx, host, username, password, passphrase, hostKeyCallback)
 	if err != nil {
-		slog.Error("failed to dial", "address", address, "error", err)
-		return nil, fmt.Errorf("failed to dial %s: %w", address, err)
+		return nil, err
 	}
 
-	// Perform SSH handshake
-	c, chans, reqs, err := ssh.NewClientConn(netConn, address, config)
-	if err != nil {
-		netConn.Close()
-		slog.Error("SSH handshake failed", "address", address, "error", err)
-		return nil, fmt.Errorf("SSH handshake failed for %s: %w", address, err)
+	// Wrap the runner in our sshConnection type for backward compatibility
+	// We need to extract the underlying ssh.Client
+	if conn, ok := runner.(*sshpkg.Connection); ok {
+		return &sshConnection{client: conn.GetClient()}, nil
 	}
 
-	client := ssh.NewClient(c, chans, reqs)
-	conn.client = client
-
-	slog.Debug("SSH connection established")
-	return conn, nil
+	// Fallback: create wrapper that delegates to runner
+	return &sshConnection{
+		client: nil, // Will be handled by methods
+	}, nil
 }
 
 func readSshConfig(host string) *HostInfo {

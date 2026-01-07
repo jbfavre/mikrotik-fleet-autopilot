@@ -264,3 +264,87 @@ func BenchmarkSshManager_GetUser(b *testing.B) {
 		_ = manager.GetUser()
 	}
 }
+
+func TestSshManager_String(t *testing.T) {
+	tests := []struct {
+		name       string
+		user       string
+		password   string
+		passphrase string
+		wantUser   string
+		wantPass   string
+		wantPhrase string
+	}{
+		{
+			name:       "all credentials set",
+			user:       "admin",
+			password:   "secretpassword123",
+			passphrase: "keypassphrase456",
+			wantUser:   "admin",
+			wantPass:   "yes (hidden)",
+			wantPhrase: "yes (hidden)",
+		},
+		{
+			name:       "password only",
+			user:       "testuser",
+			password:   "secretpass123",
+			passphrase: "",
+			wantUser:   "testuser",
+			wantPass:   "yes (hidden)",
+			wantPhrase: "no",
+		},
+		{
+			name:       "passphrase only",
+			user:       "keyuser",
+			password:   "",
+			passphrase: "mykeypass",
+			wantUser:   "keyuser",
+			wantPass:   "no",
+			wantPhrase: "yes (hidden)",
+		},
+		{
+			name:       "no credentials",
+			user:       "emptyuser",
+			password:   "",
+			passphrase: "",
+			wantUser:   "emptyuser",
+			wantPass:   "no",
+			wantPhrase: "no",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := NewSshManager(tt.user, tt.password, tt.passphrase)
+			result := manager.String()
+
+			// Verify the format
+			if !strings.HasPrefix(result, "SshManager{") {
+				t.Errorf("String() output doesn't start with 'SshManager{': %s", result)
+			}
+
+			// Verify user is present
+			if !strings.Contains(result, "user:"+tt.wantUser) {
+				t.Errorf("String() output doesn't contain 'user:%s': %s", tt.wantUser, result)
+			}
+
+			// Verify password status
+			if !strings.Contains(result, "password:"+tt.wantPass) {
+				t.Errorf("String() output doesn't contain 'password:%s': %s", tt.wantPass, result)
+			}
+
+			// Verify passphrase status
+			if !strings.Contains(result, "passphrase:"+tt.wantPhrase) {
+				t.Errorf("String() output doesn't contain 'passphrase:%s': %s", tt.wantPhrase, result)
+			}
+
+			// Critical: verify actual credentials are NOT in the output
+			if tt.password != "" && strings.Contains(result, tt.password) {
+				t.Errorf("String() leaked password! Output: %s", result)
+			}
+			if tt.passphrase != "" && strings.Contains(result, tt.passphrase) {
+				t.Errorf("String() leaked passphrase! Output: %s", result)
+			}
+		})
+	}
+}

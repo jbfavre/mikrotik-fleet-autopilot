@@ -214,7 +214,7 @@ func TestNewSsh_NoAuthenticationMethods(t *testing.T) {
 		t.Error("newSsh() expected error for no authentication, got nil")
 	}
 
-	expectedErr := "no authentication method provided (need password or SSH key with passphrase)"
+	expectedErr := "failed to build auth methods: no authentication method provided (need password or SSH key with passphrase)"
 	if err != nil && err.Error() != expectedErr {
 		t.Errorf("newSsh() error = %q, want %q", err.Error(), expectedErr)
 	}
@@ -245,8 +245,8 @@ func TestNewSsh_PassphraseWithoutKey(t *testing.T) {
 		t.Error("newSsh() expected error for invalid key, got nil")
 	}
 
-	// Should fail because parseSshPrivateKey returns nil
-	expectedErr := "open : no such file or directory"
+	// Should fail because no key file is provided
+	expectedErr := "failed to build auth methods: no authentication method provided (need password or SSH key with passphrase)"
 	if err != nil && err.Error() != expectedErr {
 		t.Errorf("newSsh() error = %q, want %q", err.Error(), expectedErr)
 	}

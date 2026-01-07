@@ -49,3 +49,18 @@ func CreateConnection(ctx context.Context, host string) (SshRunner, error) {
 func (m *SshManager) GetUser() string {
 	return m.user
 }
+
+// String implements fmt.Stringer interface to prevent accidental credential leaks in logs
+// This ensures that if the SshManager is logged, credentials are redacted
+func (m *SshManager) String() string {
+	hasPassword := "no"
+	if m.password != "" {
+		hasPassword = "yes (hidden)"
+	}
+	hasPassphrase := "no"
+	if m.passphrase != "" {
+		hasPassphrase = "yes (hidden)"
+	}
+	return fmt.Sprintf("SshManager{user:%s, password:%s, passphrase:%s}",
+		m.user, hasPassword, hasPassphrase)
+}

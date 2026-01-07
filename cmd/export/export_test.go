@@ -12,7 +12,7 @@ import (
 	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
 )
 
-// MockSshRunner is a mock implementation of SshRunner for testing
+// MockSshRunner is a mock implementation of ssh.Runner for testing
 type MockSshRunner struct {
 	CloseFunc                func() error
 	IsAlreadyClosedErrorFunc func(err error) bool
@@ -42,11 +42,11 @@ func (m *MockSshRunner) Run(cmd string) (string, error) {
 
 // MockSshManager is a mock implementation of SshManager for testing
 type MockSshManager struct {
-	CreateConnectionFunc func(host string) (core.SshRunner, error)
+	CreateConnectionFunc func(host string) (sshpkg.Runner, error)
 	GetUserFunc          func() string
 }
 
-func (m *MockSshManager) CreateConnection(host string) (core.SshRunner, error) {
+func (m *MockSshManager) CreateConnection(host string) (sshpkg.Runner, error) {
 	if m.CreateConnectionFunc != nil {
 		return m.CreateConnectionFunc(host)
 	}
@@ -153,7 +153,7 @@ add name=bridge1`,
 
 			// Mock SSH connection using the factory pattern
 			originalFactory := sshConnectionFactory
-			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				return &MockSshRunner{
 					RunFunc: func(cmd string) (string, error) {
 						executedCmd = cmd
@@ -306,7 +306,7 @@ add name=admin password=secret`,
 			originalFactory := sshConnectionFactory
 			defer func() { sshConnectionFactory = originalFactory }()
 
-			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				if tt.sshError != nil && strings.Contains(tt.sshError.Error(), "connection refused") {
 					return nil, tt.sshError
 				}
@@ -412,7 +412,7 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 
 			// Mock SSH connection
 			originalFactory := sshConnectionFactory
-			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				return &MockSshRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "/interface bridge\nadd name=bridge1", nil
@@ -473,7 +473,7 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 func TestExport_SSHConnectionFactoryError(t *testing.T) {
 	// Mock SSH connection factory to return error
 	originalFactory := sshConnectionFactory
-	sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+	sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 		return nil, fmt.Errorf("SSH connection failed: timeout")
 	}
 	defer func() {
@@ -513,7 +513,7 @@ func TestExport_CloseError(t *testing.T) {
 
 	// Mock SSH connection with close error
 	originalFactory := sshConnectionFactory
-	sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+	sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 		return &MockSshRunner{
 			RunFunc: func(cmd string) (string, error) {
 				return "/interface bridge\nadd name=bridge1", nil

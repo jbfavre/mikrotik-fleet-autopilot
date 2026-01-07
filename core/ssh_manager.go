@@ -3,13 +3,12 @@ package core
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
 )
 
-// SshManager encapsulates SSH credentials and provides SSH connections
-// without exposing credentials to callers
+// SshManager encapsulates SSH credentials and provides them
+// to the ssh package without exposing credentials to callers
 type SshManager struct {
 	user       string
 	password   string
@@ -26,41 +25,19 @@ func NewSshManager(user, password, passphrase string) *SshManager {
 	}
 }
 
-// CreateConnection retrieves the SshManager from context and creates a new SSH connection
-// to the specified host (automatically appending :22 port if not present).
-// This is the standard way to create SSH connections in subcommands.
-func CreateConnection(ctx context.Context, host string) (SshRunner, error) {
-	manager, err := GetSshManager(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get SSH manager from context: %w", err)
-	}
-
-	// Use the ssh package directly for better separation of concerns
-	slog.Debug("creating SSH connection", "host", host, "user", manager.user)
-
-	// Create the connection builder
-	configReader := &sshpkg.DefaultConfigReader{}
-	authProvider := &sshpkg.DefaultAuthProvider{}
-	builder := sshpkg.NewConnectionBuilder(configReader, authProvider)
-
-	// Create host key callback using the adapter
-	hostKeyManager := GetHostKeyManager()
-	hostKeyCallback := sshpkg.BuildHostKeyCallback(ctx, host, hostKeyManager)
-
-	// Build the connection
-	conn, err := builder.Build(ctx, host, manager.user, manager.password, manager.passphrase, hostKeyCallback)
-	if err != nil {
-		slog.Error("failed to create SSH connection", "host", host, "error", err)
-		return nil, fmt.Errorf("failed to create SSH connection to %s: %w", host, err)
-	}
-
-	return conn, nil
-}
-
-// GetUser returns the username (non-sensitive information)
-// This can be useful for logging purposes
+// GetUser returns the username (implements ssh.CredentialsProvider)
 func (m *SshManager) GetUser() string {
 	return m.user
+}
+
+// GetPassword returns the password (implements ssh.CredentialsProvider)
+func (m *SshManager) GetPassword() string {
+	return m.password
+}
+
+// GetPassphrase returns the passphrase (implements ssh.CredentialsProvider)
+func (m *SshManager) GetPassphrase() string {
+	return m.passphrase
 }
 
 // String implements fmt.Stringer interface to prevent accidental credential leaks in logs
@@ -76,4 +53,9 @@ func (m *SshManager) String() string {
 	}
 	return fmt.Sprintf("SshManager{user:%s, password:%s, passphrase:%s}",
 		m.user, hasPassword, hasPassphrase)
+}
+
+// GetSshCredentialsProvider returns a CredentialsProvider for use by the ssh package
+func GetSshCredentialsProvider(ctx context.Context) (sshpkg.CredentialsProvider, error) {
+	return GetSshManager(ctx)
 }

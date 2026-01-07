@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
 )
 
 // ContextKey is a custom type for context keys to avoid collisions
@@ -19,7 +21,7 @@ const (
 	// SshManagerKey is the context key for storing SshManager
 	SshManagerKey ContextKey = "ssh_manager"
 	// EnrollmentModeKey is the context key for storing enrollment mode
-	EnrollmentModeKey ContextKey = "enrollment_mode"
+	EnrollmentModeKey ContextKey = "enrollment"
 )
 
 // GetConfig extracts *config.Config from context
@@ -31,9 +33,9 @@ func GetConfig(ctx context.Context) (*Config, error) {
 	return cfg, nil
 }
 
-// GetSshManager extracts *SshManager from context
-func GetSshManager(ctx context.Context) (*SshManager, error) {
-	manager, ok := ctx.Value(SshManagerKey).(*SshManager)
+// GetSshManager extracts ssh.SshManager from context
+func GetSshManager(ctx context.Context) (sshpkg.SshManager, error) {
+	manager, ok := ctx.Value(SshManagerKey).(sshpkg.SshManager)
 	if !ok {
 		return nil, fmt.Errorf("invalid ssh manager type or not found in context")
 	}

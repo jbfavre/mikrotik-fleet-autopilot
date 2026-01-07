@@ -52,3 +52,10 @@ type HostKeyCallback func(hostname string, remote interface{}, key ssh.PublicKey
 type ConnectionBuilder interface {
 	Build(ctx context.Context, host, username, password, passphrase string, hostKeyCallback HostKeyCallback) (Runner, error)
 }
+
+// CredentialsProvider provides SSH credentials for connection establishment
+type CredentialsProvider interface {
+	GetUser() string
+	GetPassword() string
+	GetPassphrase() string
+}

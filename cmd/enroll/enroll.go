@@ -286,7 +286,7 @@ func enroll(ctx context.Context, host string) error {
 }
 
 // applyConfigFile reads and executes RouterOS commands from a file
-func applyConfigFile(conn core.SshRunner, filePath string) error {
+func applyConfigFile(conn sshpkg.Runner, filePath string) error {
 	// Read file
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -323,7 +323,7 @@ func applyConfigFile(conn core.SshRunner, filePath string) error {
 }
 
 // setRouterIdentity sets the system identity (hostname) on the router
-func setRouterIdentity(conn core.SshRunner, hostname string) error {
+func setRouterIdentity(conn sshpkg.Runner, hostname string) error {
 	cmd := fmt.Sprintf("/system identity set name=%s", hostname)
 	slog.Debug("setting identity with command", "hostname", hostname, "command", cmd)
 	_, err := conn.Run(cmd)

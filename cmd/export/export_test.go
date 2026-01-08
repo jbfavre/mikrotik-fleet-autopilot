@@ -141,19 +141,13 @@ add name=bridge1`,
 			}
 			defer func() {
 				_ = os.RemoveAll(tmpDir)
-			}() // Set output directory for this test
-			originalOutputDir := outputDir
-			outputDir = tmpDir
-			defer func() {
-				outputDir = originalOutputDir
 			}()
 
 			// Track which command was executed
 			var executedCmd string
 
 			// Mock SSH connection using the factory pattern
-			originalFactory := sshConnectionFactory
-			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				return &MockSshRunner{
 					RunFunc: func(cmd string) (string, error) {
 						executedCmd = cmd
@@ -164,27 +158,27 @@ add name=bridge1`,
 					},
 				}, nil
 			}
-			defer func() {
-				sshConnectionFactory = originalFactory
-			}()
 
-			// Set showSensitive flag
-			originalShowSensitive := showSensitive
-			showSensitive = tt.showSensitive
-			defer func() {
-				showSensitive = originalShowSensitive
-			}()
+			// Build test configuration
+			cfg := Config{
+				ShowSensitive: tt.showSensitive,
+				OutputDir:     tmpDir,
+			}
+
+			deps := Dependencies{
+				SSHConnectionFactory: mockSSHFactory,
+			}
 
 			// Create config and context with mock SSH manager
-			cfg := &core.Config{
+			coreCfg := &core.Config{
 				Hosts: []string{tt.host},
 				User:  "admin",
 			}
-			ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+			ctx := context.WithValue(context.Background(), core.ConfigKey, coreCfg)
 			ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
 
 			// Call the function
-			err = export(ctx, tt.host, "")
+			err = export(ctx, tt.host, "", cfg, deps)
 
 			// Verify error expectations
 			if (err != nil) != tt.wantErr {
@@ -241,112 +235,6 @@ add name=bridge1`,
 					if mode != expectedMode {
 						t.Errorf("file permissions = %o, want %o", mode, expectedMode)
 					}
-				}
-			}
-		})
-	}
-}
-
-func TestExportConfigWrapper(t *testing.T) {
-	tests := []struct {
-		name                string
-		host                string
-		exportOutputDir     string
-		exportShowSensitive bool
-		sshOutput           string
-		sshError            error
-		wantErr             bool
-		errContains         string
-	}{
-		{
-			name:                "Successful export with wrapper",
-			host:                "192.168.1.1",
-			exportOutputDir:     t.TempDir(),
-			exportShowSensitive: false,
-			sshOutput: `/interface bridge
-add name=bridge1
-/system identity
-set name=test-router`,
-			wantErr: false,
-		},
-		{
-			name:                "Successful export with sensitive data",
-			host:                "192.168.1.2",
-			exportOutputDir:     t.TempDir(),
-			exportShowSensitive: true,
-			sshOutput: `/interface bridge
-add name=bridge1
-/user
-add name=admin password=secret`,
-			wantErr: false,
-		},
-		{
-			name:                "SSH connection error",
-			host:                "192.168.1.3",
-			exportOutputDir:     t.TempDir(),
-			exportShowSensitive: false,
-			sshError:            fmt.Errorf("connection refused"),
-			wantErr:             true,
-			errContains:         "failed to create SSH connection",
-		},
-		{
-			name:                "Export command error",
-			host:                "192.168.1.4",
-			exportOutputDir:     t.TempDir(),
-			exportShowSensitive: false,
-			sshError:            fmt.Errorf("export failed"),
-			wantErr:             true,
-			errContains:         "failed to export configuration",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Mock SSH connection factory
-			originalFactory := sshConnectionFactory
-			defer func() { sshConnectionFactory = originalFactory }()
-
-			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
-				if tt.sshError != nil && strings.Contains(tt.sshError.Error(), "connection refused") {
-					return nil, tt.sshError
-				}
-
-				return &MockSshRunner{
-					RunFunc: func(cmd string) (string, error) {
-						if tt.sshError != nil {
-							return "", tt.sshError
-						}
-						return tt.sshOutput, nil
-					},
-					CloseFunc: func() error {
-						return nil
-					},
-				}, nil
-			}
-
-			// Call the wrapper function
-			ctx := context.Background()
-			err := ExportConfig(ctx, tt.host, tt.exportOutputDir, tt.exportShowSensitive, "")
-
-			// Verify error expectations
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ExportConfig() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantErr && tt.errContains != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("ExportConfig() error = %v, should contain %q", err, tt.errContains)
-				}
-			}
-
-			// Verify file was created on success
-			if !tt.wantErr {
-				// Use smart filename extraction based on host type
-				hostInfo := sshpkg.ParseHost(tt.host)
-				expectedFile := filepath.Join(tt.exportOutputDir, hostInfo.ShortName+".rsc")
-				if _, err := os.Stat(expectedFile); os.IsNotExist(err) {
-					t.Errorf("Expected file %s was not created", expectedFile)
 				}
 			}
 		})
@@ -411,8 +299,7 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 			}()
 
 			// Mock SSH connection
-			originalFactory := sshConnectionFactory
-			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				return &MockSshRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "/interface bridge\nadd name=bridge1", nil
@@ -422,34 +309,27 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 					},
 				}, nil
 			}
-			defer func() {
-				sshConnectionFactory = originalFactory
-			}()
 
-			// Set output directory
-			originalOutputDir := outputDir
-			outputDir = tmpDir
-			defer func() {
-				outputDir = originalOutputDir
-			}()
+			// Build test configuration
+			cfg := Config{
+				ShowSensitive: tt.showSensitive,
+				OutputDir:     tmpDir,
+			}
 
-			// Set showSensitive flag
-			originalShowSensitive := showSensitive
-			showSensitive = tt.showSensitive
-			defer func() {
-				showSensitive = originalShowSensitive
-			}()
+			deps := Dependencies{
+				SSHConnectionFactory: mockSSHFactory,
+			}
 
 			// Create config and context
-			cfg := &core.Config{
+			coreCfg := &core.Config{
 				Hosts: []string{tt.host},
 				User:  "admin",
 			}
-			ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+			ctx := context.WithValue(context.Background(), core.ConfigKey, coreCfg)
 			ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
 
 			// Call export
-			err = export(ctx, tt.host, tt.preferredFilename)
+			err = export(ctx, tt.host, tt.preferredFilename, cfg, deps)
 			if err != nil {
 				t.Fatalf("export() failed: %v", err)
 			}
@@ -472,24 +352,29 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 // TestExport_SSHConnectionFactoryError tests error handling when SSH connection fails
 func TestExport_SSHConnectionFactoryError(t *testing.T) {
 	// Mock SSH connection factory to return error
-	originalFactory := sshConnectionFactory
-	sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
+	mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
 		return nil, fmt.Errorf("SSH connection failed: timeout")
 	}
-	defer func() {
-		sshConnectionFactory = originalFactory
-	}()
+
+	cfg := Config{
+		ShowSensitive: false,
+		OutputDir:     t.TempDir(),
+	}
+
+	deps := Dependencies{
+		SSHConnectionFactory: mockSSHFactory,
+	}
 
 	// Create config and context
-	cfg := &core.Config{
+	coreCfg := &core.Config{
 		Hosts: []string{"test-host"},
 		User:  "admin",
 	}
-	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+	ctx := context.WithValue(context.Background(), core.ConfigKey, coreCfg)
 	ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
 
 	// Call export - should fail
-	err := export(ctx, "test-host", "")
+	err := export(ctx, "test-host", "", cfg, deps)
 	if err == nil {
 		t.Error("export() should fail when SSH connection cannot be established")
 	}
@@ -512,8 +397,7 @@ func TestExport_CloseError(t *testing.T) {
 	closeCalled := false
 
 	// Mock SSH connection with close error
-	originalFactory := sshConnectionFactory
-	sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
+	mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
 		return &MockSshRunner{
 			RunFunc: func(cmd string) (string, error) {
 				return "/interface bridge\nadd name=bridge1", nil
@@ -524,25 +408,25 @@ func TestExport_CloseError(t *testing.T) {
 			},
 		}, nil
 	}
-	defer func() {
-		sshConnectionFactory = originalFactory
-	}()
 
-	originalOutputDir := outputDir
-	outputDir = tmpDir
-	defer func() {
-		outputDir = originalOutputDir
-	}()
+	cfg := Config{
+		ShowSensitive: false,
+		OutputDir:     tmpDir,
+	}
 
-	cfg := &core.Config{
+	deps := Dependencies{
+		SSHConnectionFactory: mockSSHFactory,
+	}
+
+	coreCfg := &core.Config{
 		Hosts: []string{"test-host"},
 		User:  "admin",
 	}
-	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+	ctx := context.WithValue(context.Background(), core.ConfigKey, coreCfg)
 	ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
 
 	// Export should succeed even if close fails (error is silently ignored)
-	err = export(ctx, "test-host", "")
+	err = export(ctx, "test-host", "", cfg, deps)
 	if err != nil {
 		t.Errorf("export() should succeed even with close error, got: %v", err)
 	}

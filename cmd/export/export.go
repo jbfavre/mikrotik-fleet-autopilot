@@ -13,12 +13,16 @@ import (
 	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
-var showSensitive bool
-var outputDir string
+// Config holds all export configuration options
+type Config struct {
+	ShowSensitive bool
+	OutputDir     string
+}
 
-// sshConnectionFactory is the factory function for creating SSH connections
-// This can be overridden in tests to inject mock SSH manager
-var sshConnectionFactory = core.CreateConnection
+// Dependencies holds injectable dependencies for testing
+type Dependencies struct {
+	SSHConnectionFactory func(context.Context, string) (sshpkg.Runner, error)
+}
 
 var Command = []*cli.Command{
 	{
@@ -26,29 +30,37 @@ var Command = []*cli.Command{
 		Usage: "Export MikroTik router configuration",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
-				Name:        "show-sensitive",
-				Value:       false,
-				Usage:       "Include sensitive information in the export",
-				Destination: &showSensitive,
+				Name:  "show-sensitive",
+				Value: false,
+				Usage: "Include sensitive information in the export",
 			},
 			&cli.StringFlag{
-				Name:        "output-dir",
-				Value:       ".",
-				Usage:       "Directory where to save the exported configuration",
-				Destination: &outputDir,
+				Name:  "output-dir",
+				Value: ".",
+				Usage: "Directory where to save the exported configuration",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg, err := core.GetConfig(ctx)
+			coreCfg, err := core.GetConfig(ctx)
 			if err != nil {
 				slog.Debug("failed to get global config", "error", err)
 				return err
 			}
 
+			// Build export configuration from CLI flags
+			exportCfg := Config{
+				ShowSensitive: cmd.Bool("show-sensitive"),
+				OutputDir:     cmd.String("output-dir"),
+			}
+
+			deps := Dependencies{
+				SSHConnectionFactory: core.CreateConnection,
+			}
+
 			// Iterate over all hosts
 			var lastErr error
-			for _, host := range cfg.Hosts {
-				if err := export(ctx, host, ""); err != nil { // Empty string = derive from host
+			for _, host := range coreCfg.Hosts {
+				if err := export(ctx, host, "", exportCfg, deps); err != nil { // Empty preferred filename = derive automatically
 					lastErr = err
 					// Continue with other hosts even if one fails
 				}
@@ -58,23 +70,20 @@ var Command = []*cli.Command{
 	},
 }
 
-// ExportConfig is a public wrapper that exports configuration for a single host
+// Export is a public wrapper that exports configuration for a single host
 // This function is intended to be called from other subcommands like enroll
-func ExportConfig(ctx context.Context, host string, exportOutputDir string, exportShowSensitive bool, preferredFilename string) error {
-	// Temporarily override package-level flags for programmatic calls
-	originalOutputDir := outputDir
-	originalShowSensitive := showSensitive
-	outputDir = exportOutputDir
-	showSensitive = exportShowSensitive
-	defer func() {
-		outputDir = originalOutputDir
-		showSensitive = originalShowSensitive
-	}()
-
-	return export(ctx, host, preferredFilename)
+func Export(ctx context.Context, host string, exportOutputDir string, exportShowSensitive bool, preferredFilename string) error {
+	cfg := Config{
+		ShowSensitive: exportShowSensitive,
+		OutputDir:     exportOutputDir,
+	}
+	deps := Dependencies{
+		SSHConnectionFactory: core.CreateConnection,
+	}
+	return export(ctx, host, preferredFilename, cfg, deps)
 }
 
-func export(ctx context.Context, host string, preferredFilename string) error {
+func export(ctx context.Context, host string, preferredFilename string, cfg Config, deps Dependencies) error {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)
@@ -83,7 +92,7 @@ func export(ctx context.Context, host string, preferredFilename string) error {
 	slog.Info("exporting configuration", "host", host)
 
 	slog.Debug("initializing SSH connection", "host", host)
-	conn, err := sshConnectionFactory(ctx, host)
+	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
 		return fmt.Errorf("failed to create SSH connection: %w", err)
@@ -93,10 +102,10 @@ func export(ctx context.Context, host string, preferredFilename string) error {
 	}()
 
 	sshCmd := "/export terse"
-	if showSensitive {
+	if cfg.ShowSensitive {
 		sshCmd += " show-sensitive"
 	}
-	slog.Debug("executing export command", "command", sshCmd, "show-sensitive", showSensitive)
+	slog.Debug("executing export command", "command", sshCmd, "show-sensitive", cfg.ShowSensitive)
 
 	result, err := conn.Run(sshCmd)
 	if err != nil {
@@ -118,7 +127,7 @@ func export(ctx context.Context, host string, preferredFilename string) error {
 		hostInfo := sshpkg.ParseHost(host)
 		filename = fmt.Sprintf("%s.rsc", hostInfo.ShortName)
 	}
-	filepath := filepath.Join(outputDir, filename)
+	filepath := filepath.Join(cfg.OutputDir, filename)
 
 	slog.Debug("writing configuration", "file", filepath, "size", len(result))
 	if err := os.WriteFile(filepath, []byte(result), 0644); err != nil {

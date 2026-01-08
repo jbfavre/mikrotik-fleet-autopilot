@@ -194,26 +194,12 @@ func TestUpdates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore original values
-			originalApply := updatesApply
-			originalFactory := sshConnectionFactory
-			originalReconnectDelay := reconnectDelay
-			defer func() {
-				updatesApply = originalApply
-				sshConnectionFactory = originalFactory
-				reconnectDelay = originalReconnectDelay
-			}()
-
-			// Set test values
-			updatesApply = tt.applyUpdates
-			reconnectDelay = 10 * time.Millisecond // Speed up tests
-
 			// Track commands executed
 			var executedCommands []string
 			var connectionCount int
 
 			// Mock SSH connection factory
-			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				connectionCount++
 
 				if tt.sshError != nil {
@@ -246,16 +232,26 @@ func TestUpdates(t *testing.T) {
 				}, nil
 			}
 
+			// Build test configuration
+			cfg := Config{
+				UpdatesApply: tt.applyUpdates,
+			}
+
+			deps := Dependencies{
+				SSHConnectionFactory: mockSSHFactory,
+				ReconnectDelay:       10 * time.Millisecond, // Speed up tests
+			}
+
 			// Create context with mock manager
-			cfg := &core.Config{
+			coreCfg := &core.Config{
 				Hosts: []string{tt.host},
 				User:  "admin",
 			}
-			ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+			ctx := context.WithValue(context.Background(), core.ConfigKey, coreCfg)
 			ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
 
 			// Execute the function
-			err := updates(ctx, tt.host)
+			err := updates(ctx, tt.host, cfg, deps)
 
 			// Verify error expectations
 			if (err != nil) != tt.wantErr {
@@ -771,17 +767,6 @@ func TestCheckCurrentStatus(t *testing.T) {
 }
 
 func TestApplyUpdate(t *testing.T) {
-	// Save original values and restore after test
-	originalDelay := reconnectDelay
-	originalFactory := sshConnectionFactory
-	defer func() {
-		reconnectDelay = originalDelay
-		sshConnectionFactory = originalFactory
-	}()
-
-	// Set a minimal delay for testing
-	reconnectDelay = 1 * time.Millisecond
-
 	tests := []struct {
 		name              string
 		updateCmd         string
@@ -830,7 +815,7 @@ func TestApplyUpdate(t *testing.T) {
 			}
 
 			// Mock the SSH connection factory
-			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				reconnectAttempts++
 				if reconnectAttempts < tt.reconnectAttempts {
 					return nil, fmt.Errorf("connection failed")
@@ -845,9 +830,14 @@ func TestApplyUpdate(t *testing.T) {
 				}, nil
 			}
 
+			deps := Dependencies{
+				SSHConnectionFactory: mockSSHFactory,
+				ReconnectDelay:       1 * time.Millisecond, // Speed up tests
+			}
+
 			ctx := context.WithValue(context.Background(), core.SshManagerKey, &MockSshManager{})
 
-			newConn, err := applyUpdate(initialMock, ctx, "test-router", tt.updateCmd, "Test update")
+			newConn, err := applyUpdate(initialMock, ctx, "test-router", tt.updateCmd, "Test update", deps)
 
 			if tt.wantErr {
 				if err == nil {
@@ -946,17 +936,6 @@ func TestFormatAndDisplayResult(t *testing.T) {
 }
 
 func TestApplyComponentUpdate(t *testing.T) {
-	// Save original values and restore after test
-	originalDelay := reconnectDelay
-	originalFactory := sshConnectionFactory
-	defer func() {
-		reconnectDelay = originalDelay
-		sshConnectionFactory = originalFactory
-	}()
-
-	// Set a minimal delay for testing
-	reconnectDelay = 1 * time.Millisecond
-
 	tests := []struct {
 		name                string
 		component           string
@@ -1034,7 +1013,7 @@ func TestApplyComponentUpdate(t *testing.T) {
 			}
 
 			// Mock the SSH connection factory to return a new mock after "reconnection"
-			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				return &MockSshRunner{
 					RunFunc: func(cmd string) (string, error) {
 						if cmd == "/system/package/update/check-for-updates" {
@@ -1051,9 +1030,14 @@ func TestApplyComponentUpdate(t *testing.T) {
 				}, nil
 			}
 
+			deps := Dependencies{
+				SSHConnectionFactory: mockSSHFactory,
+				ReconnectDelay:       1 * time.Millisecond, // Speed up tests
+			}
+
 			ctx := context.WithValue(context.Background(), core.SshManagerKey, &MockSshManager{})
 
-			err := applyComponentUpdate(initialMock, ctx, "test-router", tt.component, tt.updateCmd, tt.checkBoth)
+			err := applyComponentUpdate(initialMock, ctx, "test-router", tt.component, tt.updateCmd, tt.checkBoth, deps)
 
 			if tt.wantErr {
 				if err == nil {
@@ -1073,115 +1057,6 @@ func TestApplyComponentUpdate(t *testing.T) {
 
 			if !closeCalled {
 				t.Errorf("Connection was not closed")
-			}
-		})
-	}
-}
-
-func TestApplyUpdatesWrapper(t *testing.T) {
-	tests := []struct {
-		name               string
-		host               string
-		osInstalled        string
-		osAvailable        string
-		boardInstalled     string
-		boardAvailable     string
-		hasBoard           bool
-		checkForUpdatesOut string
-		routerboardOut     string
-		sshError           error
-		wantErr            bool
-		errContains        string
-	}{
-		{
-			name:               "No updates available",
-			host:               "192.168.1.2",
-			osInstalled:        "7.11",
-			osAvailable:        "7.11",
-			boardInstalled:     "7.11",
-			boardAvailable:     "7.11",
-			hasBoard:           true,
-			checkForUpdatesOut: "status: System is already up to date",
-			routerboardOut: `  routerboard: yes
-  current-firmware: 7.11
-  upgrade-firmware: 7.11`,
-			wantErr: false,
-		},
-		{
-			name:        "SSH connection error",
-			host:        "192.168.1.3",
-			sshError:    fmt.Errorf("connection refused"),
-			wantErr:     true,
-			errContains: "failed to create SSH connection",
-		},
-		{
-			name:               "Update check command error",
-			host:               "192.168.1.4",
-			osInstalled:        "7.10",
-			osAvailable:        "7.10",
-			checkForUpdatesOut: "",
-			sshError:           fmt.Errorf("command failed"),
-			wantErr:            true,
-			errContains:        "failed to run SSH command",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Mock SSH connection factory
-			originalFactory := sshConnectionFactory
-			defer func() { sshConnectionFactory = originalFactory }()
-
-			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
-				if tt.sshError != nil && strings.Contains(tt.sshError.Error(), "connection refused") {
-					return nil, tt.sshError
-				}
-
-				return &MockSshRunner{
-					RunFunc: func(cmd string) (string, error) {
-						if tt.sshError != nil && cmd == "/system package update check-for-updates once" {
-							return "", tt.sshError
-						}
-
-						if strings.Contains(cmd, "check-for-updates") {
-							if tt.checkForUpdatesOut == "" && tt.sshError != nil {
-								return "", tt.sshError
-							}
-							return fmt.Sprintf(`installed-version: %s
-latest-version: %s
-%s`, tt.osInstalled, tt.osAvailable, tt.checkForUpdatesOut), nil
-						}
-
-						if strings.Contains(cmd, "/system/routerboard/print") {
-							if !tt.hasBoard {
-								return "", fmt.Errorf("no routerboard")
-							}
-							return tt.routerboardOut, nil
-						}
-
-						// For update commands
-						return "", nil
-					},
-					CloseFunc: func() error {
-						return nil
-					},
-				}, nil
-			}
-
-			// Call the wrapper function
-			ctx := context.Background()
-			err := ApplyUpdates(ctx, tt.host)
-
-			// Verify error expectations
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ApplyUpdates() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantErr && tt.errContains != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("ApplyUpdates() error = %v, should contain %q", err, tt.errContains)
-				}
 			}
 		})
 	}

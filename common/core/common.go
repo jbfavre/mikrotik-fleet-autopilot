@@ -20,8 +20,8 @@ const (
 	ConfigKey ContextKey = "config"
 	// SshManagerKey is the context key for storing SshManager
 	SshManagerKey ContextKey = "ssh_manager"
-	// EnrollmentModeKey is the context key for storing enrollment mode
-	EnrollmentModeKey ContextKey = "enrollment"
+	// EnrollmentKey is the context key for storing enrollment mode
+	EnrollmentKey ContextKey = "enrollment"
 )
 
 // GetConfig extracts *config.Config from context
@@ -49,7 +49,7 @@ func GetSshCredentialsProvider(ctx context.Context) (sshpkg.CredentialsProvider,
 
 // IsEnrollmentMode checks if the context is in enrollment mode
 func IsEnrollmentMode(ctx context.Context) bool {
-	mode, ok := ctx.Value(EnrollmentModeKey).(bool)
+	mode, ok := ctx.Value(EnrollmentKey).(bool)
 	return ok && mode
 }
 

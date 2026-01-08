@@ -468,12 +468,12 @@ func TestIsEnrollmentMode(t *testing.T) {
 	}{
 		{
 			name: "enrollment mode true",
-			ctx:  context.WithValue(context.Background(), EnrollmentModeKey, true),
+			ctx:  context.WithValue(context.Background(), EnrollmentKey, true),
 			want: true,
 		},
 		{
 			name: "enrollment mode false",
-			ctx:  context.WithValue(context.Background(), EnrollmentModeKey, false),
+			ctx:  context.WithValue(context.Background(), EnrollmentKey, false),
 			want: false,
 		},
 		{
@@ -483,7 +483,7 @@ func TestIsEnrollmentMode(t *testing.T) {
 		},
 		{
 			name: "wrong type in context",
-			ctx:  context.WithValue(context.Background(), EnrollmentModeKey, "true"),
+			ctx:  context.WithValue(context.Background(), EnrollmentKey, "true"),
 			want: false,
 		},
 	}

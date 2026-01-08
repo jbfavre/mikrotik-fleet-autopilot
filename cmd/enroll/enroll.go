@@ -82,127 +82,143 @@ var Command = []*cli.Command{
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			coreCfg, err := core.GetConfig(ctx)
-			if err != nil {
-				slog.Debug("failed to get global config", "error", err)
-				return err
-			}
-
-			// Build enrollment configuration from CLI flags
-			enrollCfg := Config{
-				Hostname:          cmd.String("hostname"),
-				PreEnrollScript:   cmd.String("pre-enroll-script"),
-				PostEnrollScript:  cmd.String("post-enroll-script"),
-				SkipUpdates:       cmd.Bool("skip-updates"),
-				SkipExport:        cmd.Bool("skip-export"),
-				OutputDir:         cmd.String("output-dir"),
-				Force:             cmd.Bool("force"),
-				UpdateHostKeyOnly: cmd.Bool("update-hostkey-only"),
-			}
-
-			// Validate flag combination
-			if enrollCfg.Force && enrollCfg.UpdateHostKeyOnly {
-				return fmt.Errorf("cannot use --force and --update-hostkey-only together")
-			}
-
-			// Set enrollment mode in context to allow host key capture
-			ctx = context.WithValue(ctx, core.EnrollmentModeKey, true)
-			slog.Debug("enrollment mode enabled in context")
-
-			// Build dependencies for all operations
-			deps := Dependencies{
-				SSHConnectionFactory: core.CreateConnection,
-				ApplyUpdatesFunc:     updates.ApplyUpdates,
-				ExportConfigFunc:     export.ExportConfig,
-			}
-
-			// Handle update-hostkey-only mode (supports batch processing)
-			if enrollCfg.UpdateHostKeyOnly {
-				// Batch mode: update hostkeys for all discovered hosts
-				if len(coreCfg.Hosts) > 1 {
-					slog.Info("batch updating SSH host keys", "count", len(coreCfg.Hosts))
-
-					successCount := 0
-					failCount := 0
-					var lastErr error
-
-					for _, host := range coreCfg.Hosts {
-						fingerprint, err := updateHostKey(ctx, host, deps)
-						if err != nil {
-							slog.Error("host key update failed", "host", host, "error", err)
-							fmt.Printf("❌ %s: Host key update failed\n", host)
-							failCount++
-							lastErr = err
-							// Continue with other hosts
-						} else {
-							slog.Info("host key update completed successfully", "host", host)
-							fmt.Printf("✅ %s: Host key updated (%s)\n", host, fingerprint)
-							successCount++
-						}
-					}
-
-					if failCount > 0 && successCount == 0 {
-						return fmt.Errorf("all host key updates failed")
-					} else if failCount > 0 {
-						return fmt.Errorf("some host key updates failed: %w", lastErr)
-					}
-					return nil
-				}
-
-				// Single host mode
-				if len(coreCfg.Hosts) != 1 {
-					return fmt.Errorf("no hosts specified or discovered")
-				}
-
-				host := coreCfg.Hosts[0]
-				slog.Info("updating SSH host key only", "host", host)
-				fingerprint, err := updateHostKey(ctx, host, deps)
-				if err != nil {
-					slog.Error("host key update failed", "host", host, "error", err)
-					fmt.Printf("❌ Host key update failed\n")
-					return err
-				}
-				slog.Info("host key update completed successfully", "host", host)
-				fmt.Printf("✅ Host key updated (%s)\n", fingerprint)
-				return nil
-			}
-
-			// Normal enrollment requires exactly one host and hostname
-			if len(coreCfg.Hosts) != 1 {
-				slog.Debug("enroll command requires exactly one host", "got", len(coreCfg.Hosts))
-				return fmt.Errorf("enroll command requires exactly one host, got %d", len(coreCfg.Hosts))
-			}
-
-			if enrollCfg.Hostname == "" {
-				return fmt.Errorf("--hostname is required for enrollment")
-			}
-
-			host := coreCfg.Hosts[0]
-
-			// Handle force re-enrollment
-			if enrollCfg.Force {
-				slog.Info("force re-enrollment requested", "host", host)
-				if err := deleteExistingEnrollment(host); err != nil {
-					slog.Error("failed to remove existing enrollment", "host", host, "error", err)
-					return fmt.Errorf("failed to remove existing enrollment: %w", err)
-				}
-			}
-
-			// Perform normal enrollment
-			if err := enroll(ctx, host, enrollCfg, deps); err != nil {
-				slog.Error("enrollment failed", "host", host, "error", err)
-				fmt.Printf("❌ Enrollment failed\n")
-			} else {
-				slog.Info("enrollment completed successfully", "host", host)
-				fmt.Printf("✅ Enrollment completed successfully\n")
-			}
-
-			return err
+			return enroll(ctx, cmd)
 		},
 	},
 }
 
-func enroll(ctx context.Context, host string, cfg Config, deps Dependencies) error {
+// enroll is the entry point for the enrollment command
+func enroll(ctx context.Context, cmd *cli.Command) error {
+	coreCfg, err := core.GetConfig(ctx)
+	if err != nil {
+		slog.Debug("failed to get global config", "error", err)
+		return err
+	}
+
+	// Build enrollment configuration from CLI flags
+	enrollCfg := Config{
+		Hostname:          cmd.String("hostname"),
+		PreEnrollScript:   cmd.String("pre-enroll-script"),
+		PostEnrollScript:  cmd.String("post-enroll-script"),
+		SkipUpdates:       cmd.Bool("skip-updates"),
+		SkipExport:        cmd.Bool("skip-export"),
+		OutputDir:         cmd.String("output-dir"),
+		Force:             cmd.Bool("force"),
+		UpdateHostKeyOnly: cmd.Bool("update-hostkey-only"),
+	}
+
+	// Validate flag combination
+	if enrollCfg.Force && enrollCfg.UpdateHostKeyOnly {
+		return fmt.Errorf("cannot use --force and --update-hostkey-only together")
+	}
+
+	// Set enrollment mode in context to allow host key capture
+	ctx = context.WithValue(ctx, core.EnrollmentKey, true)
+	slog.Debug("enrollment mode enabled in context")
+
+	// Build dependencies for all operations
+	deps := Dependencies{
+		SSHConnectionFactory: core.CreateConnection,
+		ApplyUpdatesFunc:     updates.ApplyUpdates,
+		ExportConfigFunc:     export.ExportConfig,
+	}
+
+	// Route to appropriate handler based on operation mode
+	if enrollCfg.UpdateHostKeyOnly {
+		return handleUpdateHostKeyOnly(ctx, coreCfg.Hosts, deps)
+	}
+	return handleNormalEnrollment(ctx, coreCfg.Hosts, enrollCfg, deps)
+}
+
+// handleUpdateHostKeyOnly processes host key updates for one or more hosts
+func handleUpdateHostKeyOnly(ctx context.Context, hosts []string, deps Dependencies) error {
+	// Batch mode: update hostkeys for all discovered hosts
+	if len(hosts) > 1 {
+		slog.Info("batch updating SSH host keys", "count", len(hosts))
+
+		successCount := 0
+		failCount := 0
+		var lastErr error
+
+		for _, host := range hosts {
+			fingerprint, err := updateHostKey(ctx, host, deps)
+			if err != nil {
+				slog.Error("host key update failed", "host", host, "error", err)
+				fmt.Printf("❌ %s: Host key update failed\n", host)
+				failCount++
+				lastErr = err
+				// Continue with other hosts
+			} else {
+				slog.Info("host key update completed successfully", "host", host)
+				fmt.Printf("✅ %s: Host key updated (%s)\n", host, fingerprint)
+				successCount++
+			}
+		}
+
+		if failCount > 0 && successCount == 0 {
+			return fmt.Errorf("all host key updates failed")
+		} else if failCount > 0 {
+			return fmt.Errorf("some host key updates failed: %w", lastErr)
+		}
+		return nil
+	}
+
+	// Single host mode
+	if len(hosts) != 1 {
+		return fmt.Errorf("no hosts specified or discovered")
+	}
+
+	host := hosts[0]
+	slog.Info("updating SSH host key only", "host", host)
+	fingerprint, err := updateHostKey(ctx, host, deps)
+	if err != nil {
+		slog.Error("host key update failed", "host", host, "error", err)
+		fmt.Printf("❌ Host key update failed\n")
+		return err
+	}
+	slog.Info("host key update completed successfully", "host", host)
+	fmt.Printf("✅ Host key updated (%s)\n", fingerprint)
+	return nil
+}
+
+// handleNormalEnrollment processes full enrollment for a single host
+func handleNormalEnrollment(ctx context.Context, hosts []string, cfg Config, deps Dependencies) error {
+	// Validate that we have exactly one host
+	if len(hosts) != 1 {
+		slog.Debug("enroll command requires exactly one host", "got", len(hosts))
+		return fmt.Errorf("enroll command requires exactly one host, got %d", len(hosts))
+	}
+
+	// Validate that hostname is provided
+	if cfg.Hostname == "" {
+		return fmt.Errorf("--hostname is required for enrollment")
+	}
+
+	host := hosts[0]
+
+	// Handle force re-enrollment by removing existing artifacts
+	if cfg.Force {
+		slog.Info("force re-enrollment requested", "host", host)
+		if err := deleteExistingEnrollment(host); err != nil {
+			slog.Error("failed to remove existing enrollment", "host", host, "error", err)
+			return fmt.Errorf("failed to remove existing enrollment: %w", err)
+		}
+	}
+
+	// Perform enrollment
+	if err := performEnrollment(ctx, host, cfg, deps); err != nil {
+		slog.Error("enrollment failed", "host", host, "error", err)
+		fmt.Printf("❌ Enrollment failed\n")
+		return err
+	}
+
+	slog.Info("enrollment completed successfully", "host", host)
+	fmt.Printf("✅ Enrollment completed successfully\n")
+	return nil
+}
+
+// performEnrollment executes the full enrollment workflow for a single host
+func performEnrollment(ctx context.Context, host string, cfg Config, deps Dependencies) error {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)
@@ -210,20 +226,48 @@ func enroll(ctx context.Context, host string, cfg Config, deps Dependencies) err
 
 	slog.Info("starting enrollment", "host", host)
 
-	// Connect to router
+	// Establish connection
+	conn, err := connectToRouter(ctx, host, deps)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if conn != nil {
+			_ = conn.Close()
+		}
+	}()
+
+	// Execute pre-enrollment steps
+	if err := executePreEnrollmentSteps(conn, host, cfg); err != nil {
+		return err
+	}
+
+	// Execute optional steps (updates and export)
+	conn, err = executeOptionalSteps(ctx, host, cfg, deps, conn)
+	if err != nil {
+		return err
+	}
+
+	// Execute post-enrollment steps
+	return executePostEnrollmentSteps(conn, cfg)
+}
+
+// connectToRouter establishes an SSH connection to the router
+func connectToRouter(ctx context.Context, host string, deps Dependencies) (sshpkg.Runner, error) {
 	slog.Debug("connecting to router", "host", host)
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
 		slog.Error("failed to connect to router", "host", host, "error", err)
 		fmt.Printf("❌ Failed to connect\n")
-		return fmt.Errorf("failed to connect to router: %w", err)
+		return nil, fmt.Errorf("failed to connect to router: %w", err)
 	}
-	defer func() {
-		_ = conn.Close()
-	}()
 	slog.Debug("successfully connected", "host", host)
+	return conn, nil
+}
 
-	// Step 1: Apply pre-enroll configuration file
+// executePreEnrollmentSteps applies pre-enrollment configuration and sets router identity
+func executePreEnrollmentSteps(conn sshpkg.Runner, host string, cfg Config) error {
+	// Apply pre-enroll configuration file
 	slog.Debug("applying pre-enroll configuration file")
 	if err := applyConfigFile(conn, cfg.PreEnrollScript); err != nil {
 		slog.Error("failed to apply pre-enroll configuration file", "error", err)
@@ -233,7 +277,7 @@ func enroll(ctx context.Context, host string, cfg Config, deps Dependencies) err
 	slog.Debug("pre-enroll configuration applied")
 	fmt.Printf("✅ Pre-enroll configuration applied\n")
 
-	// Step 2: Set router identity
+	// Set router identity
 	slog.Debug("setting router identity", "hostname", cfg.Hostname)
 	if err := setRouterIdentity(conn, cfg.Hostname); err != nil {
 		slog.Error("failed to set router identity", "error", err)
@@ -243,45 +287,56 @@ func enroll(ctx context.Context, host string, cfg Config, deps Dependencies) err
 	slog.Debug("router identity set", "host", host, "hostname", cfg.Hostname)
 	fmt.Printf("✅ Router identity set\n")
 
-	// Step 3: Apply updates (unless skipped)
+	return nil
+}
+
+// executeOptionalSteps handles updates and export steps based on configuration
+func executeOptionalSteps(ctx context.Context, host string, cfg Config, deps Dependencies, conn sshpkg.Runner) (sshpkg.Runner, error) {
+	// Apply updates (unless skipped)
 	if !cfg.SkipUpdates {
 		slog.Debug("checking and applying updates", "host", host)
 		if err := deps.ApplyUpdatesFunc(ctx, host); err != nil {
 			slog.Error("failed to apply updates", "host", host, "error", err)
 			fmt.Printf("⚠️  Updates failed (non-fatal)\n")
-			// Non fatal error, no return
+			// Non fatal error, continue
 		}
-		// No need for a specific status here since it's already managed by the updates subcommand
 	} else {
 		slog.Debug("skipping updates")
 		fmt.Printf("❓ Updates skipped\n")
 	}
 
-	// Step 4: Export configuration (unless skipped)
-	// Export properly manages its own SSH connection
+	// Export configuration (unless skipped)
 	if !cfg.SkipExport {
-		slog.Debug("exporting final configuration", "host", host)
-		if err := deps.ExportConfigFunc(ctx, host, cfg.OutputDir, false, cfg.Hostname); err != nil {
-			slog.Error("failed to export configuration", "host", host, "error", err)
-			return fmt.Errorf("failed to export configuration: %w", err)
-		}
-		// Export closes its SSH connection, invalidating our SSH connection
-		// Recreate the connection to ensure subsequent steps work properly
-		slog.Debug("recreating SSH connection after export", "host", host)
-		_ = conn.Close()
-		conn, err = deps.SSHConnectionFactory(ctx, host)
-		if err != nil {
-			slog.Error("failed to reconnect after export", "host", host, "error", err)
-			return fmt.Errorf("failed to reconnect after export: %w", err)
-		}
-		slog.Debug("reconnected after export", "host", host)
-		// No need for a specific status here since it's already managed by the export subcommand
-	} else {
-		slog.Debug("skipping export")
-		fmt.Printf("❓ Export skipped\n")
+		return exportAndReconnect(ctx, host, cfg, deps, conn)
 	}
 
-	// Step 5: Apply post-enroll configuration file
+	slog.Debug("skipping export")
+	fmt.Printf("❓ Export skipped\n")
+	return conn, nil
+}
+
+// exportAndReconnect exports configuration and recreates the SSH connection
+func exportAndReconnect(ctx context.Context, host string, cfg Config, deps Dependencies, conn sshpkg.Runner) (sshpkg.Runner, error) {
+	slog.Debug("exporting final configuration", "host", host)
+	if err := deps.ExportConfigFunc(ctx, host, cfg.OutputDir, false, cfg.Hostname); err != nil {
+		slog.Error("failed to export configuration", "host", host, "error", err)
+		return nil, fmt.Errorf("failed to export configuration: %w", err)
+	}
+
+	// Export closes its SSH connection, so we need to reconnect
+	slog.Debug("recreating SSH connection after export", "host", host)
+	_ = conn.Close()
+	newConn, err := deps.SSHConnectionFactory(ctx, host)
+	if err != nil {
+		slog.Error("failed to reconnect after export", "host", host, "error", err)
+		return nil, fmt.Errorf("failed to reconnect after export: %w", err)
+	}
+	slog.Debug("reconnected after export", "host", host)
+	return newConn, nil
+}
+
+// executePostEnrollmentSteps applies post-enrollment configuration
+func executePostEnrollmentSteps(conn sshpkg.Runner, cfg Config) error {
 	slog.Debug("applying post-enroll configuration file")
 	if err := applyConfigFile(conn, cfg.PostEnrollScript); err != nil {
 		slog.Error("failed to apply post-enroll configuration file", "error", err)
@@ -290,7 +345,6 @@ func enroll(ctx context.Context, host string, cfg Config, deps Dependencies) err
 	}
 	slog.Debug("post-enroll configuration file applied")
 	fmt.Printf("✅ Post-enroll configuration applied\n")
-
 	return nil
 }
 

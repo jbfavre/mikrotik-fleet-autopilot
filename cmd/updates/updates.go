@@ -54,7 +54,7 @@ var Command = []*cli.Command{
 			// Iterate over all hosts
 			var lastErr error
 			for _, host := range coreCfg.Hosts {
-				if err := updates(ctx, host, updatesCfg, deps); err != nil { // Empty string = derive from host
+				if err := updates(ctx, host, updatesCfg, deps); err != nil {
 					lastErr = err
 					// Continue with other hosts even if one fails
 				}

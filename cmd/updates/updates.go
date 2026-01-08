@@ -54,9 +54,8 @@ var Command = []*cli.Command{
 			// Iterate over all hosts
 			var lastErr error
 			for _, host := range coreCfg.Hosts {
-				if err := updates(ctx, host, updatesCfg, deps); err != nil {
-					slog.Debug("error checking updates", "host", host, "error", err)
-					fmt.Printf("❓ %s is unreachable\n", host)
+				if err := updates(ctx, host, updatesCfg, deps); err != nil { // Empty string = derive from host
+					lastErr = err
 					// Continue with other hosts even if one fails
 				}
 			}
@@ -96,6 +95,7 @@ func updates(ctx context.Context, host string, cfg Config, deps Dependencies) er
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
 		slog.Debug("failed to create SSH connection", "host", host, "error", err)
+		fmt.Printf("❓ %s is unreachable\n", host)
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	defer func() {
@@ -107,6 +107,7 @@ func updates(ctx context.Context, host string, cfg Config, deps Dependencies) er
 	slog.Info("Checking current update status")
 	osStatus, boardStatus, err := checkCurrentStatus(conn)
 	if err != nil {
+		fmt.Printf("❓ %s updates check failed\n", host)
 		return err
 	}
 
@@ -123,6 +124,7 @@ func updates(ctx context.Context, host string, cfg Config, deps Dependencies) er
 		if !osUpToDate {
 			slog.Info("Applying RouterOS updates")
 			if err := applyComponentUpdate(conn, ctx, host, "RouterOS", "/system/package/update/install", false, deps); err != nil {
+				fmt.Printf("❓ %s updates apply failed\n", host)
 				return err
 			}
 		}
@@ -131,6 +133,7 @@ func updates(ctx context.Context, host string, cfg Config, deps Dependencies) er
 		if !boardUpToDate && boardStatus != nil {
 			slog.Info("Applying RouterBoard updates")
 			if err := applyComponentUpdate(conn, ctx, host, "RouterBoard", "/system/reboot", true, deps); err != nil {
+				fmt.Printf("❓ %s reboot after RouterBoard updates failed\n", host)
 				return err
 			}
 		}

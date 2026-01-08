@@ -125,9 +125,30 @@ func enroll(ctx context.Context, cmd *cli.Command) error {
 
 	// Route to appropriate operation mode
 	if enrollCfg.UpdateHostKeyOnly {
+		// Only update host keys (supports batch mode)
 		return updateHostKeysOnly(ctx, coreCfg.Hosts, deps)
 	}
-	return enrollSingleHost(ctx, coreCfg.Hosts, enrollCfg, deps)
+
+	// Normal enrollment: validate single host requirement
+	if len(coreCfg.Hosts) != 1 {
+		slog.Debug("enroll command requires exactly one host", "got", len(coreCfg.Hosts))
+		return fmt.Errorf("enroll command requires exactly one host, got %d", len(coreCfg.Hosts))
+	}
+
+	host := coreCfg.Hosts[0]
+
+	// Step 0: Always update host key first
+	fingerprint, err := updateHostKey(ctx, host, deps)
+	if err != nil {
+		slog.Error("failed to capture host key", "host", host, "error", err)
+		fmt.Printf("❌ Host key capture failed\n")
+		return fmt.Errorf("failed to capture host key: %w", err)
+	}
+	slog.Debug("host key captured", "host", host, "fingerprint", fingerprint)
+	fmt.Printf("✅ Host key captured (%s)\n", fingerprint)
+
+	// Step 1+: Perform full enrollment
+	return performEnrollmentSteps(ctx, host, enrollCfg, deps)
 }
 
 // updateHostKeysOnly processes host key updates for one or more hosts
@@ -181,20 +202,12 @@ func updateHostKeysOnly(ctx context.Context, hosts []string, deps Dependencies) 
 	return nil
 }
 
-// enrollSingleHost processes full enrollment for a single host
-func enrollSingleHost(ctx context.Context, hosts []string, cfg Config, deps Dependencies) error {
-	// Validate that we have exactly one host
-	if len(hosts) != 1 {
-		slog.Debug("enroll command requires exactly one host", "got", len(hosts))
-		return fmt.Errorf("enroll command requires exactly one host, got %d", len(hosts))
-	}
-
+// performEnrollmentSteps executes the enrollment workflow (assumes host key already captured)
+func performEnrollmentSteps(ctx context.Context, host string, cfg Config, deps Dependencies) error {
 	// Validate that hostname is provided
 	if cfg.Hostname == "" {
 		return fmt.Errorf("--hostname is required for enrollment")
 	}
-
-	host := hosts[0]
 
 	// Handle force re-enrollment by removing existing artifacts
 	if cfg.Force {
@@ -212,17 +225,7 @@ func enrollSingleHost(ctx context.Context, hosts []string, cfg Config, deps Depe
 
 	slog.Info("starting enrollment", "host", host)
 
-	// Step 0: Capture and save SSH host key
-	fingerprint, err := updateHostKey(ctx, host, deps)
-	if err != nil {
-		slog.Error("failed to capture host key", "host", host, "error", err)
-		fmt.Printf("❌ Host key capture failed\n")
-		return fmt.Errorf("failed to capture host key: %w", err)
-	}
-	slog.Debug("host key captured", "host", host, "fingerprint", fingerprint)
-	fmt.Printf("✅ Host key captured (%s)\n", fingerprint)
-
-	// Establish connection
+	// Step 1: Establish connection
 	conn, err := connectToRouter(ctx, host, deps)
 	if err != nil {
 		return err
@@ -233,14 +236,14 @@ func enrollSingleHost(ctx context.Context, hosts []string, cfg Config, deps Depe
 		}
 	}()
 
-	// Step 1: Apply pre-enrollment script
+	// Step 2: Apply pre-enrollment script
 	if err := applyPreEnrollScript(conn, cfg); err != nil {
 		slog.Error("enrollment failed", "host", host, "error", err)
 		fmt.Printf("❌ Enrollment failed\n")
 		return err
 	}
 
-	// Step 2: Set router identity
+	// Step 3: Set router identity
 	if err := setRouterIdentity(conn, cfg.Hostname); err != nil {
 		slog.Error("failed to set router identity", "error", err)
 		fmt.Printf("❌ Identity set failed\n")
@@ -249,12 +252,12 @@ func enrollSingleHost(ctx context.Context, hosts []string, cfg Config, deps Depe
 	slog.Debug("router identity set", "host", host, "hostname", cfg.Hostname)
 	fmt.Printf("✅ Router identity set\n")
 
-	// Step 3: Apply updates (optional)
+	// Step 4: Apply updates (optional)
 	if err := applyUpdates(ctx, host, cfg, deps); err != nil {
 		// Non-fatal, continue
 	}
 
-	// Step 4: Export configuration (optional)
+	// Step 5: Export configuration (optional)
 	conn, err = exportConfiguration(ctx, host, cfg, deps, conn)
 	if err != nil {
 		slog.Error("enrollment failed", "host", host, "error", err)
@@ -262,7 +265,7 @@ func enrollSingleHost(ctx context.Context, hosts []string, cfg Config, deps Depe
 		return err
 	}
 
-	// Step 5: Apply post-enrollment script
+	// Step 6: Apply post-enrollment script
 	if err := applyPostEnrollScript(conn, cfg); err != nil {
 		slog.Error("enrollment failed", "host", host, "error", err)
 		fmt.Printf("❌ Enrollment failed\n")

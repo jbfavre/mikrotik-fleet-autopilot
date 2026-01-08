@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"jb.favre/mikrotik-fleet-autopilot/core"
+	"jb.favre/mikrotik-fleet-autopilot/ssh"
 )
 
 func TestBuildCommand(t *testing.T) {
@@ -314,7 +315,7 @@ func TestSshManagerCreation(t *testing.T) {
 	password := "test-pass"
 	passphrase := "test-phrase"
 
-	sshManager := core.NewSshManager(user, password, passphrase)
+	sshManager := ssh.NewSshManager(user, password, passphrase)
 
 	if sshManager == nil {
 		t.Error("NewSshManager returned nil")
@@ -348,7 +349,7 @@ func TestBuildCommandWithEmptyCredentials(t *testing.T) {
 	}
 
 	// SSH manager should be creatable with empty credentials
-	sshManager := core.NewSshManager("admin", "", "")
+	sshManager := ssh.NewSshManager("admin", "", "")
 	if sshManager == nil {
 		t.Error("NewSshManager failed with empty credentials")
 	}

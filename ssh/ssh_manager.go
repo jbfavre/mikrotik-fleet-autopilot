@@ -1,9 +1,53 @@
 package ssh
 
-// SshManager defines the interface for SSH credential management
-// This interface is implemented by core.SshManager
-type SshManager interface {
-	CredentialsProvider
-	// String provides a safe string representation (implements fmt.Stringer)
-	String() string
+import (
+	"fmt"
+)
+
+// SshManager encapsulates SSH credentials and provides them
+// to the ssh package without exposing credentials to callers
+type SshManager struct {
+	user       string
+	password   string
+	passphrase string
+}
+
+// NewSshManager creates a new SSH manager with the provided credentials
+// Credentials are stored privately and never exposed outside this package
+func NewSshManager(user, password, passphrase string) *SshManager {
+	return &SshManager{
+		user:       user,
+		password:   password,
+		passphrase: passphrase,
+	}
+}
+
+// GetUser returns the username (implements CredentialsProvider)
+func (m *SshManager) GetUser() string {
+	return m.user
+}
+
+// GetPassword returns the password (implements CredentialsProvider)
+func (m *SshManager) GetPassword() string {
+	return m.password
+}
+
+// GetPassphrase returns the passphrase (implements CredentialsProvider)
+func (m *SshManager) GetPassphrase() string {
+	return m.passphrase
+}
+
+// String implements fmt.Stringer interface to prevent accidental credential leaks in logs
+// This ensures that if the SshManager is logged, credentials are redacted
+func (m *SshManager) String() string {
+	hasPassword := "no"
+	if m.password != "" {
+		hasPassword = "yes (hidden)"
+	}
+	hasPassphrase := "no"
+	if m.passphrase != "" {
+		hasPassphrase = "yes (hidden)"
+	}
+	return fmt.Sprintf("SshManager{user:%s, password:%s, passphrase:%s}",
+		m.user, hasPassword, hasPassphrase)
 }

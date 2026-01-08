@@ -1,7 +1,6 @@
-package core
+package ssh
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
@@ -110,107 +109,67 @@ func TestSshManager_GetUser(t *testing.T) {
 	}
 }
 
-func TestSshManager_CreateConnection_NoAuth(t *testing.T) {
-	// Test that CreateConnection fails when no authentication is provided
-	manager := NewSshManager("admin", "", "")
-	ctx := context.WithValue(context.Background(), SshManagerKey, manager)
-
-	_, err := CreateConnection(ctx, "invalid-host:22")
-	if err == nil {
-		t.Error("CreateConnection() expected error for no authentication, got nil")
-	}
-
-	// The error should mention authentication
-	if err != nil && !strings.Contains(err.Error(), "no authentication method provided") {
-		t.Errorf("CreateConnection() error should mention authentication, got: %v", err)
-	}
-}
-
-func TestSshManager_CreateConnection_InvalidHost(t *testing.T) {
-	// Test connection failure with invalid host
-	manager := NewSshManager("admin", "password123", "")
-	ctx := context.WithValue(context.Background(), SshManagerKey, manager)
-
-	// Use an invalid host that will fail to connect
-	_, err := CreateConnection(ctx, "invalid.host.that.does.not.exist:22")
-	if err == nil {
-		t.Error("CreateConnection() expected error for invalid host, got nil")
-	}
-
-	// Should contain "failed to dial" in error message
-	if err != nil && !strings.Contains(err.Error(), "failed to dial") && !strings.Contains(err.Error(), "failed to create SSH connection") {
-		t.Errorf("CreateConnection() expected connection error, got: %v", err)
-	}
-}
-
-func TestGetSshManager(t *testing.T) {
+func TestSshManager_GetPassword(t *testing.T) {
 	tests := []struct {
-		name        string
-		ctx         context.Context
-		wantErr     bool
-		errContains string
+		name         string
+		password     string
+		wantPassword string
 	}{
 		{
-			name: "valid ssh manager in context",
-			ctx: context.WithValue(context.Background(), SshManagerKey,
-				NewSshManager("admin", "password", "passphrase")),
-			wantErr: false,
+			name:         "normal password",
+			password:     "password123",
+			wantPassword: "password123",
 		},
 		{
-			name:        "no ssh manager in context",
-			ctx:         context.Background(),
-			wantErr:     true,
-			errContains: "invalid ssh manager type or not found",
+			name:         "empty password",
+			password:     "",
+			wantPassword: "",
 		},
 		{
-			name:        "wrong type in context",
-			ctx:         context.WithValue(context.Background(), SshManagerKey, "not a manager"),
-			wantErr:     true,
-			errContains: "invalid ssh manager type or not found",
-		},
-		{
-			name: "nil value in context",
-			ctx:  context.WithValue(context.Background(), SshManagerKey, (*SshManager)(nil)),
-			// When a nil pointer of the correct type is stored in context,
-			// the type assertion succeeds and returns the nil pointer
-			// This is actually a valid case - we get nil manager, no error
-			// The caller should check for nil manager
-			wantErr: false,
-		},
-		{
-			name: "wrong context key",
-			ctx: context.WithValue(context.Background(), ContextKey("wrong-key"),
-				NewSshManager("admin", "password", "passphrase")),
-			wantErr:     true,
-			errContains: "invalid ssh manager type or not found",
+			name:         "complex password",
+			password:     "P@ssw0rd!#$%^&*()",
+			wantPassword: "P@ssw0rd!#$%^&*()",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manager, err := GetSshManager(tt.ctx)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("GetSshManager() error = %v, wantErr %v", err, tt.wantErr)
-				return
+			manager := NewSshManager("admin", tt.password, "")
+			if got := manager.GetPassword(); got != tt.wantPassword {
+				t.Errorf("GetPassword() = %q, want %q", got, tt.wantPassword)
 			}
+		})
+	}
+}
 
-			if tt.wantErr {
-				if err == nil {
-					t.Error("GetSshManager() expected error, got nil")
-					return
-				}
-				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("GetSshManager() error = %v, want error containing %q", err, tt.errContains)
-				}
-				return
-			}
+func TestSshManager_GetPassphrase(t *testing.T) {
+	tests := []struct {
+		name           string
+		passphrase     string
+		wantPassphrase string
+	}{
+		{
+			name:           "normal passphrase",
+			passphrase:     "mypassphrase",
+			wantPassphrase: "mypassphrase",
+		},
+		{
+			name:           "empty passphrase",
+			passphrase:     "",
+			wantPassphrase: "",
+		},
+		{
+			name:           "complex passphrase",
+			passphrase:     "Pass!@#$%Phrase123",
+			wantPassphrase: "Pass!@#$%Phrase123",
+		},
+	}
 
-			// For non-error cases, manager can be nil if that's what was stored
-			// (e.g., nil pointer of correct type)
-			// Most tests expect non-nil manager, but nil is technically valid
-			if tt.name != "nil value in context" && manager == nil {
-				t.Error("GetSshManager() returned nil manager with no error")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := NewSshManager("admin", "", tt.passphrase)
+			if got := manager.GetPassphrase(); got != tt.wantPassphrase {
+				t.Errorf("GetPassphrase() = %q, want %q", got, tt.wantPassphrase)
 			}
 		})
 	}
@@ -243,16 +202,6 @@ func TestSshManager_CredentialsIsolation(t *testing.T) {
 func BenchmarkNewSshManager(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = NewSshManager("admin", "password123", "passphrase456")
-	}
-}
-
-func BenchmarkGetSshManager(b *testing.B) {
-	ctx := context.WithValue(context.Background(), SshManagerKey,
-		NewSshManager("admin", "password", "passphrase"))
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = GetSshManager(ctx)
 	}
 }
 

@@ -106,6 +106,7 @@ func TestBuildHostKeyCallback(t *testing.T) {
 			// Create context with or without enrollment mode
 			ctx := context.Background()
 			if tt.enrollmentMode {
+				// nolint:staticcheck // Using string key to match hostkey.go implementation
 				ctx = context.WithValue(ctx, "enrollment", true)
 			}
 
@@ -216,6 +217,7 @@ func TestBuildHostKeyCallback_EnrollmentModeDetection(t *testing.T) {
 		{
 			name: "enrollment mode with boolean true",
 			setupCtx: func() context.Context {
+				// nolint:staticcheck // Using string key to match hostkey.go implementation
 				return context.WithValue(context.Background(), "enrollment", true)
 			},
 			expectCapture: true,
@@ -223,6 +225,7 @@ func TestBuildHostKeyCallback_EnrollmentModeDetection(t *testing.T) {
 		{
 			name: "enrollment mode with boolean false",
 			setupCtx: func() context.Context {
+				// nolint:staticcheck // Using string key to match hostkey.go implementation
 				return context.WithValue(context.Background(), "enrollment", false)
 			},
 			expectCapture: false,
@@ -237,6 +240,7 @@ func TestBuildHostKeyCallback_EnrollmentModeDetection(t *testing.T) {
 		{
 			name: "enrollment mode with wrong type",
 			setupCtx: func() context.Context {
+				// nolint:staticcheck // Using string key to match hostkey.go implementation
 				return context.WithValue(context.Background(), "enrollment", "true")
 			},
 			expectCapture: false,
@@ -325,7 +329,7 @@ func TestBuildHostKeyCallback_ManagerMethodCalls(t *testing.T) {
 			},
 		}
 
-		type enrollmentKey string
+		// nolint:staticcheck // Using string key to match hostkey.go implementation
 		ctx := context.WithValue(context.Background(), "enrollment", true)
 		callback := BuildHostKeyCallback(ctx, "192.168.1.1", manager)
 		_ = callback("192.168.1.1", nil, publicKey)

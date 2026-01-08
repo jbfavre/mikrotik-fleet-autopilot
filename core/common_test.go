@@ -177,15 +177,6 @@ func TestDiscoverHostsRealDirectory(t *testing.T) {
 	}
 }
 
-// mockError implements the error interface for testing
-type mockError struct {
-	msg string
-}
-
-func (e *mockError) Error() string {
-	return e.msg
-}
-
 func TestContextKey(t *testing.T) {
 	// Test that ConfigKey is properly typed
 	key := ConfigKey

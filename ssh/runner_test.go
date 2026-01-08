@@ -1,8 +1,12 @@
 package ssh
 
 import (
+	"context"
+	"fmt"
 	"errors"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestDefaultRunner_IsAlreadyClosedError(t *testing.T) {
@@ -95,5 +99,66 @@ func TestDefaultRunner_Run_NilClient(t *testing.T) {
 	expectedErr := "SSH connection not established"
 	if err != nil && err.Error() != expectedErr {
 		t.Errorf("Run() error = %q, want %q", err.Error(), expectedErr)
+	}
+}
+
+func TestConnection_Run_WithMockServer(t *testing.T) {
+	server, port := startMockSSHServer(t)
+	defer server.stop()
+
+	ctx := context.Background()
+	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
+		return nil // Accept any key for testing
+	}
+
+	address := fmt.Sprintf("127.0.0.1:%d", port)
+	conn, err := buildTestConnection(ctx, address, "admin", "testpass", "", hostKeyCallback)
+	if err != nil {
+		t.Fatalf("Failed to build connection: %v", err)
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Logf("Failed to close connection: %v", err)
+		}
+	}()
+
+	// Test Run
+	output, err := conn.Run("echo test")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if output == "" {
+		t.Error("Run() returned empty output")
+	}
+
+	t.Logf("Run() output: %s", output)
+}
+
+func TestConnection_Close_WithMockServer(t *testing.T) {
+	server, port := startMockSSHServer(t)
+	defer server.stop()
+
+	ctx := context.Background()
+	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
+		return nil
+	}
+
+	address := fmt.Sprintf("127.0.0.1:%d", port)
+	conn, err := buildTestConnection(ctx, address, "admin", "testpass", "", hostKeyCallback)
+	if err != nil {
+		t.Fatalf("Failed to build connection: %v", err)
+	}
+
+	// Close the connection
+	err = conn.Close()
+	if err != nil {
+		t.Errorf("Close() error = %v, want nil", err)
+	}
+
+	// Try to close again - should not error (already closed errors are silently ignored)
+	err = conn.Close()
+	if err != nil {
+		t.Logf("Close() twice returned: %v (already closed errors are ignored)", err)
 	}
 }

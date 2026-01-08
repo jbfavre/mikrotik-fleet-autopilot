@@ -9,11 +9,8 @@ import (
 	"github.com/kevinburke/ssh_config"
 )
 
-// DefaultConfigReader implements ConfigReader
-type DefaultConfigReader struct{}
-
-// ReadConfig reads SSH configuration for a host
-func (r *DefaultConfigReader) ReadConfig(host string) (*HostInfo, error) {
+// readConfig reads SSH configuration for a host
+func readConfig(host string) (*HostInfo, error) {
 	// Step 1: Parse user input into HostInfo
 	hostInfo := ParseHost(host)
 

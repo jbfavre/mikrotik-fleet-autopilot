@@ -170,7 +170,7 @@ func TestCreateConnection_ErrorMessages(t *testing.T) {
 
 	// Check that error message contains useful information
 	errMsg := err.Error()
-	if !strings.Contains(errMsg, "failed to create SSH connection") {
+	if !strings.Contains(errMsg, "failed to") {
 		t.Errorf("error message should mention connection failure: %v", errMsg)
 	}
 }

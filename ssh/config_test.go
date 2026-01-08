@@ -1,9 +1,13 @@
 package ssh
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestDefaultConfigReader_ReadConfig(t *testing.T) {
@@ -16,8 +20,6 @@ func TestDefaultConfigReader_ReadConfig(t *testing.T) {
 	defer func() {
 		_ = os.Setenv("HOME", originalHome)
 	}()
-
-	reader := &DefaultConfigReader{}
 
 	tests := []struct {
 		name     string
@@ -87,7 +89,7 @@ func TestDefaultConfigReader_ReadConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			info, err := reader.ReadConfig(tt.host)
+			info, err := readConfig(tt.host)
 			if err != nil {
 				t.Fatalf("ReadConfig(%q) unexpected error: %v", tt.host, err)
 			}
@@ -146,8 +148,6 @@ Host *.local
 		_ = os.Setenv("HOME", originalHome)
 	}()
 
-	reader := &DefaultConfigReader{}
-
 	tests := []struct {
 		name     string
 		host     string
@@ -180,7 +180,7 @@ Host *.local
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hostInfo, err := reader.ReadConfig(tt.host)
+			hostInfo, err := readConfig(tt.host)
 			if err != nil {
 				t.Fatalf("ReadConfig() error = %v", err)
 			}
@@ -387,5 +387,57 @@ func BenchmarkParseHost(b *testing.B) {
 		for _, input := range testInputs {
 			ParseHost(input)
 		}
+	}
+}
+
+func TestBuild_WithSSHConfigUsername(t *testing.T) {
+	// Create temporary SSH config with username
+	tmpDir := t.TempDir()
+	sshDir := filepath.Join(tmpDir, ".ssh")
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		t.Fatalf("Failed to create temp .ssh dir: %v", err)
+	}
+
+	server, port := startMockSSHServer(t)
+	defer server.stop()
+
+	configContent := fmt.Sprintf(`
+Host testhost
+    HostName 127.0.0.1
+    User admin
+    Port %d
+`, port)
+	configPath := filepath.Join(sshDir, "config")
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	// Override HOME
+	originalHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", tmpDir); err != nil {
+		t.Fatalf("Failed to set HOME: %v", err)
+	}
+	defer func() {
+		_ = os.Setenv("HOME", originalHome)
+	}()
+
+	ctx := context.Background()
+	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
+		return nil
+	}
+
+	// Use alias from SSH config
+	conn, err := buildTestConnection(ctx, "testhost", "", "testpass", "", hostKeyCallback)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Logf("Failed to close connection: %v", err)
+		}
+	}()
+
+	if conn == nil {
+		t.Error("Build() returned nil connection")
 	}
 }

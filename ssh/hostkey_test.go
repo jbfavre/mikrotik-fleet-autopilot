@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"fmt"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -374,5 +375,26 @@ func BenchmarkHostKeyCallback_Execution(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = callback("192.168.1.1", nil, publicKey)
+	}
+}
+
+func TestBuild_HostKeyRejection(t *testing.T) {
+	server, port := startMockSSHServer(t)
+	defer server.stop()
+
+	ctx := context.Background()
+	// Reject all host keys
+	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
+		return fmt.Errorf("host key rejected")
+	}
+
+	address := fmt.Sprintf("127.0.0.1:%d", port)
+	_, err := buildTestConnection(ctx, address, "admin", "testpass", "", hostKeyCallback)
+	if err == nil {
+		t.Error("Build() expected error for rejected host key, got nil")
+	}
+
+	if err != nil && !containsAny(err.Error(), []string{"host key", "handshake"}) {
+		t.Logf("Build() error = %q", err.Error())
 	}
 }

@@ -9,8 +9,8 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/kevinburke/ssh_config"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -19,20 +19,82 @@ import (
 func CreateConnection(ctx context.Context, host string, credentials CredentialsProvider, hostKeyManager HostKeyManager) (Runner, error) {
 	slog.Debug("creating SSH connection", "host", host, "user", credentials.GetUser())
 
-	// Create the connection builder
-	builder := NewConnectionBuilder(&DefaultConfigReader{})
-
-	// Create host key callback
-	hostKeyCallback := BuildHostKeyCallback(ctx, host, hostKeyManager)
-
-	// Build the connection
-	conn, err := builder.Build(ctx, host, credentials.GetUser(), credentials.GetPassword(), credentials.GetPassphrase(), hostKeyCallback)
-	if err != nil {
-		slog.Error("failed to create SSH connection", "host", host, "error", err)
-		return nil, fmt.Errorf("failed to create SSH connection to %s: %w", host, err)
+	// Check if context is already cancelled
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled before connection: %w", err)
 	}
 
-	return conn, nil
+	// Step 1: Read SSH configuration
+	hostInfo, err := readConfig(host)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read SSH config: %w", err)
+	}
+
+	slog.Debug("SSH host configuration",
+		"original", hostInfo.Original,
+		"type", hostInfo.Type,
+		"hostname", hostInfo.Hostname,
+		"port", hostInfo.Port,
+		"user", hostInfo.User,
+		"identityFile", hostInfo.IdentityFile)
+
+	// Step 2: Build authentication methods
+	authMethods, err := buildAuthMethods(hostInfo, credentials.GetPassword(), credentials.GetPassphrase())
+	if err != nil {
+		return nil, fmt.Errorf("failed to build auth methods: %w", err)
+	}
+
+	// Step 3: Determine which username to use
+	finalUsername := credentials.GetUser()
+	if hostInfo.User != "" {
+		slog.Debug("using username from ssh_config", "user", hostInfo.User)
+		finalUsername = hostInfo.User
+	} else {
+		slog.Debug("using username from command line", "user", credentials.GetUser())
+	}
+
+	// Step 4: Build SSH client config
+	hostKeyCallback := BuildHostKeyCallback(ctx, host, hostKeyManager)
+	config := &ssh.ClientConfig{
+		User: finalUsername,
+		Auth: authMethods,
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			return hostKeyCallback(hostname, remote, key)
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	// Step 5: Establish connection with context awareness
+	address := net.JoinHostPort(hostInfo.Hostname, hostInfo.Port)
+	slog.Debug("establishing SSH connection", "address", address)
+
+	// Check context before dialing
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled before dial: %w", err)
+	}
+
+	// Create a dialer that respects context
+	dialer := net.Dialer{
+		Timeout: config.Timeout,
+	}
+	netConn, err := dialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		slog.Error("failed to dial", "address", address, "error", err)
+		return nil, fmt.Errorf("failed to dial %s: %w", address, err)
+	}
+
+	// Perform SSH handshake
+	c, chans, reqs, err := ssh.NewClientConn(netConn, address, config)
+	if err != nil {
+		_ = netConn.Close() // Ignore close error when handshake failed
+		slog.Error("SSH handshake failed", "address", address, "error", err)
+		return nil, fmt.Errorf("SSH handshake failed for %s: %w", address, err)
+	}
+
+	client := ssh.NewClient(c, chans, reqs)
+
+	slog.Debug("SSH connection established")
+	return &DefaultRunner{client: client}, nil
 }
 
 // buildAuthMethods builds SSH authentication methods based on available credentials
@@ -110,59 +172,6 @@ func parseSshPrivateKey(identityFile, passphrase string) (ssh.Signer, error) {
 	}
 	slog.Debug("private key parsed successfully", "keyType", signer.PublicKey().Type())
 	return signer, nil
-}
-
-// readConfig reads SSH configuration for a host
-func readConfig(host string) (*HostInfo, error) {
-	// Step 1: Parse user input into HostInfo
-	hostInfo := ParseHost(host)
-
-	// Step 2: Try to read from user's ssh_config
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return hostInfo, nil
-	}
-
-	sshConfigFile, err := os.Open(filepath.Join(homeDir, ".ssh", "config"))
-	if err != nil {
-		slog.Debug("SSH config file doesn't exist or can't be read - using defaults")
-		return hostInfo, nil
-	}
-	defer func() { _ = sshConfigFile.Close() }()
-
-	sshConfig, err := ssh_config.Decode(sshConfigFile)
-	if err != nil || sshConfig == nil {
-		slog.Debug("Failed to decode SSH config - using defaults")
-		return hostInfo, nil
-	}
-
-	// Step 3: Merge ssh_config values into HostInfo
-	if hostname, _ := sshConfig.Get(host, "Hostname"); hostname != "" {
-		hostInfo.Hostname = strings.ReplaceAll(hostname, "%h", host)
-	}
-
-	if user, _ := sshConfig.Get(host, "User"); user != "" {
-		hostInfo.User = user
-	}
-
-	if port, _ := sshConfig.Get(host, "Port"); port != "" && port != "0" {
-		hostInfo.Port = port
-	}
-
-	hostInfo.IdentityFile, _ = sshConfig.Get(host, "IdentityFile")
-	hostInfo.IdentitiesOnly, _ = sshConfig.Get(host, "IdentitiesOnly")
-	hostInfo.ForwardAgent, _ = sshConfig.Get(host, "ForwardAgent")
-	hostInfo.HostkeyAlgorithms, _ = sshConfig.Get(host, "HostkeyAlgorithms")
-	hostInfo.PubkeyAcceptedAlgorithms, _ = sshConfig.Get(host, "PubkeyAcceptedAlgorithms")
-
-	slog.Debug("ssh_config found",
-		"host", host,
-		"hostname", hostInfo.Hostname,
-		"port", hostInfo.Port,
-		"user", hostInfo.User,
-		"identityfile", hostInfo.IdentityFile)
-
-	return hostInfo, nil
 }
 
 // ParseHost analyzes a host string and returns initial HostInfo.

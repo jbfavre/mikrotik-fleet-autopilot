@@ -1,11 +1,11 @@
 package ssh
 
 import (
-	"fmt"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -401,4 +401,101 @@ func TestBuild_HostKeyRejection(t *testing.T) {
 	if err != nil && !containsAny(err.Error(), []string{"host key", "handshake"}) {
 		t.Logf("Build() error = %q", err.Error())
 	}
+}
+
+func TestBuildHostKeyCallback_SkipVerification(t *testing.T) {
+	// Generate test key
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate test key: %v", err)
+	}
+	publicKey, err := ssh.NewPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		t.Fatalf("failed to create SSH public key: %v", err)
+	}
+
+	tests := []struct {
+		name              string
+		skipHostKeyCheck  bool
+		hostKeyExists     bool
+		enrollmentMode    bool
+		expectCaptureCall bool
+	}{
+		{
+			name:              "skip verification - host key exists",
+			skipHostKeyCheck:  true,
+			hostKeyExists:     true,
+			enrollmentMode:    false,
+			expectCaptureCall: false,
+		},
+		{
+			name:              "skip verification - new host in enrollment",
+			skipHostKeyCheck:  true,
+			hostKeyExists:     false,
+			enrollmentMode:    true,
+			expectCaptureCall: true,
+		},
+		{
+			name:              "skip verification - new host not in enrollment",
+			skipHostKeyCheck:  true,
+			hostKeyExists:     false,
+			enrollmentMode:    false,
+			expectCaptureCall: false,
+		},
+		{
+			name:              "verification enabled - existing host",
+			skipHostKeyCheck:  false,
+			hostKeyExists:     true,
+			enrollmentMode:    false,
+			expectCaptureCall: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			captureCalled := false
+			manager := &mockTestHostKeyManager{
+				existsFunc: func(host string) bool {
+					return tt.hostKeyExists
+				},
+				verifyFunc: func(host string, key ssh.PublicKey) error {
+					return nil
+				},
+				captureFunc: func(host string, key ssh.PublicKey) error {
+					captureCalled = true
+					return nil
+				},
+				getFingerprintFunc: func(key ssh.PublicKey) string {
+					return "SHA256:test"
+				},
+			}
+
+			// Build context with config
+			ctx := context.Background()
+			if tt.skipHostKeyCheck {
+				// nolint:staticcheck // Using string key to match hostkey.go implementation
+				ctx = context.WithValue(ctx, "config", &testConfigSkipCheck{})
+			}
+			if tt.enrollmentMode {
+				// nolint:staticcheck
+				ctx = context.WithValue(ctx, "enrollment", true)
+			}
+
+			callback := BuildHostKeyCallback(ctx, "192.168.1.1", manager)
+			err := callback("192.168.1.1", nil, publicKey)
+
+			if err != nil {
+				t.Errorf("BuildHostKeyCallback() unexpected error = %v", err)
+			}
+			if captureCalled != tt.expectCaptureCall {
+				t.Errorf("BuildHostKeyCallback() capture called = %v, want %v", captureCalled, tt.expectCaptureCall)
+			}
+		})
+	}
+}
+
+type testConfigSkipCheck struct{}
+
+func (c *testConfigSkipCheck) GetSkipHostKeyCheck() bool {
+	return true
 }

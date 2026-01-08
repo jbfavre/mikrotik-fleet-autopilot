@@ -70,9 +70,9 @@ var Command = []*cli.Command{
 	},
 }
 
-// ExportConfig is a public wrapper that exports configuration for a single host
+// Export is a public wrapper that exports configuration for a single host
 // This function is intended to be called from other subcommands like enroll
-func ExportConfig(ctx context.Context, host string, exportOutputDir string, exportShowSensitive bool, preferredFilename string) error {
+func Export(ctx context.Context, host string, exportOutputDir string, exportShowSensitive bool, preferredFilename string) error {
 	cfg := Config{
 		ShowSensitive: exportShowSensitive,
 		OutputDir:     exportOutputDir,

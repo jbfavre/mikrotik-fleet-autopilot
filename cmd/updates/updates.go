@@ -71,7 +71,7 @@ type UpdateStatus struct {
 
 // ApplyUpdates is a public wrapper that applies updates to a single host
 // This function is intended to be called from other subcommands like enroll
-func ApplyUpdates(ctx context.Context, host string) error {
+func Updates(ctx context.Context, host string) error {
 	cfg := Config{
 		UpdatesApply: true,
 	}

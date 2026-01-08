@@ -2,7 +2,6 @@ package ssh
 
 import (
 	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,13 +9,10 @@ import (
 	"github.com/kevinburke/ssh_config"
 )
 
-// DefaultConfigReader implements ConfigReader
-type DefaultConfigReader struct{}
-
-// ReadConfig reads SSH configuration for a host
-func (r *DefaultConfigReader) ReadConfig(host string) (*HostInfo, error) {
+// readConfig reads SSH configuration for a host
+func readConfig(host string) (*HostInfo, error) {
 	// Step 1: Parse user input into HostInfo
-	hostInfo := parseHost(host)
+	hostInfo := ParseHost(host)
 
 	// Step 2: Try to read from user's ssh_config
 	homeDir, err := os.UserHomeDir()
@@ -64,48 +60,4 @@ func (r *DefaultConfigReader) ReadConfig(host string) (*HostInfo, error) {
 		"identityfile", hostInfo.IdentityFile)
 
 	return hostInfo, nil
-}
-
-// parseHost analyzes a host string and returns initial HostInfo
-func parseHost(host string) *HostInfo {
-	info := &HostInfo{
-		Original: host,
-		Port:     "22", // Default port
-	}
-
-	// Check if port is specified in the input
-	hostPart := host
-	if strings.Contains(host, ":") {
-		h, p, err := net.SplitHostPort(host)
-		if err == nil {
-			hostPart = h
-			info.Port = p
-		}
-	}
-
-	// Determine host type and set initial values
-	if isIPAddress(hostPart) {
-		info.Type = "ip"
-		info.Hostname = hostPart
-		info.ShortName = hostPart
-	} else if strings.Contains(hostPart, ".") {
-		info.Type = "fqdn"
-		info.Hostname = hostPart
-		if idx := strings.Index(hostPart, "."); idx > 0 {
-			info.ShortName = hostPart[:idx]
-		} else {
-			info.ShortName = hostPart
-		}
-	} else {
-		info.Type = "hostname"
-		info.Hostname = hostPart
-		info.ShortName = hostPart
-	}
-
-	return info
-}
-
-// isIPAddress checks if string is valid IPv4/IPv6
-func isIPAddress(host string) bool {
-	return net.ParseIP(host) != nil
 }

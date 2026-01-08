@@ -10,7 +10,8 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/cmd/enroll"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
-	"jb.favre/mikrotik-fleet-autopilot/core"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 func main() {
@@ -118,7 +119,7 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				}
 			}
 			// Create SSH manager with credentials (credentials stay encapsulated)
-			sshManager := core.NewSshManager(globalConfig.User, *sshPassword, *sshPassphrase)
+			sshManager := ssh.NewSshManager(globalConfig.User, *sshPassword, *sshPassphrase)
 
 			// Make global config (without credentials) and SSH manager available in context
 			ctx = context.WithValue(ctx, core.ConfigKey, globalConfig)

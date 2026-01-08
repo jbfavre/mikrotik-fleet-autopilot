@@ -8,7 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"jb.favre/mikrotik-fleet-autopilot/core"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 // copyFile copies a file from src to dst
@@ -531,7 +532,7 @@ func TestEnroll(t *testing.T) {
 			}
 			defer func() { exportConfigFunc = originalExportFunc }()
 
-			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				if tt.connectionError != nil {
 					return nil, tt.connectionError
 				}
@@ -656,7 +657,7 @@ func TestUpdateHostKey(t *testing.T) {
 			originalFactory := sshConnectionFactory
 			defer func() { sshConnectionFactory = originalFactory }()
 
-			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				if tt.connectionError {
 					return nil, fmt.Errorf("connection failed")
 				}
@@ -893,7 +894,7 @@ func TestUpdateHostKeyBatchMode(t *testing.T) {
 			originalFactory := sshConnectionFactory
 			defer func() { sshConnectionFactory = originalFactory }()
 
-			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				if tt.connectionErrors[host] {
 					return nil, fmt.Errorf("connection failed for %s", host)
 				}
@@ -1042,7 +1043,7 @@ func TestEnrollActionValidation(t *testing.T) {
 			originalFactory := sshConnectionFactory
 			defer func() { sshConnectionFactory = originalFactory }()
 
-			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				// Simulate host key capture
 				srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
 				dstFile := core.HostKeyFilePath(host)

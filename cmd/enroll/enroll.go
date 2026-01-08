@@ -11,7 +11,8 @@ import (
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
-	"jb.favre/mikrotik-fleet-autopilot/core"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 var hostname string
@@ -285,7 +286,7 @@ func enroll(ctx context.Context, host string) error {
 }
 
 // applyConfigFile reads and executes RouterOS commands from a file
-func applyConfigFile(conn core.SshRunner, filePath string) error {
+func applyConfigFile(conn sshpkg.Runner, filePath string) error {
 	// Read file
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -322,7 +323,7 @@ func applyConfigFile(conn core.SshRunner, filePath string) error {
 }
 
 // setRouterIdentity sets the system identity (hostname) on the router
-func setRouterIdentity(conn core.SshRunner, hostname string) error {
+func setRouterIdentity(conn sshpkg.Runner, hostname string) error {
 	cmd := fmt.Sprintf("/system identity set name=%s", hostname)
 	slog.Debug("setting identity with command", "hostname", hostname, "command", cmd)
 	_, err := conn.Run(cmd)
@@ -398,7 +399,7 @@ func deleteExistingEnrollment(host string) error {
 	}
 
 	// Delete config file
-	parsedHost := core.ParseHost(host)
+	parsedHost := sshpkg.ParseHost(host)
 	configFile := fmt.Sprintf("%s.rsc", parsedHost.ShortName)
 	if _, err := os.Stat(configFile); err == nil {
 		slog.Debug("deleting config file", "file", configFile)

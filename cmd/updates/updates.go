@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v3"
-	"jb.favre/mikrotik-fleet-autopilot/core"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 var updatesApply bool = true
@@ -127,7 +128,7 @@ func updates(ctx context.Context, host string) error {
 }
 
 // checkCurrentStatus retrieves the current RouterOS and RouterBoard status
-func checkCurrentStatus(conn core.SshRunner) (UpdateStatus, *UpdateStatus, error) {
+func checkCurrentStatus(conn sshpkg.Runner) (UpdateStatus, *UpdateStatus, error) {
 	slog.Info("Checking RouterOS update status")
 	osStatusPtr, err := getUpdateStatus(
 		conn,
@@ -176,7 +177,7 @@ func checkCurrentStatus(conn core.SshRunner) (UpdateStatus, *UpdateStatus, error
 }
 
 // applyComponentUpdate applies an update to RouterOS or RouterBoard and displays the result
-func applyComponentUpdate(conn core.SshRunner, ctx context.Context, host, component, updateCmd string, checkBoth bool) error {
+func applyComponentUpdate(conn sshpkg.Runner, ctx context.Context, host, component, updateCmd string, checkBoth bool) error {
 	slog.Info("component update needed, applying updates", "component", component)
 	slog.Debug("applying component updates", "component", component, "host", host)
 
@@ -277,7 +278,7 @@ func formatAndDisplayResult(host string, osStatus UpdateStatus, boardStatus *Upd
 }
 
 // Generic update status fetcher for RouterOS and RouterBoard
-func getUpdateStatus(conn core.SshRunner, sshCmd, subSystem string, installedRe, availableRe *regexp.Regexp, skipIfNoRouterBoard bool) (*UpdateStatus, error) {
+func getUpdateStatus(conn sshpkg.Runner, sshCmd, subSystem string, installedRe, availableRe *regexp.Regexp, skipIfNoRouterBoard bool) (*UpdateStatus, error) {
 	slog.Debug("executing command", "command", sshCmd)
 	result, err := conn.Run(sshCmd)
 	if err != nil {
@@ -318,7 +319,7 @@ func getUpdateStatus(conn core.SshRunner, sshCmd, subSystem string, installedRe,
 }
 
 // Generic function to apply updates and wait for router to come back
-func applyUpdate(conn core.SshRunner, ctx context.Context, host, updateCmd, waitMsg string) (core.SshRunner, error) {
+func applyUpdate(conn sshpkg.Runner, ctx context.Context, host, updateCmd, waitMsg string) (sshpkg.Runner, error) {
 	_, err := conn.Run(updateCmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to run SSH command: %w", err)
@@ -326,7 +327,7 @@ func applyUpdate(conn core.SshRunner, ctx context.Context, host, updateCmd, wait
 	_ = conn.Close()
 	fmt.Printf("⏳ %s\n", waitMsg)
 
-	var newConn core.SshRunner
+	var newConn sshpkg.Runner
 	for {
 		// Check if context was cancelled during reconnection
 		if err := ctx.Err(); err != nil {

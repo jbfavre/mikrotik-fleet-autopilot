@@ -9,7 +9,8 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v3"
-	"jb.favre/mikrotik-fleet-autopilot/core"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 var showSensitive bool
@@ -114,7 +115,7 @@ func export(ctx context.Context, host string, preferredFilename string) error {
 		filename = fmt.Sprintf("%s.rsc", preferredFilename)
 	} else {
 		// Derive from host using HostInfo
-		hostInfo := core.ParseHost(host)
+		hostInfo := sshpkg.ParseHost(host)
 		filename = fmt.Sprintf("%s.rsc", hostInfo.ShortName)
 	}
 	filepath := filepath.Join(outputDir, filename)

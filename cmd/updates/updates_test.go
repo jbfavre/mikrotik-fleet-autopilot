@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"jb.favre/mikrotik-fleet-autopilot/core"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
-// MockSshRunner is a mock implementation of SshRunner for testing
+// MockSshRunner is a mock implementation of ssh.Runner for testing
 type MockSshRunner struct {
 	CloseFunc                func() error
 	IsAlreadyClosedErrorFunc func(err error) bool
@@ -41,11 +42,11 @@ func (m *MockSshRunner) Run(cmd string) (string, error) {
 
 // MockSshManager is a mock implementation of SshManager for testing
 type MockSshManager struct {
-	CreateConnectionFunc func(ctx context.Context, host string) (core.SshRunner, error)
+	CreateConnectionFunc func(ctx context.Context, host string) (sshpkg.Runner, error)
 	GetUserFunc          func() string
 }
 
-func (m *MockSshManager) CreateConnection(ctx context.Context, host string) (core.SshRunner, error) {
+func (m *MockSshManager) CreateConnection(ctx context.Context, host string) (sshpkg.Runner, error) {
 	if m.CreateConnectionFunc != nil {
 		return m.CreateConnectionFunc(ctx, host)
 	}
@@ -212,7 +213,7 @@ func TestUpdates(t *testing.T) {
 			var connectionCount int
 
 			// Mock SSH connection factory
-			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				connectionCount++
 
 				if tt.sshError != nil {
@@ -829,7 +830,7 @@ func TestApplyUpdate(t *testing.T) {
 			}
 
 			// Mock the SSH connection factory
-			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				reconnectAttempts++
 				if reconnectAttempts < tt.reconnectAttempts {
 					return nil, fmt.Errorf("connection failed")
@@ -1033,7 +1034,7 @@ func TestApplyComponentUpdate(t *testing.T) {
 			}
 
 			// Mock the SSH connection factory to return a new mock after "reconnection"
-			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				return &MockSshRunner{
 					RunFunc: func(cmd string) (string, error) {
 						if cmd == "/system/package/update/check-for-updates" {
@@ -1131,7 +1132,7 @@ func TestApplyUpdatesWrapper(t *testing.T) {
 			originalFactory := sshConnectionFactory
 			defer func() { sshConnectionFactory = originalFactory }()
 
-			sshConnectionFactory = func(ctx context.Context, host string) (core.SshRunner, error) {
+			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				if tt.sshError != nil && strings.Contains(tt.sshError.Error(), "connection refused") {
 					return nil, tt.sshError
 				}

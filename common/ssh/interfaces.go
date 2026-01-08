@@ -1,8 +1,6 @@
 package ssh
 
 import (
-	"context"
-
 	"golang.org/x/crypto/ssh"
 )
 
@@ -35,20 +33,12 @@ type HostInfo struct {
 	PubkeyAcceptedAlgorithms string
 }
 
-// ConfigReader reads SSH configuration
-type ConfigReader interface {
-	ReadConfig(host string) (*HostInfo, error)
-}
-
-// AuthProvider provides SSH authentication methods
-type AuthProvider interface {
-	BuildAuthMethods(hostInfo *HostInfo, password, passphrase string) ([]ssh.AuthMethod, error)
-}
-
 // HostKeyCallback provides host key validation
 type HostKeyCallback func(hostname string, remote interface{}, key ssh.PublicKey) error
 
-// ConnectionBuilder builds SSH connections
-type ConnectionBuilder interface {
-	Build(ctx context.Context, host, username, password, passphrase string, hostKeyCallback HostKeyCallback) (Runner, error)
+// CredentialsProvider provides SSH credentials for connection establishment
+type CredentialsProvider interface {
+	GetUser() string
+	GetPassword() string
+	GetPassphrase() string
 }

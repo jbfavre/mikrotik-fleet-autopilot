@@ -82,7 +82,7 @@ var Command = []*cli.Command{
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg, err := core.GetConfig(ctx)
+			coreCfg, err := core.GetConfig(ctx)
 			if err != nil {
 				slog.Debug("failed to get global config", "error", err)
 				return err
@@ -119,14 +119,14 @@ var Command = []*cli.Command{
 			// Handle update-hostkey-only mode (supports batch processing)
 			if enrollCfg.UpdateHostKeyOnly {
 				// Batch mode: update hostkeys for all discovered hosts
-				if len(cfg.Hosts) > 1 {
-					slog.Info("batch updating SSH host keys", "count", len(cfg.Hosts))
+				if len(coreCfg.Hosts) > 1 {
+					slog.Info("batch updating SSH host keys", "count", len(coreCfg.Hosts))
 
 					successCount := 0
 					failCount := 0
 					var lastErr error
 
-					for _, host := range cfg.Hosts {
+					for _, host := range coreCfg.Hosts {
 						fingerprint, err := updateHostKey(ctx, host, deps)
 						if err != nil {
 							slog.Error("host key update failed", "host", host, "error", err)
@@ -150,11 +150,11 @@ var Command = []*cli.Command{
 				}
 
 				// Single host mode
-				if len(cfg.Hosts) != 1 {
+				if len(coreCfg.Hosts) != 1 {
 					return fmt.Errorf("no hosts specified or discovered")
 				}
 
-				host := cfg.Hosts[0]
+				host := coreCfg.Hosts[0]
 				slog.Info("updating SSH host key only", "host", host)
 				fingerprint, err := updateHostKey(ctx, host, deps)
 				if err != nil {
@@ -168,16 +168,16 @@ var Command = []*cli.Command{
 			}
 
 			// Normal enrollment requires exactly one host and hostname
-			if len(cfg.Hosts) != 1 {
-				slog.Debug("enroll command requires exactly one host", "got", len(cfg.Hosts))
-				return fmt.Errorf("enroll command requires exactly one host, got %d", len(cfg.Hosts))
+			if len(coreCfg.Hosts) != 1 {
+				slog.Debug("enroll command requires exactly one host", "got", len(coreCfg.Hosts))
+				return fmt.Errorf("enroll command requires exactly one host, got %d", len(coreCfg.Hosts))
 			}
 
 			if enrollCfg.Hostname == "" {
 				return fmt.Errorf("--hostname is required for enrollment")
 			}
 
-			host := cfg.Hosts[0]
+			host := coreCfg.Hosts[0]
 
 			// Handle force re-enrollment
 			if enrollCfg.Force {

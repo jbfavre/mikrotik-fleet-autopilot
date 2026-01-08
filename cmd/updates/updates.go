@@ -12,12 +12,12 @@ import (
 	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
-// Config holds all updates configuration options
+// UpdatesConfig holds all updates configuration options
 type UpdatesConfig struct {
 	UpdatesApply bool
 }
 
-// Dependencies holds injectable dependencies for testing
+// UpdatesDependencies holds injectable dependencies for testing
 type UpdatesDependencies struct {
 	SSHConnectionFactory func(context.Context, string) (sshpkg.Runner, error)
 	ReconnectDelay       time.Duration

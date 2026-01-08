@@ -15,7 +15,7 @@ import (
 	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
-// Config holds all enrollment configuration options
+// EnrollConfig holds all enrollment configuration options
 type EnrollConfig struct {
 	Hostname          string
 	PreEnrollScript   string
@@ -27,7 +27,7 @@ type EnrollConfig struct {
 	UpdateHostKeyOnly bool
 }
 
-// Dependencies holds injectable dependencies for testing
+// EnrollDependencies holds injectable dependencies for testing
 type EnrollDependencies struct {
 	SSHConnectionFactory func(context.Context, string) (sshpkg.Runner, error)
 	ApplyUpdatesFunc     func(context.Context, string) error

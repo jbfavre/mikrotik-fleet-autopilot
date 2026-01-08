@@ -13,13 +13,13 @@ import (
 	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
-// Config holds all export configuration options
+// ExportConfig holds all export configuration options
 type ExportConfig struct {
 	ShowSensitive bool
 	OutputDir     string
 }
 
-// Dependencies holds injectable dependencies for testing
+// ExportDependencies holds injectable dependencies for testing
 type ExportDependencies struct {
 	SSHConnectionFactory func(context.Context, string) (sshpkg.Runner, error)
 }

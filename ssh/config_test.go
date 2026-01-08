@@ -373,33 +373,6 @@ func TestParseHost_Hostname(t *testing.T) {
 	}
 }
 
-// TestIsIPAddress tests the IsIPAddress function
-func TestIsIPAddress(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected bool
-	}{
-		{"IPv4", "192.168.1.1", true},
-		{"IPv4 localhost", "127.0.0.1", true},
-		{"IPv6 short", "::1", true},
-		{"IPv6 full", "2001:0db8:85a3:0000:0000:8a2e:0370:7334", true},
-		{"Hostname", "router1", false},
-		{"FQDN", "router1.home.local", false},
-		{"Invalid IP", "999.999.999.999", false},
-		{"Empty string", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsIPAddress(tt.input)
-			if result != tt.expected {
-				t.Errorf("IsIPAddress(%q) = %v, want %v", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
 // BenchmarkParseHost benchmarks the ParseHost function
 func BenchmarkParseHost(b *testing.B) {
 	testInputs := []string{
@@ -413,23 +386,6 @@ func BenchmarkParseHost(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, input := range testInputs {
 			ParseHost(input)
-		}
-	}
-}
-
-// BenchmarkIsIPAddress benchmarks the IsIPAddress function
-func BenchmarkIsIPAddress(b *testing.B) {
-	testInputs := []string{
-		"192.168.1.1",
-		"router1.home.local",
-		"router1",
-		"::1",
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		for _, input := range testInputs {
-			IsIPAddress(input)
 		}
 	}
 }

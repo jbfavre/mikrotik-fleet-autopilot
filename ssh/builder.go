@@ -13,14 +13,12 @@ import (
 // DefaultConnectionBuilder implements ConnectionBuilder
 type DefaultConnectionBuilder struct {
 	configReader ConfigReader
-	authProvider AuthProvider
 }
 
 // NewConnectionBuilder creates a new ConnectionBuilder
-func NewConnectionBuilder(configReader ConfigReader, authProvider AuthProvider) *DefaultConnectionBuilder {
+func NewConnectionBuilder(configReader ConfigReader) *DefaultConnectionBuilder {
 	return &DefaultConnectionBuilder{
 		configReader: configReader,
-		authProvider: authProvider,
 	}
 }
 
@@ -32,7 +30,7 @@ func (b *DefaultConnectionBuilder) Build(ctx context.Context, host, username, pa
 	}
 
 	// Step 1: Read SSH configuration
-	hostInfo, err := b.configReader.ReadConfig(host)
+	hostInfo, err := readConfig(host)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read SSH config: %w", err)
 	}

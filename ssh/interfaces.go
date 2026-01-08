@@ -40,11 +40,6 @@ type ConfigReader interface {
 	ReadConfig(host string) (*HostInfo, error)
 }
 
-// AuthProvider provides SSH authentication methods
-type AuthProvider interface {
-	BuildAuthMethods(hostInfo *HostInfo, password, passphrase string) ([]ssh.AuthMethod, error)
-}
-
 // HostKeyCallback provides host key validation
 type HostKeyCallback func(hostname string, remote interface{}, key ssh.PublicKey) error
 

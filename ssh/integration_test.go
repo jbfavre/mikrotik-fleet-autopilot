@@ -143,8 +143,7 @@ func TestConnection_Run_WithMockServer(t *testing.T) {
 
 	// Create connection using builder
 	configReader := &DefaultConfigReader{}
-	authProvider := &DefaultAuthProvider{}
-	builder := NewConnectionBuilder(configReader, authProvider)
+	builder := NewConnectionBuilder(configReader)
 
 	ctx := context.Background()
 	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
@@ -180,8 +179,7 @@ func TestConnection_Close_WithMockServer(t *testing.T) {
 	defer server.stop()
 
 	configReader := &DefaultConfigReader{}
-	authProvider := &DefaultAuthProvider{}
-	builder := NewConnectionBuilder(configReader, authProvider)
+	builder := NewConnectionBuilder(configReader)
 
 	ctx := context.Background()
 	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
@@ -212,8 +210,7 @@ func TestBuild_WithUsername(t *testing.T) {
 	defer server.stop()
 
 	configReader := &DefaultConfigReader{}
-	authProvider := &DefaultAuthProvider{}
-	builder := NewConnectionBuilder(configReader, authProvider)
+	builder := NewConnectionBuilder(configReader)
 
 	ctx := context.Background()
 	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
@@ -269,8 +266,7 @@ Host testhost
 	}()
 
 	configReader := &DefaultConfigReader{}
-	authProvider := &DefaultAuthProvider{}
-	builder := NewConnectionBuilder(configReader, authProvider)
+	builder := NewConnectionBuilder(configReader)
 
 	ctx := context.Background()
 	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
@@ -318,13 +314,12 @@ func TestBuildAuthMethods_WithValidKey(t *testing.T) {
 	}
 
 	// Test with key and password
-	provider := &DefaultAuthProvider{}
 	hostInfo := &HostInfo{
 		Hostname:     "test.host",
 		IdentityFile: keyPath,
 	}
 
-	methods, err := provider.BuildAuthMethods(hostInfo, "password123", passphrase)
+	methods, err := buildAuthMethods(hostInfo, "password123", passphrase)
 	if err != nil {
 		t.Fatalf("BuildAuthMethods() error = %v", err)
 	}
@@ -357,14 +352,13 @@ func TestBuildAuthMethods_KeyOnlySuccess(t *testing.T) {
 	}
 
 	// Test with key only (provide empty passphrase to trigger key loading)
-	provider := &DefaultAuthProvider{}
 	hostInfo := &HostInfo{
 		Hostname:     "test.host",
 		IdentityFile: keyPath,
 	}
 
 	// Need to provide passphrase parameter (even if empty) to trigger key loading logic
-	methods, err := provider.BuildAuthMethods(hostInfo, "", "")
+	methods, err := buildAuthMethods(hostInfo, "", "")
 	if err != nil {
 		// Expected: without passphrase parameter, no auth method is provided
 		t.Logf("BuildAuthMethods() with empty passphrase: %v", err)
@@ -382,8 +376,7 @@ func TestBuild_AuthenticationFailure(t *testing.T) {
 	defer server.stop()
 
 	configReader := &DefaultConfigReader{}
-	authProvider := &DefaultAuthProvider{}
-	builder := NewConnectionBuilder(configReader, authProvider)
+	builder := NewConnectionBuilder(configReader)
 
 	ctx := context.Background()
 	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
@@ -407,8 +400,7 @@ func TestBuild_HostKeyRejection(t *testing.T) {
 	defer server.stop()
 
 	configReader := &DefaultConfigReader{}
-	authProvider := &DefaultAuthProvider{}
-	builder := NewConnectionBuilder(configReader, authProvider)
+	builder := NewConnectionBuilder(configReader)
 
 	ctx := context.Background()
 	// Reject all host keys
@@ -430,8 +422,7 @@ func TestBuild_HostKeyRejection(t *testing.T) {
 func TestBuild_ShortTimeout(t *testing.T) {
 	// Don't start a server - let it timeout
 	configReader := &DefaultConfigReader{}
-	authProvider := &DefaultAuthProvider{}
-	builder := NewConnectionBuilder(configReader, authProvider)
+	builder := NewConnectionBuilder(configReader)
 
 	// Use very short context timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)

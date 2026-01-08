@@ -233,11 +233,11 @@ func TestUpdates(t *testing.T) {
 			}
 
 			// Build test configuration
-			cfg := Config{
+			cfg := UpdatesConfig{
 				UpdatesApply: tt.applyUpdates,
 			}
 
-			deps := Dependencies{
+			deps := UpdatesDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 				ReconnectDelay:       10 * time.Millisecond, // Speed up tests
 			}
@@ -830,7 +830,7 @@ func TestApplyUpdate(t *testing.T) {
 				}, nil
 			}
 
-			deps := Dependencies{
+			deps := UpdatesDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 				ReconnectDelay:       1 * time.Millisecond, // Speed up tests
 			}
@@ -1030,7 +1030,7 @@ func TestApplyComponentUpdate(t *testing.T) {
 				}, nil
 			}
 
-			deps := Dependencies{
+			deps := UpdatesDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 				ReconnectDelay:       1 * time.Millisecond, // Speed up tests
 			}

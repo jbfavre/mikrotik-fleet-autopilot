@@ -160,12 +160,12 @@ add name=bridge1`,
 			}
 
 			// Build test configuration
-			cfg := Config{
+			cfg := ExportConfig{
 				ShowSensitive: tt.showSensitive,
 				OutputDir:     tmpDir,
 			}
 
-			deps := Dependencies{
+			deps := ExportDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 			}
 
@@ -311,12 +311,12 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 			}
 
 			// Build test configuration
-			cfg := Config{
+			cfg := ExportConfig{
 				ShowSensitive: tt.showSensitive,
 				OutputDir:     tmpDir,
 			}
 
-			deps := Dependencies{
+			deps := ExportDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 			}
 
@@ -356,12 +356,12 @@ func TestExport_SSHConnectionFactoryError(t *testing.T) {
 		return nil, fmt.Errorf("SSH connection failed: timeout")
 	}
 
-	cfg := Config{
+	cfg := ExportConfig{
 		ShowSensitive: false,
 		OutputDir:     t.TempDir(),
 	}
 
-	deps := Dependencies{
+	deps := ExportDependencies{
 		SSHConnectionFactory: mockSSHFactory,
 	}
 
@@ -409,12 +409,12 @@ func TestExport_CloseError(t *testing.T) {
 		}, nil
 	}
 
-	cfg := Config{
+	cfg := ExportConfig{
 		ShowSensitive: false,
 		OutputDir:     tmpDir,
 	}
 
-	deps := Dependencies{
+	deps := ExportDependencies{
 		SSHConnectionFactory: mockSSHFactory,
 	}
 

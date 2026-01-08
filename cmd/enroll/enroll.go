@@ -16,7 +16,7 @@ import (
 )
 
 // Config holds all enrollment configuration options
-type Config struct {
+type EnrollConfig struct {
 	Hostname          string
 	PreEnrollScript   string
 	PostEnrollScript  string
@@ -28,7 +28,7 @@ type Config struct {
 }
 
 // Dependencies holds injectable dependencies for testing
-type Dependencies struct {
+type EnrollDependencies struct {
 	SSHConnectionFactory func(context.Context, string) (sshpkg.Runner, error)
 	ApplyUpdatesFunc     func(context.Context, string) error
 	ExportConfigFunc     func(context.Context, string, string, bool, string) error
@@ -96,7 +96,7 @@ func enroll(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Build enrollment configuration from CLI flags
-	enrollCfg := Config{
+	enrollCfg := EnrollConfig{
 		Hostname:          cmd.String("hostname"),
 		PreEnrollScript:   cmd.String("pre-enroll-script"),
 		PostEnrollScript:  cmd.String("post-enroll-script"),
@@ -117,7 +117,7 @@ func enroll(ctx context.Context, cmd *cli.Command) error {
 	slog.Debug("enrollment mode enabled in context")
 
 	// Build dependencies for all operations
-	deps := Dependencies{
+	deps := EnrollDependencies{
 		SSHConnectionFactory: core.CreateConnection,
 		ApplyUpdatesFunc:     updates.Updates,
 		ExportConfigFunc:     export.Export,
@@ -152,7 +152,7 @@ func enroll(ctx context.Context, cmd *cli.Command) error {
 }
 
 // updateHostKeysOnly processes host key updates for one or more hosts
-func updateHostKeysOnly(ctx context.Context, hosts []string, deps Dependencies) error {
+func updateHostKeysOnly(ctx context.Context, hosts []string, deps EnrollDependencies) error {
 	// Batch mode: update hostkeys for all discovered hosts
 	if len(hosts) > 1 {
 		slog.Info("batch updating SSH host keys", "count", len(hosts))
@@ -203,7 +203,7 @@ func updateHostKeysOnly(ctx context.Context, hosts []string, deps Dependencies) 
 }
 
 // performEnrollmentSteps executes the enrollment workflow (assumes host key already captured)
-func performEnrollmentSteps(ctx context.Context, host string, cfg Config, deps Dependencies) error {
+func performEnrollmentSteps(ctx context.Context, host string, cfg EnrollConfig, deps EnrollDependencies) error {
 	// Validate that hostname is provided
 	if cfg.Hostname == "" {
 		return fmt.Errorf("--hostname is required for enrollment")
@@ -278,7 +278,7 @@ func performEnrollmentSteps(ctx context.Context, host string, cfg Config, deps D
 }
 
 // connectToRouter establishes an SSH connection to the router
-func connectToRouter(ctx context.Context, host string, deps Dependencies) (sshpkg.Runner, error) {
+func connectToRouter(ctx context.Context, host string, deps EnrollDependencies) (sshpkg.Runner, error) {
 	slog.Debug("connecting to router", "host", host)
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
@@ -291,7 +291,7 @@ func connectToRouter(ctx context.Context, host string, deps Dependencies) (sshpk
 }
 
 // applyPreEnrollScript applies the pre-enrollment configuration script
-func applyPreEnrollScript(conn sshpkg.Runner, cfg Config) error {
+func applyPreEnrollScript(conn sshpkg.Runner, cfg EnrollConfig) error {
 	slog.Debug("applying pre-enroll configuration file")
 	if err := applyConfigFile(conn, cfg.PreEnrollScript); err != nil {
 		slog.Error("failed to apply pre-enroll configuration file", "error", err)
@@ -304,7 +304,7 @@ func applyPreEnrollScript(conn sshpkg.Runner, cfg Config) error {
 }
 
 // applyUpdates applies system updates unless skipped
-func applyUpdates(ctx context.Context, host string, cfg Config, deps Dependencies) error {
+func applyUpdates(ctx context.Context, host string, cfg EnrollConfig, deps EnrollDependencies) error {
 	if cfg.SkipUpdates {
 		slog.Debug("skipping updates")
 		fmt.Printf("❓ Updates skipped\n")
@@ -321,7 +321,7 @@ func applyUpdates(ctx context.Context, host string, cfg Config, deps Dependencie
 }
 
 // exportConfiguration exports the router configuration and recreates SSH connection
-func exportConfiguration(ctx context.Context, host string, cfg Config, deps Dependencies, conn sshpkg.Runner) (sshpkg.Runner, error) {
+func exportConfiguration(ctx context.Context, host string, cfg EnrollConfig, deps EnrollDependencies, conn sshpkg.Runner) (sshpkg.Runner, error) {
 	if cfg.SkipExport {
 		slog.Debug("skipping export")
 		fmt.Printf("❓ Export skipped\n")
@@ -347,7 +347,7 @@ func exportConfiguration(ctx context.Context, host string, cfg Config, deps Depe
 }
 
 // applyPostEnrollScript applies the post-enrollment configuration script
-func applyPostEnrollScript(conn sshpkg.Runner, cfg Config) error {
+func applyPostEnrollScript(conn sshpkg.Runner, cfg EnrollConfig) error {
 	slog.Debug("applying post-enroll configuration file")
 	if err := applyConfigFile(conn, cfg.PostEnrollScript); err != nil {
 		slog.Error("failed to apply post-enroll configuration file", "error", err)
@@ -409,7 +409,7 @@ func setRouterIdentity(conn sshpkg.Runner, hostname string) error {
 
 // updateHostKey captures the SSH host key for the first time or updates an existing one,
 // without performing full enrollment.
-func updateHostKey(ctx context.Context, host string, deps Dependencies) (string, error) {
+func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (string, error) {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("context cancelled: %w", err)

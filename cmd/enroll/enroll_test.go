@@ -518,7 +518,7 @@ func TestPerformEnrollment(t *testing.T) {
 			}
 
 			// Build config directly from test values
-			cfg := Config{
+			cfg := EnrollConfig{
 				Hostname:          tt.hostnameValue,
 				PreEnrollScript:   tt.setupPreConfig(),
 				PostEnrollScript:  tt.setupPostConfig(),
@@ -574,7 +574,7 @@ func TestPerformEnrollment(t *testing.T) {
 			ctx := context.Background()
 
 			// Build dependencies from test mocks
-			deps := Dependencies{
+			deps := EnrollDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 				ApplyUpdatesFunc:     mockApplyUpdates,
 				ExportConfigFunc:     mockExportConfig,
@@ -697,7 +697,7 @@ func TestUpdateHostKey(t *testing.T) {
 			}
 
 			// Execute
-			deps := Dependencies{
+			deps := EnrollDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 				ApplyUpdatesFunc:     updates.Updates,
 				ExportConfigFunc:     export.Export,
@@ -936,7 +936,7 @@ func TestUpdateHostKeyBatchMode(t *testing.T) {
 			failCount := 0
 			var lastErr error
 
-			deps := Dependencies{
+			deps := EnrollDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 				ApplyUpdatesFunc:     updates.Updates,
 				ExportConfigFunc:     export.Export,
@@ -1101,7 +1101,7 @@ func TestHandleUpdateHostKeyOnly(t *testing.T) {
 				}, nil
 			}
 
-			deps := Dependencies{
+			deps := EnrollDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 				ApplyUpdatesFunc:     updates.Updates,
 				ExportConfigFunc:     export.Export,
@@ -1234,7 +1234,7 @@ func TestHandleNormalEnrollment(t *testing.T) {
 			}
 
 			// Build config
-			cfg := Config{
+			cfg := EnrollConfig{
 				Hostname:         tt.hostname,
 				PreEnrollScript:  preEnrollFile,
 				PostEnrollScript: postEnrollFile,
@@ -1267,7 +1267,7 @@ func TestHandleNormalEnrollment(t *testing.T) {
 				}, nil
 			}
 
-			deps := Dependencies{
+			deps := EnrollDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 				ApplyUpdatesFunc:     updates.Updates,
 				ExportConfigFunc:     export.Export,
@@ -1393,7 +1393,7 @@ func TestEnrollActionValidation(t *testing.T) {
 			_ = os.Chdir(tmpDir)
 
 			// Build enrollment config from test values
-			enrollCfg := Config{
+			enrollCfg := EnrollConfig{
 				Hostname:          tt.hostnameValue,
 				UpdateHostKeyOnly: tt.updateHostKeyOnly,
 				Force:             tt.force,
@@ -1423,7 +1423,7 @@ func TestEnrollActionValidation(t *testing.T) {
 			var err error
 
 			// Build dependencies from test mocks
-			deps := Dependencies{
+			deps := EnrollDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 				ApplyUpdatesFunc:     updates.Updates,
 				ExportConfigFunc:     export.Export,

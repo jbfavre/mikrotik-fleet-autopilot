@@ -60,7 +60,7 @@ var Command = []*cli.Command{
 			// Iterate over all hosts
 			var lastErr error
 			for _, host := range coreCfg.Hosts {
-				if err := export(ctx, host, "", exportCfg, deps); err != nil { // Empty string = derive from host
+				if err := export(ctx, host, "", exportCfg, deps); err != nil { // Empty preferred filename = derive automatically
 					lastErr = err
 					// Continue with other hosts even if one fails
 				}

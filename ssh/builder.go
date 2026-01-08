@@ -1,12 +1,10 @@
 package ssh
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"net"
-	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -48,7 +46,7 @@ func (b *DefaultConnectionBuilder) Build(ctx context.Context, host, username, pa
 		"identityFile", hostInfo.IdentityFile)
 
 	// Step 2: Build authentication methods
-	authMethods, err := b.authProvider.BuildAuthMethods(hostInfo, password, passphrase)
+	authMethods, err := buildAuthMethods(hostInfo, password, passphrase)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build auth methods: %w", err)
 	}
@@ -102,60 +100,5 @@ func (b *DefaultConnectionBuilder) Build(ctx context.Context, host, username, pa
 	client := ssh.NewClient(c, chans, reqs)
 
 	slog.Debug("SSH connection established")
-	return &Connection{client: client}, nil
-}
-
-// Connection implements Runner interface
-type Connection struct {
-	client *ssh.Client
-}
-
-// GetClient returns the underlying SSH client (for backward compatibility)
-func (c *Connection) GetClient() *ssh.Client {
-	return c.client
-}
-
-func (c *Connection) Close() error {
-	if c.client == nil {
-		return nil
-	}
-	err := c.client.Close()
-	if err != nil && !c.IsAlreadyClosedError(err) {
-		slog.Warn("failed to close SSH connection", "error", err)
-		return err
-	}
-	return nil
-}
-
-func (c *Connection) IsAlreadyClosedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errMsg := err.Error()
-	return strings.Contains(errMsg, "use of closed network connection") ||
-		strings.Contains(errMsg, "connection already closed")
-}
-
-func (c *Connection) Run(cmd string) (string, error) {
-	if c.client == nil {
-		slog.Warn("SSH connection not established")
-		return "", fmt.Errorf("SSH connection not established")
-	}
-
-	session, err := c.client.NewSession()
-	if err != nil {
-		slog.Warn("failed to create session", "error", err)
-		return "", fmt.Errorf("failed to create session: %v", err)
-	}
-	defer func() {
-		_ = session.Close()
-	}()
-
-	var b bytes.Buffer
-	session.Stdout = &b
-	if err := session.Run(cmd); err != nil {
-		slog.Warn("failed to run command", "command", cmd, "error", err)
-		return "", fmt.Errorf("failed to run command: %v", err)
-	}
-	return b.String(), nil
+	return &DefaultRunner{client: client}, nil
 }

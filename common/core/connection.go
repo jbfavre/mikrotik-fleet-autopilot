@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 // CreateConnection retrieves credentials and host key manager from context

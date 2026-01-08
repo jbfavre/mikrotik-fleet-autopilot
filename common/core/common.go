@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 // ContextKey is a custom type for context keys to avoid collisions

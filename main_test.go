@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"jb.favre/mikrotik-fleet-autopilot/core"
-	"jb.favre/mikrotik-fleet-autopilot/ssh"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 func TestBuildCommand(t *testing.T) {

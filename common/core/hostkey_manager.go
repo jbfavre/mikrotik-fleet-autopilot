@@ -2,7 +2,7 @@ package core
 
 import (
 	"golang.org/x/crypto/ssh"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 // HostKeyManager encapsulates host key operations and provides them

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 // HostKeyInfo stores information about a captured SSH host key

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 func TestGetConfig(t *testing.T) {
@@ -391,9 +391,9 @@ func TestGetSshManager(t *testing.T) {
 			errContains: "invalid ssh manager type or not found",
 		},
 		{
-			name:        "nil value in context",
-			ctx:         context.WithValue(context.Background(), SshManagerKey, (*sshpkg.SshManager)(nil)),
-			wantErr:     false, // nil pointer of correct type is valid
+			name:    "nil value in context",
+			ctx:     context.WithValue(context.Background(), SshManagerKey, (*sshpkg.SshManager)(nil)),
+			wantErr: false, // nil pointer of correct type is valid
 		},
 	}
 

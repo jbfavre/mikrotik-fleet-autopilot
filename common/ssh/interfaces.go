@@ -33,7 +33,6 @@ type HostInfo struct {
 	PubkeyAcceptedAlgorithms string
 }
 
-
 // HostKeyCallback provides host key validation
 type HostKeyCallback func(hostname string, remote interface{}, key ssh.PublicKey) error
 

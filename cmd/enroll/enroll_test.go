@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"jb.favre/mikrotik-fleet-autopilot/core"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 // copyFile copies a file from src to dst

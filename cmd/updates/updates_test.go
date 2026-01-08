@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"jb.favre/mikrotik-fleet-autopilot/core"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 // MockSshRunner is a mock implementation of ssh.Runner for testing

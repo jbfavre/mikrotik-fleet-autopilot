@@ -10,8 +10,8 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/cmd/enroll"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
-	"jb.favre/mikrotik-fleet-autopilot/core"
-	"jb.favre/mikrotik-fleet-autopilot/ssh"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 func main() {

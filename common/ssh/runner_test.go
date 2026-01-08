@@ -2,8 +2,8 @@ package ssh
 
 import (
 	"context"
-	"fmt"
 	"errors"
+	"fmt"
 	"testing"
 
 	"golang.org/x/crypto/ssh"

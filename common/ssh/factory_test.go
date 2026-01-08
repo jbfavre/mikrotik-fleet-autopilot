@@ -420,9 +420,9 @@ func TestCreateConnection_ContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately
 
 	manager := &mockTestHostKeyManager{
-		existsFunc:    func(host string) bool { return true },
-		verifyFunc:    func(host string, key ssh.PublicKey) error { return nil },
-		captureFunc:   func(host string, key ssh.PublicKey) error { return nil },
+		existsFunc:         func(host string) bool { return true },
+		verifyFunc:         func(host string, key ssh.PublicKey) error { return nil },
+		captureFunc:        func(host string, key ssh.PublicKey) error { return nil },
 		getFingerprintFunc: func(key ssh.PublicKey) string { return "test" },
 	}
 
@@ -445,9 +445,9 @@ func TestCreateConnection_InvalidAuthMethods(t *testing.T) {
 	ctx := context.Background()
 
 	manager := &mockTestHostKeyManager{
-		existsFunc:    func(host string) bool { return true },
-		verifyFunc:    func(host string, key ssh.PublicKey) error { return nil },
-		captureFunc:   func(host string, key ssh.PublicKey) error { return nil },
+		existsFunc:         func(host string) bool { return true },
+		verifyFunc:         func(host string, key ssh.PublicKey) error { return nil },
+		captureFunc:        func(host string, key ssh.PublicKey) error { return nil },
 		getFingerprintFunc: func(key ssh.PublicKey) string { return "test" },
 	}
 

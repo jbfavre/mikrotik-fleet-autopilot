@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v3"
-	"jb.favre/mikrotik-fleet-autopilot/core"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 var showSensitive bool

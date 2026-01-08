@@ -11,8 +11,8 @@ import (
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
-	"jb.favre/mikrotik-fleet-autopilot/core"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/ssh"
+	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 var hostname string

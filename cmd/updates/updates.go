@@ -35,7 +35,7 @@ var Command = []*cli.Command{
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg, err := core.GetConfig(ctx)
+			coreCfg, err := core.GetConfig(ctx)
 			if err != nil {
 				return err
 			}
@@ -53,7 +53,7 @@ var Command = []*cli.Command{
 
 			// Iterate over all hosts
 			var lastErr error
-			for _, host := range cfg.Hosts {
+			for _, host := range coreCfg.Hosts {
 				if err := updates(ctx, host, updatesCfg, deps); err != nil {
 					slog.Debug("error checking updates", "host", host, "error", err)
 					fmt.Printf("❓ %s is unreachable\n", host)

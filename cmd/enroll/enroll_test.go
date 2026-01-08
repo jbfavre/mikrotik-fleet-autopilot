@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
+	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
 	core "jb.favre/mikrotik-fleet-autopilot/common/core"
 	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
@@ -496,43 +498,38 @@ func TestEnroll(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup - set all package variables
-			preEnrollScript = tt.setupPreConfig()
-			postEnrollScript = tt.setupPostConfig()
-			hostname = tt.hostnameValue
-			skipUpdates = tt.skipUpdatesValue
-			skipExport = tt.skipExportValue
-			outputDir = "."
+			// Build config directly from test values
+			cfg := Config{
+				Hostname:          tt.hostnameValue,
+				PreEnrollScript:   tt.setupPreConfig(),
+				PostEnrollScript:  tt.setupPostConfig(),
+				SkipUpdates:       tt.skipUpdatesValue,
+				SkipExport:        tt.skipExportValue,
+				OutputDir:         ".",
+				Force:             false,
+				UpdateHostKeyOnly: false,
+			}
 
-			// Mock SSH connection factory
-			originalFactory := sshConnectionFactory
-			defer func() { sshConnectionFactory = originalFactory }()
-
-			// Mock updates function
-			originalUpdatesFunc := applyUpdatesFunc
+			// Create mock functions
 			updatesCallCount := 0
-			applyUpdatesFunc = func(ctx context.Context, host string) error {
+			mockApplyUpdates := func(ctx context.Context, host string) error {
 				updatesCallCount++
 				if tt.updatesError != nil {
 					return tt.updatesError
 				}
 				return nil
 			}
-			defer func() { applyUpdatesFunc = originalUpdatesFunc }()
 
-			// Mock export function
-			originalExportFunc := exportConfigFunc
 			exportCallCount := 0
-			exportConfigFunc = func(ctx context.Context, host string, outputDir string, showSensitive bool, preferredFilename string) error {
+			mockExportConfig := func(ctx context.Context, host string, outputDir string, showSensitive bool, preferredFilename string) error {
 				exportCallCount++
 				if tt.exportError != nil {
 					return tt.exportError
 				}
 				return nil
 			}
-			defer func() { exportConfigFunc = originalExportFunc }()
 
-			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				if tt.connectionError != nil {
 					return nil, tt.connectionError
 				}
@@ -552,8 +549,15 @@ func TestEnroll(t *testing.T) {
 			// Create context
 			ctx := context.Background()
 
+			// Build dependencies from test mocks
+			deps := Dependencies{
+				SSHConnectionFactory: mockSSHFactory,
+				ApplyUpdatesFunc:     mockApplyUpdates,
+				ExportConfigFunc:     mockExportConfig,
+			}
+
 			// Test enroll
-			err := enroll(ctx, tt.host)
+			err := enroll(ctx, tt.host, cfg, deps)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
@@ -653,11 +657,8 @@ func TestUpdateHostKey(t *testing.T) {
 				}
 			}
 
-			// Mock SSH connection factory
-			originalFactory := sshConnectionFactory
-			defer func() { sshConnectionFactory = originalFactory }()
-
-			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			// Create mock SSH connection factory
+			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				if tt.connectionError {
 					return nil, fmt.Errorf("connection failed")
 				}
@@ -678,7 +679,12 @@ func TestUpdateHostKey(t *testing.T) {
 			}
 
 			// Execute
-			_, err := updateHostKey(ctx, tt.host)
+			deps := Dependencies{
+				SSHConnectionFactory: mockSSHFactory,
+				ApplyUpdatesFunc:     updates.ApplyUpdates,
+				ExportConfigFunc:     export.ExportConfig,
+			}
+			_, err := updateHostKey(ctx, tt.host, deps)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
@@ -890,11 +896,8 @@ func TestUpdateHostKeyBatchMode(t *testing.T) {
 				}
 			}
 
-			// Mock SSH connection factory
-			originalFactory := sshConnectionFactory
-			defer func() { sshConnectionFactory = originalFactory }()
-
-			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			// Create mock SSH connection factory
+			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				if tt.connectionErrors[host] {
 					return nil, fmt.Errorf("connection failed for %s", host)
 				}
@@ -915,8 +918,13 @@ func TestUpdateHostKeyBatchMode(t *testing.T) {
 			failCount := 0
 			var lastErr error
 
+			deps := Dependencies{
+				SSHConnectionFactory: mockSSHFactory,
+				ApplyUpdatesFunc:     updates.ApplyUpdates,
+				ExportConfigFunc:     export.ExportConfig,
+			}
 			for _, host := range tt.hosts {
-				if _, err := updateHostKey(ctx, host); err != nil {
+				if _, err := updateHostKey(ctx, host, deps); err != nil {
 					failCount++
 					lastErr = err
 				} else {
@@ -1027,10 +1035,12 @@ func TestEnrollActionValidation(t *testing.T) {
 			}()
 			_ = os.Chdir(tmpDir)
 
-			// Set package variables
-			hostname = tt.hostnameValue
-			updateHostKeyOnly = tt.updateHostKeyOnly
-			force = tt.force
+			// Build enrollment config from test values
+			enrollCfg := Config{
+				Hostname:          tt.hostnameValue,
+				UpdateHostKeyOnly: tt.updateHostKeyOnly,
+				Force:             tt.force,
+			}
 
 			// Create mock config
 			cfg := &core.Config{
@@ -1039,11 +1049,8 @@ func TestEnrollActionValidation(t *testing.T) {
 			ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
 			ctx = context.WithValue(ctx, core.EnrollmentModeKey, true)
 
-			// Mock SSH connection factory
-			originalFactory := sshConnectionFactory
-			defer func() { sshConnectionFactory = originalFactory }()
-
-			sshConnectionFactory = func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			// Create mock SSH connection factory
+			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
 				// Simulate host key capture
 				srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
 				dstFile := core.HostKeyFilePath(host)
@@ -1058,10 +1065,17 @@ func TestEnrollActionValidation(t *testing.T) {
 			// Execute the Action logic directly (simulating the CLI command execution)
 			var err error
 
+			// Build dependencies from test mocks
+			deps := Dependencies{
+				SSHConnectionFactory: mockSSHFactory,
+				ApplyUpdatesFunc:     updates.ApplyUpdates,
+				ExportConfigFunc:     export.ExportConfig,
+			}
+
 			// Validate flag combinations
-			if force && updateHostKeyOnly {
+			if enrollCfg.Force && enrollCfg.UpdateHostKeyOnly {
 				err = fmt.Errorf("cannot use --force and --update-hostkey-only together")
-			} else if updateHostKeyOnly {
+			} else if enrollCfg.UpdateHostKeyOnly {
 				// Batch mode: update hostkeys for all discovered hosts
 				if len(cfg.Hosts) > 1 {
 					successCount := 0
@@ -1069,7 +1083,7 @@ func TestEnrollActionValidation(t *testing.T) {
 					var lastErr error
 
 					for _, host := range cfg.Hosts {
-						if _, updateErr := updateHostKey(ctx, host); updateErr != nil {
+						if _, updateErr := updateHostKey(ctx, host, deps); updateErr != nil {
 							failCount++
 							lastErr = updateErr
 						} else {
@@ -1085,7 +1099,7 @@ func TestEnrollActionValidation(t *testing.T) {
 				} else if len(cfg.Hosts) == 1 {
 					// Single host mode
 					host := cfg.Hosts[0]
-					_, err = updateHostKey(ctx, host)
+					_, err = updateHostKey(ctx, host, deps)
 				} else {
 					err = fmt.Errorf("no hosts specified or discovered")
 				}
@@ -1093,7 +1107,7 @@ func TestEnrollActionValidation(t *testing.T) {
 				// Normal enrollment validation
 				if len(cfg.Hosts) != 1 {
 					err = fmt.Errorf("enroll command requires exactly one host, got %d", len(cfg.Hosts))
-				} else if hostname == "" {
+				} else if enrollCfg.Hostname == "" {
 					err = fmt.Errorf("--hostname is required for enrollment")
 				}
 			}

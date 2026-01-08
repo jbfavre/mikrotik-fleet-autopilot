@@ -229,7 +229,7 @@ func TestSetRouterIdentity(t *testing.T) {
 func TestPerformEnrollment(t *testing.T) {
 	tests := []struct {
 		name             string
-		host             string
+		hosts            []string
 		hostnameValue    string
 		setupPreConfig   func() string
 		setupPostConfig  func() string
@@ -244,7 +244,7 @@ func TestPerformEnrollment(t *testing.T) {
 	}{
 		{
 			name:             "successful enrollment",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  true,
@@ -264,7 +264,7 @@ func TestPerformEnrollment(t *testing.T) {
 		},
 		{
 			name:             "successful enrollment with updates",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			skipUpdatesValue: false,
 			skipExportValue:  true,
@@ -284,7 +284,7 @@ func TestPerformEnrollment(t *testing.T) {
 		},
 		{
 			name:             "successful enrollment with export",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  false,
@@ -304,7 +304,7 @@ func TestPerformEnrollment(t *testing.T) {
 		},
 		{
 			name:             "successful enrollment with updates and export",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			skipUpdatesValue: false,
 			skipExportValue:  false,
@@ -324,7 +324,7 @@ func TestPerformEnrollment(t *testing.T) {
 		},
 		{
 			name:             "updates failure (non-fatal)",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			skipUpdatesValue: false,
 			skipExportValue:  true,
@@ -345,7 +345,7 @@ func TestPerformEnrollment(t *testing.T) {
 		},
 		{
 			name:             "export failure (non-fatal)",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  false,
@@ -366,7 +366,7 @@ func TestPerformEnrollment(t *testing.T) {
 		},
 		{
 			name:             "connection failure",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			connectionError:  fmt.Errorf("failed to connect to host"),
 			skipUpdatesValue: true,
@@ -388,7 +388,7 @@ func TestPerformEnrollment(t *testing.T) {
 		},
 		{
 			name:             "pre-enroll config file application error",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  true,
@@ -412,7 +412,7 @@ func TestPerformEnrollment(t *testing.T) {
 		},
 		{
 			name:             "identity set error",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  true,
@@ -436,7 +436,7 @@ func TestPerformEnrollment(t *testing.T) {
 		},
 		{
 			name:             "post-enroll config file application error",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  true,
@@ -460,7 +460,7 @@ func TestPerformEnrollment(t *testing.T) {
 		},
 		{
 			name:             "missing post-enroll config file",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  true,
@@ -478,7 +478,7 @@ func TestPerformEnrollment(t *testing.T) {
 		},
 		{
 			name:             "missing pre-enroll config file",
-			host:             "192.168.1.50",
+			hosts:            []string{"192.168.1.50"},
 			hostnameValue:    "test-router",
 			skipUpdatesValue: true,
 			skipExportValue:  true,
@@ -498,6 +498,25 @@ func TestPerformEnrollment(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create temp directory and change to it to avoid polluting the repository
+			tempDir, errTempDir := os.MkdirTemp("", "enroll-test-*")
+			if errTempDir != nil {
+				t.Fatalf("Failed to create temp dir: %v", errTempDir)
+			}
+			defer os.RemoveAll(tempDir)
+
+			// Save current directory and restore it after test
+			originalDir, errOriginalDir := os.Getwd()
+			if errOriginalDir != nil {
+				t.Fatalf("Failed to get current directory: %v", errOriginalDir)
+			}
+			defer os.Chdir(originalDir)
+
+			// Change to temp directory
+			if errChdir := os.Chdir(tempDir); errChdir != nil {
+				t.Fatalf("Failed to change to temp directory: %v", errChdir)
+			}
+
 			// Build config directly from test values
 			cfg := Config{
 				Hostname:          tt.hostnameValue,
@@ -534,6 +553,11 @@ func TestPerformEnrollment(t *testing.T) {
 					return nil, tt.connectionError
 				}
 
+				// Simulate host key capture by creating a mock host key file
+				hostKeyFile := core.HostKeyFilePath(host)
+				mockHostKeyData := fmt.Sprintf(`{"host":"%s","algorithm":"ssh-ed25519","fingerprint":"SHA256:mockFingerprint123","publicKey":"mock-public-key","capturedAt":"2026-01-08T00:00:00Z"}`, host)
+				_ = os.WriteFile(hostKeyFile, []byte(mockHostKeyData), 0600)
+
 				return &MockSshRunner{
 					RunFunc: func(cmd string) (string, error) {
 						if tt.commandErrors != nil {
@@ -556,18 +580,18 @@ func TestPerformEnrollment(t *testing.T) {
 				ExportConfigFunc:     mockExportConfig,
 			}
 
-			// Test performEnrollment
-			err := performEnrollment(ctx, tt.host, cfg, deps)
+			// Test enrollSingleHost
+			err := enrollSingleHost(ctx, tt.hosts, cfg, deps)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
-				t.Errorf("performEnrollment() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("enrollSingleHost() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			if tt.wantErr && tt.errContains != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("performEnrollment() error = %v, should contain %q", err, tt.errContains)
+					t.Errorf("enrollSingleHost() error = %v, should contain %q", err, tt.errContains)
 				}
 			}
 
@@ -681,8 +705,8 @@ func TestUpdateHostKey(t *testing.T) {
 			// Execute
 			deps := Dependencies{
 				SSHConnectionFactory: mockSSHFactory,
-				ApplyUpdatesFunc:     updates.ApplyUpdates,
-				ExportConfigFunc:     export.ExportConfig,
+				ApplyUpdatesFunc:     updates.Updates,
+				ExportConfigFunc:     export.Export,
 			}
 			_, err := updateHostKey(ctx, tt.host, deps)
 
@@ -920,8 +944,8 @@ func TestUpdateHostKeyBatchMode(t *testing.T) {
 
 			deps := Dependencies{
 				SSHConnectionFactory: mockSSHFactory,
-				ApplyUpdatesFunc:     updates.ApplyUpdates,
-				ExportConfigFunc:     export.ExportConfig,
+				ApplyUpdatesFunc:     updates.Updates,
+				ExportConfigFunc:     export.Export,
 			}
 			for _, host := range tt.hosts {
 				if _, err := updateHostKey(ctx, host, deps); err != nil {
@@ -1085,22 +1109,22 @@ func TestHandleUpdateHostKeyOnly(t *testing.T) {
 
 			deps := Dependencies{
 				SSHConnectionFactory: mockSSHFactory,
-				ApplyUpdatesFunc:     updates.ApplyUpdates,
-				ExportConfigFunc:     export.ExportConfig,
+				ApplyUpdatesFunc:     updates.Updates,
+				ExportConfigFunc:     export.Export,
 			}
 
 			// Execute
-			err := handleUpdateHostKeyOnly(ctx, tt.hosts, deps)
+			err := updateHostKeysOnly(ctx, tt.hosts, deps)
 
 			// Verify error expectation
 			if (err != nil) != tt.wantErr {
-				t.Errorf("handleUpdateHostKeyOnly() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("updateHostKeysOnly() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			if tt.wantErr && tt.errContains != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("handleUpdateHostKeyOnly() error = %v, should contain %q", err, tt.errContains)
+					t.Errorf("updateHostKeysOnly() error = %v, should contain %q", err, tt.errContains)
 				}
 			}
 
@@ -1174,7 +1198,7 @@ func TestHandleNormalEnrollment(t *testing.T) {
 			hostname:        "test-router",
 			connectionError: true,
 			wantErr:         true,
-			errContains:     "failed to connect to router",
+			errContains:     "failed to capture host key",
 		},
 		{
 			name:     "enrollment fails on command error",
@@ -1232,8 +1256,12 @@ func TestHandleNormalEnrollment(t *testing.T) {
 					return nil, fmt.Errorf("connection failed")
 				}
 
+				// Simulate host key capture by creating a mock host key file
+				hostKeyFile := core.HostKeyFilePath(host)
+				mockHostKeyData := fmt.Sprintf(`{"host":"%s","algorithm":"ssh-ed25519","fingerprint":"SHA256:mockFingerprint123","publicKey":"mock-public-key","capturedAt":"2026-01-08T00:00:00Z"}`, host)
+				_ = os.WriteFile(hostKeyFile, []byte(mockHostKeyData), 0600)
+
 				return &MockSshRunner{
-					CloseFunc: func() error { return nil },
 					RunFunc: func(cmd string) (string, error) {
 						if tt.commandErrors != nil {
 							if err, exists := tt.commandErrors[cmd]; exists {
@@ -1247,24 +1275,24 @@ func TestHandleNormalEnrollment(t *testing.T) {
 
 			deps := Dependencies{
 				SSHConnectionFactory: mockSSHFactory,
-				ApplyUpdatesFunc:     updates.ApplyUpdates,
-				ExportConfigFunc:     export.ExportConfig,
+				ApplyUpdatesFunc:     updates.Updates,
+				ExportConfigFunc:     export.Export,
 			}
 
 			ctx := context.Background()
 
 			// Execute
-			err := handleNormalEnrollment(ctx, tt.hosts, cfg, deps)
+			err := enrollSingleHost(ctx, tt.hosts, cfg, deps)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
-				t.Errorf("handleNormalEnrollment() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("enrollSingleHost() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			if tt.wantErr && tt.errContains != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("handleNormalEnrollment() error = %v, should contain %q", err, tt.errContains)
+					t.Errorf("enrollSingleHost() error = %v, should contain %q", err, tt.errContains)
 				}
 			}
 
@@ -1392,8 +1420,8 @@ func TestEnrollActionValidation(t *testing.T) {
 			// Build dependencies from test mocks
 			deps := Dependencies{
 				SSHConnectionFactory: mockSSHFactory,
-				ApplyUpdatesFunc:     updates.ApplyUpdates,
-				ExportConfigFunc:     export.ExportConfig,
+				ApplyUpdatesFunc:     updates.Updates,
+				ExportConfigFunc:     export.Export,
 			}
 
 			// Validate flag combinations

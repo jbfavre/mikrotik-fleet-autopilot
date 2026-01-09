@@ -2,10 +2,7 @@ package core
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
-
-	"golang.org/x/crypto/ssh"
 )
 
 func TestNewHostKeyManager(t *testing.T) {
@@ -54,21 +51,10 @@ func TestHostKeyManager_Exists(t *testing.T) {
 func TestHostKeyManager_GetFingerprint(t *testing.T) {
 	manager := NewHostKeyManager()
 
-	// Read test key from testdata
-	testdataDir, err := filepath.Abs("testdata")
+	// Generate a test key instead of reading from file
+	pubKey, err := generateTestKeyEd25519()
 	if err != nil {
-		t.Fatalf("Failed to get testdata path: %v", err)
-	}
-
-	keyPath := filepath.Join(testdataDir, "ssh_keys", "test_key.pub")
-	keyData, err := os.ReadFile(keyPath)
-	if err != nil {
-		t.Skipf("Test key not found: %v", err)
-	}
-
-	pubKey, _, _, _, err := ssh.ParseAuthorizedKey(keyData)
-	if err != nil {
-		t.Fatalf("Failed to parse test key: %v", err)
+		t.Fatalf("Failed to generate test key: %v", err)
 	}
 
 	fingerprint := manager.GetFingerprint(pubKey)
@@ -91,21 +77,10 @@ func TestHostKeyManager_Capture(t *testing.T) {
 
 	manager := NewHostKeyManager()
 
-	// Read test key
-	testdataDir, err := filepath.Abs(filepath.Join(originalWd, "testdata"))
+	// Generate a test key instead of reading from file
+	pubKey, err := generateTestKeyEd25519()
 	if err != nil {
-		t.Fatalf("Failed to get testdata path: %v", err)
-	}
-
-	keyPath := filepath.Join(testdataDir, "ssh_keys", "test_key.pub")
-	keyData, err := os.ReadFile(keyPath)
-	if err != nil {
-		t.Skipf("Test key not found: %v", err)
-	}
-
-	pubKey, _, _, _, err := ssh.ParseAuthorizedKey(keyData)
-	if err != nil {
-		t.Fatalf("Failed to parse test key: %v", err)
+		t.Fatalf("Failed to generate test key: %v", err)
 	}
 
 	// Capture host key
@@ -135,21 +110,10 @@ func TestHostKeyManager_Verify(t *testing.T) {
 
 	manager := NewHostKeyManager()
 
-	// Read test key
-	testdataDir, err := filepath.Abs(filepath.Join(originalWd, "testdata"))
+	// Generate a test key instead of reading from file
+	pubKey, err := generateTestKeyEd25519()
 	if err != nil {
-		t.Fatalf("Failed to get testdata path: %v", err)
-	}
-
-	keyPath := filepath.Join(testdataDir, "ssh_keys", "test_key.pub")
-	keyData, err := os.ReadFile(keyPath)
-	if err != nil {
-		t.Skipf("Test key not found: %v", err)
-	}
-
-	pubKey, _, _, _, err := ssh.ParseAuthorizedKey(keyData)
-	if err != nil {
-		t.Fatalf("Failed to parse test key: %v", err)
+		t.Fatalf("Failed to generate test key: %v", err)
 	}
 
 	host := "test-verify-host"
@@ -174,34 +138,14 @@ func TestHostKeyManager_VerifyWrongKey(t *testing.T) {
 
 	manager := NewHostKeyManager()
 
-	// Read test keys
-	testdataDir, err := filepath.Abs(filepath.Join(originalWd, "testdata"))
+	// Generate two different test keys
+	pubKey1, err := generateTestKeyEd25519()
 	if err != nil {
-		t.Fatalf("Failed to get testdata path: %v", err)
+		t.Fatalf("Failed to generate test key: %v", err)
 	}
-
-	// Read first key
-	keyPath1 := filepath.Join(testdataDir, "ssh_keys", "test_key.pub")
-	keyData1, err := os.ReadFile(keyPath1)
+	pubKey2, err := generateTestKeyEd25519()
 	if err != nil {
-		t.Skipf("Test key not found: %v", err)
-	}
-
-	pubKey1, _, _, _, err := ssh.ParseAuthorizedKey(keyData1)
-	if err != nil {
-		t.Fatalf("Failed to parse test key 1: %v", err)
-	}
-
-	// Read second key (encrypted key's public part)
-	keyPath2 := filepath.Join(testdataDir, "ssh_keys", "encrypted_key.pub")
-	keyData2, err := os.ReadFile(keyPath2)
-	if err != nil {
-		t.Skipf("Test key 2 not found: %v", err)
-	}
-
-	pubKey2, _, _, _, err := ssh.ParseAuthorizedKey(keyData2)
-	if err != nil {
-		t.Fatalf("Failed to parse test key 2: %v", err)
+		t.Fatalf("Failed to generate test key: %v", err)
 	}
 
 	host := "test-verify-wrong-key"
@@ -227,21 +171,10 @@ func BenchmarkHostKeyManager_Exists(b *testing.B) {
 }
 
 func BenchmarkHostKeyManager_GetFingerprint(b *testing.B) {
-	// Read test key
-	testdataDir, err := filepath.Abs("testdata")
+	// Generate a test key for benchmarking
+	pubKey, err := generateTestKeyEd25519()
 	if err != nil {
-		b.Fatalf("Failed to get testdata path: %v", err)
-	}
-
-	keyPath := filepath.Join(testdataDir, "ssh_keys", "test_key.pub")
-	keyData, err := os.ReadFile(keyPath)
-	if err != nil {
-		b.Skipf("Test key not found: %v", err)
-	}
-
-	pubKey, _, _, _, err := ssh.ParseAuthorizedKey(keyData)
-	if err != nil {
-		b.Fatalf("Failed to parse test key: %v", err)
+		b.Fatalf("Failed to generate test key: %v", err)
 	}
 
 	manager := NewHostKeyManager()

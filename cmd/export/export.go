@@ -13,14 +13,14 @@ import (
 	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
-// Config holds all export configuration options
-type Config struct {
+// ExportConfig holds all export configuration options
+type ExportConfig struct {
 	ShowSensitive bool
 	OutputDir     string
 }
 
-// Dependencies holds injectable dependencies for testing
-type Dependencies struct {
+// ExportDependencies holds injectable dependencies for testing
+type ExportDependencies struct {
 	SSHConnectionFactory func(context.Context, string) (sshpkg.Runner, error)
 }
 
@@ -48,12 +48,12 @@ var Command = []*cli.Command{
 			}
 
 			// Build export configuration from CLI flags
-			exportCfg := Config{
+			exportCfg := ExportConfig{
 				ShowSensitive: cmd.Bool("show-sensitive"),
 				OutputDir:     cmd.String("output-dir"),
 			}
 
-			deps := Dependencies{
+			deps := ExportDependencies{
 				SSHConnectionFactory: core.CreateConnection,
 			}
 
@@ -73,17 +73,17 @@ var Command = []*cli.Command{
 // Export is a public wrapper that exports configuration for a single host
 // This function is intended to be called from other subcommands like enroll
 func Export(ctx context.Context, host string, exportOutputDir string, exportShowSensitive bool, preferredFilename string) error {
-	cfg := Config{
+	cfg := ExportConfig{
 		ShowSensitive: exportShowSensitive,
 		OutputDir:     exportOutputDir,
 	}
-	deps := Dependencies{
+	deps := ExportDependencies{
 		SSHConnectionFactory: core.CreateConnection,
 	}
 	return export(ctx, host, preferredFilename, cfg, deps)
 }
 
-func export(ctx context.Context, host string, preferredFilename string, cfg Config, deps Dependencies) error {
+func export(ctx context.Context, host string, preferredFilename string, cfg ExportConfig, deps ExportDependencies) error {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)

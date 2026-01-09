@@ -1,30 +1,11 @@
 package core
 
 import (
-	"crypto/rand"
-	"crypto/rsa"
 	"encoding/json"
 	"os"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 )
-
-// generateTestKey generates an RSA key pair for testing
-func generateTestKey() (ssh.PublicKey, error) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, err
-	}
-
-	publicKey, err := ssh.NewPublicKey(&privateKey.PublicKey)
-	if err != nil {
-		return nil, err
-	}
-
-	return publicKey, nil
-}
 
 func TestHostKeyFilePath(t *testing.T) {
 	tests := []struct {
@@ -65,7 +46,7 @@ func TestHostKeyFilePath(t *testing.T) {
 }
 
 func TestGetHostKeyFingerprint(t *testing.T) {
-	key, err := generateTestKey()
+	key, err := generateTestKeyEd25519()
 	if err != nil {
 		t.Fatalf("Failed to generate test key: %v", err)
 	}
@@ -108,7 +89,7 @@ func TestCaptureAndLoadHostKey(t *testing.T) {
 	}()
 
 	// Generate test key
-	testKey, err := generateTestKey()
+	testKey, err := generateTestKeyEd25519()
 	if err != nil {
 		t.Fatalf("Failed to generate test key: %v", err)
 	}
@@ -175,12 +156,12 @@ func TestVerifyHostKey(t *testing.T) {
 	}()
 
 	// Generate test keys
-	correctKey, err := generateTestKey()
+	correctKey, err := generateTestKeyEd25519()
 	if err != nil {
 		t.Fatalf("Failed to generate test key: %v", err)
 	}
 
-	wrongKey, err := generateTestKey()
+	wrongKey, err := generateTestKeyEd25519()
 	if err != nil {
 		t.Fatalf("Failed to generate wrong key: %v", err)
 	}
@@ -234,7 +215,7 @@ func TestHostKeyExists(t *testing.T) {
 	}
 
 	// Create key
-	testKey, err := generateTestKey()
+	testKey, err := generateTestKeyEd25519()
 	if err != nil {
 		t.Fatalf("Failed to generate test key: %v", err)
 	}
@@ -272,7 +253,7 @@ func TestDeleteHostKey(t *testing.T) {
 	}
 
 	// Create key
-	testKey, err := generateTestKey()
+	testKey, err := generateTestKeyEd25519()
 	if err != nil {
 		t.Fatalf("Failed to generate test key: %v", err)
 	}
@@ -310,7 +291,7 @@ func TestLoadHostKeyInfo(t *testing.T) {
 	host := "testrouter"
 
 	// Generate and capture key
-	testKey, err := generateTestKey()
+	testKey, err := generateTestKeyEd25519()
 	if err != nil {
 		t.Fatalf("Failed to generate test key: %v", err)
 	}
@@ -363,7 +344,7 @@ func TestHostKeyFileFormat(t *testing.T) {
 	host := "testrouter"
 
 	// Generate and capture key
-	testKey, err := generateTestKey()
+	testKey, err := generateTestKeyEd25519()
 	if err != nil {
 		t.Fatalf("Failed to generate test key: %v", err)
 	}

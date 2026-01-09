@@ -137,19 +137,6 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 
 	host := coreCfg.Hosts[0]
 
-	// Step 1: Always update host key first
-	fingerprint, err := updateHostKey(ctx, host, deps)
-	if err != nil {
-		slog.Error("failed to capture host key", "host", host, "error", err)
-		return fmt.Errorf("failed to capture host key: %w", err)
-	}
-	slog.Debug("host key captured", "host", host, "fingerprint", fingerprint)
-
-	// If only updating host key, we are done
-	if enrollCfg.UpdateHostKeyOnly {
-		return nil
-	}
-
 	// Handle force re-enrollment by removing existing artifacts
 	if enrollCfg.Force {
 		slog.Info("force re-enrollment requested", "host", host)
@@ -166,6 +153,19 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 
 	slog.Info("starting enrollment", "host", host)
 
+	// Step 1: Always update host key first
+	fingerprint, err := updateHostKey(ctx, host, deps)
+	if err != nil {
+		slog.Error("failed to capture host key", "host", host, "error", err)
+		return fmt.Errorf("failed to capture host key: %w", err)
+	}
+	slog.Debug("host key captured", "host", host, "fingerprint", fingerprint)
+
+	// If only updating host key, we are done
+	if enrollCfg.UpdateHostKeyOnly {
+		return nil
+	}
+
 	// Step 2: Establish connection
 	conn, err := connectToRouter(ctx, host, deps)
 	if err != nil {
@@ -179,8 +179,8 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 
 	// Step 3: Apply pre-enrollment script
 	if enrollCfg.PreEnrollScript == "" {
-		slog.Debug("skipping pre-enroll script, none provided")
-		fmt.Printf("❓ Pre-enroll script skipped\n")
+		slog.Error("failed to apply pre-enroll script", "host", host, "--pre-enroll-script value", enrollCfg.PreEnrollScript)
+		return fmt.Errorf("failed to apply pre-enroll script: none provided")
 	} else {
 		if err := applyPreEnrollScript(conn, enrollCfg); err != nil {
 			slog.Error("pre-enroll script failed", "host", host, "error", err)
@@ -197,8 +197,7 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 
 	// Step 5: Apply updates (optional)
 	if enrollCfg.SkipUpdates {
-		slog.Debug("skipping updates")
-		fmt.Printf("❓ Updates skipped\n")
+		slog.Warn("skipping updates", "host", host, "--skip-updates value", enrollCfg.SkipUpdates)
 	} else {
 		if err := applyUpdates(ctx, host, deps); err != nil {
 			slog.Error("failed to apply updates", "host", host, "error", err)
@@ -209,9 +208,7 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 
 	// Step 6: Export configuration (optional)
 	if enrollCfg.SkipExport {
-		slog.Debug("skipping export")
-		fmt.Printf("❓ Export skipped\n")
-		return nil
+		slog.Warn("skipping export", "host", host, "--skip-export value", enrollCfg.SkipExport)
 	} else {
 		conn, err = exportConfiguration(ctx, host, enrollCfg, deps, conn)
 		if err != nil {
@@ -222,8 +219,8 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 
 	// Step 7: Apply post-enrollment script
 	if enrollCfg.PostEnrollScript == "" {
-		slog.Debug("skipping post-enroll script, none provided")
-		fmt.Printf("❓ Post-enroll script skipped, none provided\n")
+		slog.Error("failed to apply post-enroll script", "host", host, "--post-enroll-script value", enrollCfg.PostEnrollScript)
+		return fmt.Errorf("failed to apply post-enroll script: none provided")
 	} else {
 		if err := applyPostEnrollScript(conn, enrollCfg); err != nil {
 			slog.Error("post-enroll script failed", "host", host, "error", err)

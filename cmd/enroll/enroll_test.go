@@ -1912,7 +1912,7 @@ func TestEnrollWorkflow(t *testing.T) {
 				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
 				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
 			},
-			wantErr:    false,
+			wantErr: false,
 			validateResults: func(t *testing.T, hostname string) {
 				// Verify host key file exists
 				if _, err := os.Stat("test-router1.hostkey"); os.IsNotExist(err) {
@@ -1951,7 +1951,7 @@ func TestEnrollWorkflow(t *testing.T) {
 				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
 				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
 			},
-			wantErr:    false,
+			wantErr: false,
 		},
 		{
 			name:       "enrollment with skip-export flag",
@@ -1984,7 +1984,7 @@ func TestEnrollWorkflow(t *testing.T) {
 				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
 				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
 			},
-			wantErr:    false,
+			wantErr: false,
 		},
 		{
 			name:        "enrollment with both skip flags",
@@ -2019,7 +2019,7 @@ func TestEnrollWorkflow(t *testing.T) {
 				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
 				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
 			},
-			wantErr:    false,
+			wantErr: false,
 		},
 		{
 			name:     "enrollment with pre-enroll script",
@@ -2296,7 +2296,7 @@ func TestEnrollWorkflow(t *testing.T) {
 				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
 				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
 			},
-			wantErr:    false, // Updates failure is non-fatal
+			wantErr: false, // Updates failure is non-fatal
 			validateResults: func(t *testing.T, hostname string) {
 				// Enrollment should complete despite updates failure
 			},

@@ -123,6 +123,11 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 		return fmt.Errorf("cannot use --force and --update-hostkey-only together")
 	}
 
+	// Handle update-hostkey-only mode (supports multiple hosts)
+	if enrollCfg.UpdateHostKeyOnly {
+		return processMultiHostKeyUpdate(ctx, coreCfg.Hosts, deps)
+	}
+
 	// Normal enrollment: validate single host requirement
 	if len(coreCfg.Hosts) != 1 {
 		slog.Debug("enroll command requires exactly one host", "got", len(coreCfg.Hosts))
@@ -155,11 +160,6 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 	}
 	slog.Debug("host key captured", "host", host, "fingerprint", fingerprint)
 
-	// If only updating host key, we are done
-	if enrollCfg.UpdateHostKeyOnly {
-		return nil
-	}
-
 	// Step 2: Establish connection
 	conn, err := connectToRouter(ctx, host, deps)
 	if err != nil {
@@ -172,14 +172,9 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 	}()
 
 	// Step 3: Apply pre-enrollment script
-	if enrollCfg.PreEnrollScript == "" {
-		slog.Error("failed to apply pre-enroll script", "host", host, "--pre-enroll-script value", enrollCfg.PreEnrollScript)
-		return fmt.Errorf("failed to apply pre-enroll script: none provided")
-	} else {
-		if err := applyPreEnrollScript(conn, enrollCfg); err != nil {
-			slog.Error("pre-enroll script failed", "host", host, "error", err)
-			return fmt.Errorf("failed to apply pre-enroll script: %w", err)
-		}
+	if err := applyPreEnrollScript(conn, enrollCfg); err != nil {
+		slog.Error("pre-enroll script failed", "host", host, "error", err)
+		return fmt.Errorf("failed to apply pre-enroll script: %w", err)
 	}
 
 	// Step 4: Set router identity
@@ -212,22 +207,17 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 	}
 
 	// Step 7: Apply post-enrollment script
-	if enrollCfg.PostEnrollScript == "" {
-		slog.Error("failed to apply post-enroll script", "host", host, "--post-enroll-script value", enrollCfg.PostEnrollScript)
-		return fmt.Errorf("failed to apply post-enroll script: none provided")
-	} else {
-		if err := applyPostEnrollScript(conn, enrollCfg); err != nil {
-			slog.Error("post-enroll script failed", "host", host, "error", err)
-			return fmt.Errorf("failed to apply post-enroll script: %w", err)
-		}
+	if err := applyPostEnrollScript(conn, enrollCfg); err != nil {
+		slog.Error("post-enroll script failed", "host", host, "error", err)
+		return fmt.Errorf("failed to apply post-enroll script: %w", err)
 	}
 
 	slog.Info("enrollment completed successfully", "host", host)
 	return nil
 }
 
-// updateHostKeysOnly processes host key updates for one or more hosts
-func updateHostKeysOnly(ctx context.Context, hosts []string, deps EnrollDependencies) error {
+// processMultiHostKeyUpdate processes host key updates for one or more hosts
+func processMultiHostKeyUpdate(ctx context.Context, hosts []string, deps EnrollDependencies) error {
 	// Batch mode: update hostkeys for all discovered hosts
 	if len(hosts) > 1 {
 		slog.Info("batch updating SSH host keys", "count", len(hosts))

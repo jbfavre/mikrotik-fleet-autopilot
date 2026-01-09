@@ -759,17 +759,17 @@ func TestHandleUpdateHostKeyOnly(t *testing.T) {
 			}
 
 			// Execute
-			err := updateHostKeysOnly(ctx, tt.hosts, deps)
+			err := processMultiHostKeyUpdate(ctx, tt.hosts, deps)
 
 			// Verify error expectation
 			if (err != nil) != tt.wantErr {
-				t.Errorf("updateHostKeysOnly() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("processMultiHostKeyUpdate() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			if tt.wantErr && tt.errContains != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("updateHostKeysOnly() error = %v, should contain %q", err, tt.errContains)
+					t.Errorf("processMultiHostKeyUpdate() error = %v, should contain %q", err, tt.errContains)
 				}
 			}
 
@@ -1729,8 +1729,8 @@ func TestEnrollMainWorkflow(t *testing.T) {
 			if enrollCfg.Force && enrollCfg.UpdateHostKeyOnly {
 				err = fmt.Errorf("cannot use --force and --update-hostkey-only together")
 			} else if enrollCfg.UpdateHostKeyOnly {
-				// Route to updateHostKeysOnly
-				err = updateHostKeysOnly(ctx, cfg.Hosts, deps)
+				// Route to processMultiHostKeyUpdate
+				err = processMultiHostKeyUpdate(ctx, cfg.Hosts, deps)
 			} else {
 				// Normal enrollment validation
 				if len(cfg.Hosts) != 1 {

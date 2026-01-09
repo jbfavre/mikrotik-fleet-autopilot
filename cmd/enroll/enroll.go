@@ -344,9 +344,6 @@ func exportConfiguration(ctx context.Context, host string, enrollCfg EnrollConfi
 
 // applyPostEnrollScript applies the post-enrollment configuration script
 func applyPostEnrollScript(conn sshpkg.Runner, cfg EnrollConfig) error {
-	if cfg.PostEnrollScript == "" {
-		return nil
-	}
 	slog.Debug("applying post-enroll configuration file")
 	if err := applyConfigFile(conn, cfg.PostEnrollScript); err != nil {
 		slog.Error("failed to apply post-enroll configuration file", "error", err)

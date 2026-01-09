@@ -1907,7 +1907,11 @@ func TestEnrollWorkflow(t *testing.T) {
 					},
 				}
 			},
-			setupFiles: func(t *testing.T, hostname string) {},
+			setupFiles: func(t *testing.T, hostname string) {
+				// Create empty pre/post-enroll scripts
+				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
+				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
+			},
 			wantErr:    false,
 			validateResults: func(t *testing.T, hostname string) {
 				// Verify host key file exists
@@ -1942,7 +1946,11 @@ func TestEnrollWorkflow(t *testing.T) {
 					},
 				}
 			},
-			setupFiles: func(t *testing.T, hostname string) {},
+			setupFiles: func(t *testing.T, hostname string) {
+				// Create empty pre/post-enroll scripts
+				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
+				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
+			},
 			wantErr:    false,
 		},
 		{
@@ -1971,7 +1979,11 @@ func TestEnrollWorkflow(t *testing.T) {
 					},
 				}
 			},
-			setupFiles: func(t *testing.T, hostname string) {},
+			setupFiles: func(t *testing.T, hostname string) {
+				// Create empty pre/post-enroll scripts
+				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
+				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
+			},
 			wantErr:    false,
 		},
 		{
@@ -2002,7 +2014,11 @@ func TestEnrollWorkflow(t *testing.T) {
 					},
 				}
 			},
-			setupFiles: func(t *testing.T, hostname string) {},
+			setupFiles: func(t *testing.T, hostname string) {
+				// Create empty pre/post-enroll scripts
+				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
+				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
+			},
 			wantErr:    false,
 		},
 		{
@@ -2040,6 +2056,8 @@ func TestEnrollWorkflow(t *testing.T) {
 				// Create pre-enroll script
 				scriptContent := "/system identity set name=pre-test-command\n"
 				_ = os.WriteFile("pre-enroll-test.rsc", []byte(scriptContent), 0644)
+				// Create empty post-enroll script
+				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
 			},
 			wantErr: false,
 		},
@@ -2078,6 +2096,8 @@ func TestEnrollWorkflow(t *testing.T) {
 				}
 			},
 			setupFiles: func(t *testing.T, hostname string) {
+				// Create empty pre-enroll script
+				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
 				// Create post-enroll script
 				scriptContent := "/system identity set name=post-test-command\n"
 				_ = os.WriteFile("post-enroll-test.rsc", []byte(scriptContent), 0644)
@@ -2113,6 +2133,9 @@ func TestEnrollWorkflow(t *testing.T) {
 				// Create existing enrollment artifacts
 				_ = os.WriteFile("test-router7.hostkey", []byte("old-key"), 0600)
 				_ = os.WriteFile("test-router7.rsc", []byte("old-config"), 0644)
+				// Create empty pre/post-enroll scripts
+				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
+				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
 			},
 			wantErr: false,
 			validateResults: func(t *testing.T, hostname string) {
@@ -2268,7 +2291,11 @@ func TestEnrollWorkflow(t *testing.T) {
 					},
 				}
 			},
-			setupFiles: func(t *testing.T, hostname string) {},
+			setupFiles: func(t *testing.T, hostname string) {
+				// Create empty pre/post-enroll scripts
+				_ = os.WriteFile("pre-enroll-test.rsc", []byte(""), 0644)
+				_ = os.WriteFile("post-enroll-test.rsc", []byte(""), 0644)
+			},
 			wantErr:    false, // Updates failure is non-fatal
 			validateResults: func(t *testing.T, hostname string) {
 				// Enrollment should complete despite updates failure

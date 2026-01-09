@@ -82,36 +82,36 @@ var Command = []*cli.Command{
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return enroll(ctx, cmd)
+			// Build enrollment configuration from CLI flags
+			enrollCfg := EnrollConfig{
+				Hostname:          cmd.String("hostname"),
+				PreEnrollScript:   cmd.String("pre-enroll-script"),
+				PostEnrollScript:  cmd.String("post-enroll-script"),
+				SkipUpdates:       cmd.Bool("skip-updates"),
+				SkipExport:        cmd.Bool("skip-export"),
+				OutputDir:         cmd.String("output-dir"),
+				Force:             cmd.Bool("force"),
+				UpdateHostKeyOnly: cmd.Bool("update-hostkey-only"),
+			}
+
+			// Build dependencies for all operations
+			deps := EnrollDependencies{
+				SSHConnectionFactory: core.CreateConnection,
+				ApplyUpdatesFunc:     updates.Updates,
+				ExportConfigFunc:     export.Export,
+			}
+
+			return enroll(ctx, enrollCfg, deps)
 		},
 	},
 }
 
 // enroll is the entry point for the enrollment command
-func enroll(ctx context.Context, cmd *cli.Command) error {
+func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies) error {
 	coreCfg, err := core.GetConfig(ctx)
 	if err != nil {
 		slog.Debug("failed to get global config", "error", err)
 		return err
-	}
-
-	// Build enrollment configuration from CLI flags
-	enrollCfg := EnrollConfig{
-		Hostname:          cmd.String("hostname"),
-		PreEnrollScript:   cmd.String("pre-enroll-script"),
-		PostEnrollScript:  cmd.String("post-enroll-script"),
-		SkipUpdates:       cmd.Bool("skip-updates"),
-		SkipExport:        cmd.Bool("skip-export"),
-		OutputDir:         cmd.String("output-dir"),
-		Force:             cmd.Bool("force"),
-		UpdateHostKeyOnly: cmd.Bool("update-hostkey-only"),
-	}
-
-	// Build dependencies for all operations
-	deps := EnrollDependencies{
-		SSHConnectionFactory: core.CreateConnection,
-		ApplyUpdatesFunc:     updates.Updates,
-		ExportConfigFunc:     export.Export,
 	}
 
 	// Set enrollment mode in context to allow host key capture
@@ -178,9 +178,14 @@ func enroll(ctx context.Context, cmd *cli.Command) error {
 	}()
 
 	// Step 3: Apply pre-enrollment script
-	if err := applyPreEnrollScript(conn, enrollCfg); err != nil {
-		slog.Error("pre-enroll script failed", "host", host, "error", err)
-		return fmt.Errorf("failed to apply pre-enroll script: %w", err)
+	if enrollCfg.PreEnrollScript == "" {
+		slog.Debug("skipping pre-enroll script, none provided")
+		fmt.Printf("❓ Pre-enroll script skipped\n")
+	} else {
+		if err := applyPreEnrollScript(conn, enrollCfg); err != nil {
+			slog.Error("pre-enroll script failed", "host", host, "error", err)
+			return fmt.Errorf("failed to apply pre-enroll script: %w", err)
+		}
 	}
 
 	// Step 4: Set router identity
@@ -216,9 +221,14 @@ func enroll(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Step 7: Apply post-enrollment script
-	if err := applyPostEnrollScript(conn, enrollCfg); err != nil {
-		slog.Error("post-enroll script failed", "host", host, "error", err)
-		return fmt.Errorf("failed to apply post-enroll script: %w", err)
+	if enrollCfg.PostEnrollScript == "" {
+		slog.Debug("skipping post-enroll script, none provided")
+		fmt.Printf("❓ Post-enroll script skipped\n")
+	} else {
+		if err := applyPostEnrollScript(conn, enrollCfg); err != nil {
+			slog.Error("post-enroll script failed", "host", host, "error", err)
+			return fmt.Errorf("failed to apply post-enroll script: %w", err)
+		}
 	}
 
 	slog.Info("enrollment completed successfully", "host", host)
@@ -334,6 +344,9 @@ func exportConfiguration(ctx context.Context, host string, enrollCfg EnrollConfi
 
 // applyPostEnrollScript applies the post-enrollment configuration script
 func applyPostEnrollScript(conn sshpkg.Runner, cfg EnrollConfig) error {
+	if cfg.PostEnrollScript == "" {
+		return nil
+	}
 	slog.Debug("applying post-enroll configuration file")
 	if err := applyConfigFile(conn, cfg.PostEnrollScript); err != nil {
 		slog.Error("failed to apply post-enroll configuration file", "error", err)

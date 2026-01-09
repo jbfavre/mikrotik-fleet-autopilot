@@ -123,12 +123,6 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 		return fmt.Errorf("cannot use --force and --update-hostkey-only together")
 	}
 
-	// Route to appropriate operation mode
-	if enrollCfg.UpdateHostKeyOnly {
-		// Only update host keys (supports batch mode)
-		return updateHostKeysOnly(ctx, coreCfg.Hosts, deps)
-	}
-
 	// Normal enrollment: validate single host requirement
 	if len(coreCfg.Hosts) != 1 {
 		slog.Debug("enroll command requires exactly one host", "got", len(coreCfg.Hosts))

@@ -313,7 +313,6 @@ func applyUpdates(ctx context.Context, host string, deps EnrollDependencies) err
 	slog.Debug("checking and applying updates", "host", host)
 	if err := deps.ApplyUpdatesFunc(ctx, host); err != nil {
 		return fmt.Errorf("failed to apply updates: %w", err)
-		// Non-fatal error
 	}
 	return nil
 }

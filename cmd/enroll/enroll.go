@@ -303,12 +303,8 @@ func connectToRouter(ctx context.Context, host string, deps EnrollDependencies) 
 func applyPreEnrollScript(conn sshpkg.Runner, cfg EnrollConfig) error {
 	slog.Debug("applying pre-enroll configuration file")
 	if err := applyConfigFile(conn, cfg.PreEnrollScript); err != nil {
-		slog.Error("failed to apply pre-enroll configuration file", "error", err)
-		fmt.Printf("❌ Pre-enroll configuration failed\n")
 		return fmt.Errorf("failed to apply pre-enroll configuration file: %w", err)
 	}
-	slog.Debug("pre-enroll configuration applied")
-	fmt.Printf("✅ Pre-enroll configuration applied\n")
 	return nil
 }
 
@@ -346,12 +342,8 @@ func exportConfiguration(ctx context.Context, host string, enrollCfg EnrollConfi
 func applyPostEnrollScript(conn sshpkg.Runner, cfg EnrollConfig) error {
 	slog.Debug("applying post-enroll configuration file")
 	if err := applyConfigFile(conn, cfg.PostEnrollScript); err != nil {
-		slog.Error("failed to apply post-enroll configuration file", "error", err)
-		fmt.Printf("❌ Post-enroll configuration failed\n")
 		return fmt.Errorf("failed to apply post-enroll configuration file: %w", err)
 	}
-	slog.Debug("post-enroll configuration file applied")
-	fmt.Printf("✅ Post-enroll configuration applied\n")
 	return nil
 }
 

@@ -223,7 +223,7 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 	// Step 7: Apply post-enrollment script
 	if enrollCfg.PostEnrollScript == "" {
 		slog.Debug("skipping post-enroll script, none provided")
-		fmt.Printf("❓ Post-enroll script skipped\n")
+		fmt.Printf("❓ Post-enroll script skipped, none provided\n")
 	} else {
 		if err := applyPostEnrollScript(conn, enrollCfg); err != nil {
 			slog.Error("post-enroll script failed", "host", host, "error", err)

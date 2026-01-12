@@ -493,9 +493,3 @@ func TestBuildHostKeyCallback_SkipVerification(t *testing.T) {
 		})
 	}
 }
-
-type testConfigSkipCheck struct{}
-
-func (c *testConfigSkipCheck) GetSkipHostKeyCheck() bool {
-	return true
-}

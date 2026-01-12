@@ -223,3 +223,10 @@ func findSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+// testConfigSkipCheck is a mock config that returns true for skip host key check
+type testConfigSkipCheck struct{}
+
+func (c *testConfigSkipCheck) GetSkipHostKeyCheck() bool {
+	return true
+}

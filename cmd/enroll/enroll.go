@@ -115,7 +115,7 @@ func enroll(ctx context.Context, enrollCfg EnrollConfig, deps EnrollDependencies
 	}
 
 	// Set enrollment mode in context to allow host key capture
-	ctx = context.WithValue(ctx, core.EnrollmentKey, true)
+	ctx = context.WithValue(ctx, "enrollment", true)
 	slog.Debug("enrollment mode enabled in context")
 
 	// Validate flag combination
@@ -398,6 +398,13 @@ func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (s
 	} else {
 		slog.Debug("no existing host key found", "host", host)
 	}
+
+	// Inject config into context for SSH host key callback
+	coreCfg, err := core.GetConfig(ctx)
+	if err == nil && coreCfg != nil {
+		ctx = context.WithValue(ctx, "config", coreCfg)
+	}
+	ctx = context.WithValue(ctx, "enrollment", true)
 
 	// Create SSH connection (this will capture the new host key)
 	slog.Debug("connecting to router to capture new host key", "host", host)

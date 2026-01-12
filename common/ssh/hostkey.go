@@ -8,6 +8,16 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// ContextKey is a custom type for context keys to avoid collisions
+type ContextKey string
+
+const (
+	// ConfigKey is the context key for storing Config (must match core.ConfigKey)
+	ConfigKey ContextKey = "config"
+	// EnrollmentKey is the context key for storing enrollment mode (must match core.EnrollmentKey)
+	EnrollmentKey ContextKey = "enrollment"
+)
+
 // HostKeyManager provides host key validation operations
 type HostKeyManager interface {
 	Exists(host string) bool
@@ -23,6 +33,12 @@ func BuildHostKeyCallback(ctx context.Context, host string, manager HostKeyManag
 		type configGetter interface {
 			GetSkipHostKeyCheck() bool
 		}
+
+		// Debug: check what's in the context
+		slog.Debug("host key callback invoked",
+			"host", host,
+			"configKey", ctx.Value("config") != nil,
+			"enrollmentKey", ctx.Value("enrollment") != nil)
 
 		// Check if user wants to skip host key verification (INSECURE)
 		var skipVerification bool

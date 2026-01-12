@@ -8,16 +8,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// ContextKey is a custom type for context keys to avoid collisions
-type ContextKey string
-
-const (
-	// ConfigKey is the context key for storing Config (must match core.ConfigKey)
-	ConfigKey ContextKey = "config"
-	// EnrollmentKey is the context key for storing enrollment mode (must match core.EnrollmentKey)
-	EnrollmentKey ContextKey = "enrollment"
-)
-
 // HostKeyManager provides host key validation operations
 type HostKeyManager interface {
 	Exists(host string) bool

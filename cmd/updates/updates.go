@@ -329,7 +329,7 @@ func formatAndDisplayResult(host string, osStatus UpdateStatus, boardStatus *Upd
 // Generic update status fetcher for RouterOS and RouterBoard
 func getUpdateStatus(conn ssh.RunnerInterface, sshCmd, subSystem string, installedRe, availableRe *regexp.Regexp, skipIfNoRouterBoard bool) (*UpdateStatus, error) {
 	slog.Debug("executing command", "command", sshCmd)
-	result, err := (conn).Run(sshCmd)
+	result, err := conn.Run(sshCmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to run SSH command: %w", err)
 	}
@@ -369,11 +369,11 @@ func getUpdateStatus(conn ssh.RunnerInterface, sshCmd, subSystem string, install
 
 // Generic function to apply updates and wait for router to come back
 func applyUpdate(conn ssh.RunnerInterface, ctx context.Context, host, updateCmd, waitMsg string, deps UpdatesDependencies) (ssh.RunnerInterface, error) {
-	_, err := (conn).Run(updateCmd)
+	_, err := conn.Run(updateCmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to run SSH command: %w", err)
 	}
-	_ = (conn).Close()
+	_ = conn.Close()
 	fmt.Printf("⏳ %s\n", waitMsg)
 
 	var newConn ssh.RunnerInterface

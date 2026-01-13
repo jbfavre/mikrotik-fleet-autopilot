@@ -399,11 +399,7 @@ func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (s
 		slog.Debug("no existing host key found", "host", host)
 	}
 
-	// Inject config into context for SSH host key callback
-	coreCfg, err := core.GetConfig(ctx)
-	if err == nil && coreCfg != nil {
-		ctx = context.WithValue(ctx, core.ConfigKey, coreCfg)
-	}
+	// Inject enrollment into context for SSH host key callback
 	ctx = context.WithValue(ctx, core.EnrollmentKey, true)
 
 	// Create SSH connection (this will capture the new host key)

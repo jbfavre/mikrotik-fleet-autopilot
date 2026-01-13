@@ -221,16 +221,16 @@ func TestBuildHostKeyCallback_EnrollmentModeDetection(t *testing.T) {
 		{
 			name: "enrollment mode with boolean true",
 			setupCtx: func() context.Context {
-				// nolint:staticcheck // Using string key to match hostkey.go implementation
-				return context.WithValue(context.Background(), "enrollment", true)
+				// nolint:staticcheck
+				return context.WithValue(context.Background(), core.EnrollmentKey, true)
 			},
 			expectCapture: true,
 		},
 		{
 			name: "enrollment mode with boolean false",
 			setupCtx: func() context.Context {
-				// nolint:staticcheck // Using string key to match hostkey.go implementation
-				return context.WithValue(context.Background(), "enrollment", false)
+				// nolint:staticcheck
+				return context.WithValue(context.Background(), core.EnrollmentKey, false)
 			},
 			expectCapture: false,
 		},
@@ -244,8 +244,8 @@ func TestBuildHostKeyCallback_EnrollmentModeDetection(t *testing.T) {
 		{
 			name: "enrollment mode with wrong type",
 			setupCtx: func() context.Context {
-				// nolint:staticcheck // Using string key to match hostkey.go implementation
-				return context.WithValue(context.Background(), "enrollment", "true")
+				// nolint:staticcheck
+				return context.WithValue(context.Background(), core.EnrollmentKey, "true")
 			},
 			expectCapture: false,
 		},
@@ -333,8 +333,8 @@ func TestBuildHostKeyCallback_ManagerMethodCalls(t *testing.T) {
 			},
 		}
 
-		// nolint:staticcheck // Using string key to match hostkey.go implementation
-		ctx := context.WithValue(context.Background(), "enrollment", true)
+		// nolint:staticcheck
+		ctx := context.WithValue(context.Background(), core.EnrollmentKey, true)
 		callback := BuildHostKeyCallback(ctx, "192.168.1.1", manager)
 		_ = callback("192.168.1.1", nil, publicKey)
 
@@ -478,11 +478,11 @@ func TestBuildHostKeyCallback_SkipVerification(t *testing.T) {
 			ctx := context.Background()
 			if tt.skipHostKeyCheck {
 				// nolint:staticcheck // Using string key to match hostkey.go implementation
-				ctx = context.WithValue(ctx, "config", &testConfigSkipCheck{})
+				ctx = context.WithValue(ctx, core.ConfigKey, &testConfigSkipCheck{})
 			}
 			if tt.enrollmentMode {
 				// nolint:staticcheck
-				ctx = context.WithValue(ctx, "enrollment", true)
+				ctx = context.WithValue(ctx, core.EnrollmentKey, true)
 			}
 
 			callback := BuildHostKeyCallback(ctx, "192.168.1.1", manager)

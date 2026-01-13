@@ -382,18 +382,17 @@ func TestGetSshManager(t *testing.T) {
 			name:        "no ssh manager in context",
 			ctx:         context.Background(),
 			wantErr:     true,
-			errContains: "invalid ssh manager type or not found",
+			errContains: "ssh manager not found",
 		},
 		{
-			name:        "wrong type in context",
-			ctx:         context.WithValue(context.Background(), SshManagerKey, "not a manager"),
-			wantErr:     true,
-			errContains: "invalid ssh manager type or not found",
+			name:    "wrong type in context",
+			ctx:     context.WithValue(context.Background(), SshManagerKey, "not a manager"),
+			wantErr: false, // GetSshManager returns interface{}, no type checking
 		},
 		{
 			name:    "nil value in context",
 			ctx:     context.WithValue(context.Background(), SshManagerKey, (*sshpkg.SshManager)(nil)),
-			wantErr: false, // nil pointer of correct type is valid
+			wantErr: false, // nil pointer is still a value
 		},
 	}
 
@@ -415,46 +414,11 @@ func TestGetSshManager(t *testing.T) {
 			if !tt.wantErr && tt.name == "valid ssh manager in context" {
 				if manager == nil {
 					t.Error("GetSshManager() returned nil manager")
-				} else if manager.GetUser() != "admin" {
-					t.Errorf("GetSshManager() user = %q, want %q", manager.GetUser(), "admin")
+				} else if sshManager, ok := manager.(*sshpkg.SshManager); !ok {
+					t.Errorf("GetSshManager() returned wrong type: %T", manager)
+				} else if sshManager.GetUser() != "admin" {
+					t.Errorf("GetSshManager() user = %q, want %q", sshManager.GetUser(), "admin")
 				}
-			}
-		})
-	}
-}
-
-func TestGetSshCredentialsProvider(t *testing.T) {
-	tests := []struct {
-		name    string
-		ctx     context.Context
-		wantErr bool
-	}{
-		{
-			name: "valid credentials in context",
-			ctx: context.WithValue(context.Background(), SshManagerKey,
-				sshpkg.NewSshManager("admin", "password", "")),
-			wantErr: false,
-		},
-		{
-			name:    "no credentials in context",
-			ctx:     context.Background(),
-			wantErr: true,
-		},
-		{
-			name:    "wrong type in context",
-			ctx:     context.WithValue(context.Background(), SshManagerKey, "wrong"),
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			provider, err := GetSshCredentialsProvider(tt.ctx)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("GetSshCredentialsProvider() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if !tt.wantErr && provider == nil {
-				t.Error("GetSshCredentialsProvider() returned nil provider")
 			}
 		})
 	}

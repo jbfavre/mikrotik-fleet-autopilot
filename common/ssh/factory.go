@@ -17,12 +17,12 @@ import (
 // CreateConnection creates a new SSH connection using the provided credentials and host key manager.
 // This is the main entry point for creating SSH connections in the application.
 func CreateConnection(ctx context.Context, host string, credentials CredentialsProvider, hostKeyManager HostKeyManager) (Runner, error) {
-	slog.Debug("creating SSH connection", "host", host, "user", credentials.GetUser())
-
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context cancelled before connection: %w", err)
 	}
+
+	slog.Debug("creating SSH connection", "host", host, "user", credentials.GetUser())
 
 	// Step 1: Read SSH configuration
 	hostInfo, err := readConfig(host)

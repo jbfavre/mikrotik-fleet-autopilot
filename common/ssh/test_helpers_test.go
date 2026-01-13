@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
@@ -229,4 +230,20 @@ type testConfigSkipCheck struct{}
 
 func (c *testConfigSkipCheck) GetSkipHostKeyCheck() bool {
 	return true
+}
+
+// generateTestKeyEd25519 generates an ed25519 SSH key pair for testing.
+// This is the preferred key type for tests as it's faster and more modern than RSA.
+func generateTestKeyEd25519() (ssh.PublicKey, error) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return signer.PublicKey(), nil
 }

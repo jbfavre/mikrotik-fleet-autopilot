@@ -55,7 +55,7 @@ func startMockSSHServer(t *testing.T) (*mockSSHServer, int) {
 		stopped:  make(chan struct{}),
 	}
 
-	go server.acceptConnections(t)
+	go server.acceptConnections()
 
 	// Get the port
 	_, portStr, _ := net.SplitHostPort(listener.Addr().String())
@@ -67,7 +67,7 @@ func startMockSSHServer(t *testing.T) (*mockSSHServer, int) {
 	return server, port
 }
 
-func (s *mockSSHServer) acceptConnections(t *testing.T) {
+func (s *mockSSHServer) acceptConnections() {
 	defer close(s.stopped)
 
 	for {
@@ -76,11 +76,11 @@ func (s *mockSSHServer) acceptConnections(t *testing.T) {
 			return // Server stopped
 		}
 
-		go s.handleConnection(conn, t)
+		go s.handleConnection(conn)
 	}
 }
 
-func (s *mockSSHServer) handleConnection(netConn net.Conn, t *testing.T) {
+func (s *mockSSHServer) handleConnection(netConn net.Conn) {
 	defer func() {
 		_ = netConn.Close()
 	}()

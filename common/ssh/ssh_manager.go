@@ -22,23 +22,23 @@ func NewSshManager(user, password, passphrase string) *SshManager {
 	}
 }
 
-// GetUser returns the username (implements CredentialsProvider)
-func (m *SshManager) GetUser() string {
+// GetUser returns the username
+func (m *SshManager) getUser() string {
 	return m.user
 }
 
-// GetPassword returns the password (implements CredentialsProvider)
-func (m *SshManager) GetPassword() string {
+// GetPassword returns the password
+func (m *SshManager) getPassword() string {
 	return m.password
 }
 
-// GetPassphrase returns the passphrase (implements CredentialsProvider)
-func (m *SshManager) GetPassphrase() string {
+// GetPassphrase returns the passphrase
+func (m *SshManager) getPassphrase() string {
 	return m.passphrase
 }
 
 // String implements fmt.Stringer interface to prevent accidental credential leaks in logs
-// This ensures that if the SshManager is logged, credentials are redacted
+// This ensures that if the CredentialsProvider is logged, credentials are redacted
 func (m *SshManager) String() string {
 	hasPassword := "no"
 	if m.password != "" {

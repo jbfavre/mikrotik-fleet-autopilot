@@ -8,8 +8,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 func TestGetConfig(t *testing.T) {
@@ -362,64 +360,6 @@ func TestSetupLogging(t *testing.T) {
 			// Verify that slog is configured by attempting to log
 			slog.Debug("test debug message")
 			slog.Info("test info message")
-		})
-	}
-}
-func TestGetSshManager(t *testing.T) {
-	tests := []struct {
-		name        string
-		ctx         context.Context
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name: "valid ssh manager in context",
-			ctx: context.WithValue(context.Background(), SshManagerKey,
-				sshpkg.NewSshManager("admin", "password", "passphrase")),
-			wantErr: false,
-		},
-		{
-			name:        "no ssh manager in context",
-			ctx:         context.Background(),
-			wantErr:     true,
-			errContains: "ssh manager not found",
-		},
-		{
-			name:    "wrong type in context",
-			ctx:     context.WithValue(context.Background(), SshManagerKey, "not a manager"),
-			wantErr: false, // GetSshManager returns interface{}, no type checking
-		},
-		{
-			name:    "nil value in context",
-			ctx:     context.WithValue(context.Background(), SshManagerKey, (*sshpkg.SshManager)(nil)),
-			wantErr: false, // nil pointer is still a value
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			manager, err := GetSshManager(tt.ctx)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("GetSshManager() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantErr && err != nil {
-				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("GetSshManager() error = %v, want error containing %q", err, tt.errContains)
-				}
-			}
-
-			if !tt.wantErr && tt.name == "valid ssh manager in context" {
-				if manager == nil {
-					t.Error("GetSshManager() returned nil manager")
-				} else if sshManager, ok := manager.(*sshpkg.SshManager); !ok {
-					t.Errorf("GetSshManager() returned wrong type: %T", manager)
-				} else if sshManager.GetUser() != "admin" {
-					t.Errorf("GetSshManager() user = %q, want %q", sshManager.GetUser(), "admin")
-				}
-			}
 		})
 	}
 }

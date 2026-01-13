@@ -4,13 +4,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Runner defines the interface for SSH operations
-type Runner interface {
-	Close() error
-	IsAlreadyClosedError(err error) bool
-	Run(cmd string) (string, error)
-}
-
 // HostInfo contains SSH connection details
 type HostInfo struct {
 	// User input
@@ -35,10 +28,3 @@ type HostInfo struct {
 
 // HostKeyCallback provides host key validation
 type HostKeyCallback func(hostname string, remote interface{}, key ssh.PublicKey) error
-
-// CredentialsProvider provides SSH credentials for connection establishment
-type CredentialsProvider interface {
-	GetUser() string
-	GetPassword() string
-	GetPassphrase() string
-}

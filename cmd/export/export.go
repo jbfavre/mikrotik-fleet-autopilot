@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v3"
-	core "jb.favre/mikrotik-fleet-autopilot/common/core"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 // ExportConfig holds all export configuration options
@@ -21,7 +21,7 @@ type ExportConfig struct {
 
 // ExportDependencies holds injectable dependencies for testing
 type ExportDependencies struct {
-	SSHConnectionFactory func(context.Context, string) (sshpkg.Runner, error)
+	SSHConnectionFactory func(context.Context, string) (ssh.RunnerInterface, error)
 }
 
 var Command = []*cli.Command{
@@ -54,7 +54,7 @@ var Command = []*cli.Command{
 			}
 
 			deps := ExportDependencies{
-				SSHConnectionFactory: core.CreateConnection,
+				SSHConnectionFactory: ssh.CreateConnection,
 			}
 
 			// Iterate over all hosts
@@ -78,7 +78,7 @@ func Export(ctx context.Context, host string, exportOutputDir string, exportShow
 		OutputDir:     exportOutputDir,
 	}
 	deps := ExportDependencies{
-		SSHConnectionFactory: core.CreateConnection,
+		SSHConnectionFactory: ssh.CreateConnection,
 	}
 	return export(ctx, host, preferredFilename, cfg, deps)
 }
@@ -124,7 +124,7 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 		filename = fmt.Sprintf("%s.rsc", preferredFilename)
 	} else {
 		// Derive from host using HostInfo
-		hostInfo := sshpkg.ParseHost(host)
+		hostInfo := ssh.ParseHost(host)
 		filename = fmt.Sprintf("%s.rsc", hostInfo.ShortName)
 	}
 	filepath := filepath.Join(cfg.OutputDir, filename)

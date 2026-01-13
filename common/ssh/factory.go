@@ -12,17 +12,26 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
 )
 
 // CreateConnection creates a new SSH connection using the provided credentials and host key manager.
 // This is the main entry point for creating SSH connections in the application.
-func CreateConnection(ctx context.Context, host string, credentials CredentialsProvider, hostKeyManager HostKeyManager) (Runner, error) {
+func CreateConnection(ctx context.Context, host string) (RunnerInterface, error) {
+	// Get manager from context
+	manager := ctx.Value(core.SshManagerKey).(*SshManager)
+	if manager == nil {
+		return nil, fmt.Errorf("failed to get manager from context")
+	}
+	// Get host key manager
+	hostKeyManager := NewDefaultHostKeyManager()
+
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context cancelled before connection: %w", err)
 	}
 
-	slog.Debug("creating SSH connection", "host", host, "user", credentials.GetUser())
+	slog.Debug("creating SSH connection", "host", host, "user", manager.getUser())
 
 	// Step 1: Read SSH configuration
 	hostInfo, err := readConfig(host)
@@ -39,18 +48,18 @@ func CreateConnection(ctx context.Context, host string, credentials CredentialsP
 		"identityFile", hostInfo.IdentityFile)
 
 	// Step 2: Build authentication methods
-	authMethods, err := buildAuthMethods(hostInfo, credentials.GetPassword(), credentials.GetPassphrase())
+	authMethods, err := buildAuthMethods(hostInfo, manager.getPassword(), manager.getPassphrase())
 	if err != nil {
 		return nil, fmt.Errorf("failed to build auth methods: %w", err)
 	}
 
 	// Step 3: Determine which username to use
-	finalUsername := credentials.GetUser()
+	finalUsername := manager.getUser()
 	if hostInfo.User != "" {
 		slog.Debug("using username from ssh_config", "user", hostInfo.User)
 		finalUsername = hostInfo.User
 	} else {
-		slog.Debug("using username from command line", "user", credentials.GetUser())
+		slog.Debug("using username from command line", "user", manager.getUser())
 	}
 
 	// Step 4: Build SSH client config
@@ -94,7 +103,7 @@ func CreateConnection(ctx context.Context, host string, credentials CredentialsP
 	client := ssh.NewClient(c, chans, reqs)
 
 	slog.Debug("SSH connection established")
-	return &DefaultRunner{client: client}, nil
+	return &Runner{client: client}, nil
 }
 
 // buildAuthMethods builds SSH authentication methods based on available credentials

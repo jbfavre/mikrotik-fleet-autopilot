@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
 )
 
 func TestBuildHostKeyCallback(t *testing.T) {
@@ -110,7 +111,7 @@ func TestBuildHostKeyCallback(t *testing.T) {
 			ctx := context.Background()
 			if tt.enrollmentMode {
 				// nolint:staticcheck // Using string key to match hostkey.go implementation
-				ctx = context.WithValue(ctx, "enrollment", true)
+				ctx = context.WithValue(ctx, core.EnrollmentKey, true)
 			}
 
 			callback := BuildHostKeyCallback(ctx, tt.host, manager)
@@ -496,6 +497,7 @@ func TestBuildHostKeyCallback_SkipVerification(t *testing.T) {
 		})
 	}
 }
+
 // Tests for DefaultHostKeyManager
 
 func TestNewDefaultHostKeyManager(t *testing.T) {

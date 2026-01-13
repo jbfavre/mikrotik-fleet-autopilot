@@ -8,57 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	core "jb.favre/mikrotik-fleet-autopilot/common/core"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/sshmocks_test"
 )
-
-// MockSshRunner is a mock implementation of ssh.Runner for testing
-type MockSshRunner struct {
-	CloseFunc                func() error
-	IsAlreadyClosedErrorFunc func(err error) bool
-	RunFunc                  func(cmd string) (string, error)
-}
-
-func (m *MockSshRunner) Close() error {
-	if m.CloseFunc != nil {
-		return m.CloseFunc()
-	}
-	return nil
-}
-
-func (m *MockSshRunner) IsAlreadyClosedError(err error) bool {
-	if m.IsAlreadyClosedErrorFunc != nil {
-		return m.IsAlreadyClosedErrorFunc(err)
-	}
-	return false
-}
-
-func (m *MockSshRunner) Run(cmd string) (string, error) {
-	if m.RunFunc != nil {
-		return m.RunFunc(cmd)
-	}
-	return "", nil
-}
-
-// MockSshManager is a mock implementation of SshManager for testing
-type MockSshManager struct {
-	CreateConnectionFunc func(host string) (sshpkg.Runner, error)
-	GetUserFunc          func() string
-}
-
-func (m *MockSshManager) CreateConnection(host string) (sshpkg.Runner, error) {
-	if m.CreateConnectionFunc != nil {
-		return m.CreateConnectionFunc(host)
-	}
-	return nil, fmt.Errorf("mock CreateConnection not implemented")
-}
-
-func (m *MockSshManager) GetUser() string {
-	if m.GetUserFunc != nil {
-		return m.GetUserFunc()
-	}
-	return "admin"
-}
 
 // TestExport tests the public Export function wrapper
 // Since Export uses core.CreateConnection directly (not injectable),
@@ -259,8 +212,8 @@ add name=bridge1`,
 			var executedCmd string
 
 			// Mock SSH connection using the factory pattern
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
-				return &MockSshRunner{
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+				return &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						executedCmd = cmd
 						return tt.sshOutput, tt.sshError
@@ -287,7 +240,7 @@ add name=bridge1`,
 				User:  "admin",
 			}
 			ctx := context.WithValue(context.Background(), core.ConfigKey, coreCfg)
-			ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
+			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			// Call the function
 			err = export(ctx, tt.host, "", cfg, deps)
@@ -411,8 +364,8 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 			}()
 
 			// Mock SSH connection
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
-				return &MockSshRunner{
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+				return &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "/interface bridge\nadd name=bridge1", nil
 					},
@@ -438,7 +391,7 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 				User:  "admin",
 			}
 			ctx := context.WithValue(context.Background(), core.ConfigKey, coreCfg)
-			ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
+			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			// Call export
 			err = export(ctx, tt.host, tt.preferredFilename, cfg, deps)
@@ -464,7 +417,7 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 // TestExport_SSHConnectionFactoryError tests error handling when SSH connection fails
 func TestExport_SSHConnectionFactoryError(t *testing.T) {
 	// Mock SSH connection factory to return error
-	mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
+	mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 		return nil, fmt.Errorf("SSH connection failed: timeout")
 	}
 
@@ -483,7 +436,7 @@ func TestExport_SSHConnectionFactoryError(t *testing.T) {
 		User:  "admin",
 	}
 	ctx := context.WithValue(context.Background(), core.ConfigKey, coreCfg)
-	ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
+	ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 	// Call export - should fail
 	err := export(ctx, "test-host", "", cfg, deps)
@@ -509,8 +462,8 @@ func TestExport_CloseError(t *testing.T) {
 	closeCalled := false
 
 	// Mock SSH connection with close error
-	mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
-		return &MockSshRunner{
+	mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+		return &sshmocks_test.MockRunner{
 			RunFunc: func(cmd string) (string, error) {
 				return "/interface bridge\nadd name=bridge1", nil
 			},
@@ -535,7 +488,7 @@ func TestExport_CloseError(t *testing.T) {
 		User:  "admin",
 	}
 	ctx := context.WithValue(context.Background(), core.ConfigKey, coreCfg)
-	ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
+	ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 	// Export should succeed even if close fails (error is silently ignored)
 	err = export(ctx, "test-host", "", cfg, deps)

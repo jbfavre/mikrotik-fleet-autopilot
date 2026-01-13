@@ -8,57 +8,10 @@ import (
 	"testing"
 	"time"
 
-	core "jb.favre/mikrotik-fleet-autopilot/common/core"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/sshmocks_test"
 )
-
-// MockSshRunner is a mock implementation of ssh.Runner for testing
-type MockSshRunner struct {
-	CloseFunc                func() error
-	IsAlreadyClosedErrorFunc func(err error) bool
-	RunFunc                  func(cmd string) (string, error)
-}
-
-func (m *MockSshRunner) Close() error {
-	if m.CloseFunc != nil {
-		return m.CloseFunc()
-	}
-	return nil
-}
-
-func (m *MockSshRunner) IsAlreadyClosedError(err error) bool {
-	if m.IsAlreadyClosedErrorFunc != nil {
-		return m.IsAlreadyClosedErrorFunc(err)
-	}
-	return false
-}
-
-func (m *MockSshRunner) Run(cmd string) (string, error) {
-	if m.RunFunc != nil {
-		return m.RunFunc(cmd)
-	}
-	return "", nil
-}
-
-// MockSshManager is a mock implementation of SshManager for testing
-type MockSshManager struct {
-	CreateConnectionFunc func(ctx context.Context, host string) (sshpkg.Runner, error)
-	GetUserFunc          func() string
-}
-
-func (m *MockSshManager) CreateConnection(ctx context.Context, host string) (sshpkg.Runner, error) {
-	if m.CreateConnectionFunc != nil {
-		return m.CreateConnectionFunc(ctx, host)
-	}
-	return nil, fmt.Errorf("mock CreateConnection not implemented")
-}
-
-func (m *MockSshManager) GetUser() string {
-	if m.GetUserFunc != nil {
-		return m.GetUserFunc()
-	}
-	return "admin"
-}
 
 // TestUpdatesPublicWrapper tests the public Updates function wrapper
 // Since Updates uses core.CreateConnection directly (not injectable),
@@ -144,7 +97,7 @@ func TestUpdatesParameterMapping(t *testing.T) {
 				UpdatesApply: true,
 			}
 			deps := UpdatesDependencies{
-				SSHConnectionFactory: core.CreateConnection,
+				SSHConnectionFactory: ssh.CreateConnection,
 				ReconnectDelay:       10 * time.Second,
 			}
 			tt.validateConfig(t, cfg, deps)
@@ -291,14 +244,14 @@ func TestUpdates(t *testing.T) {
 			var connectionCount int
 
 			// Mock SSH connection factory
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 				connectionCount++
 
 				if tt.sshError != nil {
 					return nil, tt.sshError
 				}
 
-				return &MockSshRunner{
+				return &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						executedCommands = append(executedCommands, cmd)
 
@@ -340,7 +293,7 @@ func TestUpdates(t *testing.T) {
 				User:  "admin",
 			}
 			ctx := context.WithValue(context.Background(), core.ConfigKey, coreCfg)
-			ctx = context.WithValue(ctx, core.SshManagerKey, &MockSshManager{})
+			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			// Execute the function
 			err := updates(ctx, tt.host, cfg, deps)
@@ -579,7 +532,7 @@ func TestGetUpdateStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &MockSshRunner{
+			mock := &sshmocks_test.MockRunner{
 				RunFunc: func(cmd string) (string, error) {
 					return tt.sshOutput, tt.sshError
 				},
@@ -809,7 +762,7 @@ func TestCheckCurrentStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &MockSshRunner{
+			mock := &sshmocks_test.MockRunner{
 				RunFunc: func(cmd string) (string, error) {
 					if cmd == "/system/package/update/check-for-updates" {
 						return tt.osOutput, tt.osError
@@ -896,7 +849,7 @@ func TestApplyUpdate(t *testing.T) {
 			closeCallCount := 0
 			reconnectAttempts := 0
 
-			initialMock := &MockSshRunner{
+			initialMock := &sshmocks_test.MockRunner{
 				RunFunc: func(cmd string) (string, error) {
 					return "", tt.runError
 				},
@@ -907,12 +860,12 @@ func TestApplyUpdate(t *testing.T) {
 			}
 
 			// Mock the SSH connection factory
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 				reconnectAttempts++
 				if reconnectAttempts < tt.reconnectAttempts {
 					return nil, fmt.Errorf("connection failed")
 				}
-				return &MockSshRunner{
+				return &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "", nil
 					},
@@ -927,7 +880,7 @@ func TestApplyUpdate(t *testing.T) {
 				ReconnectDelay:       1 * time.Millisecond, // Speed up tests
 			}
 
-			ctx := context.WithValue(context.Background(), core.SshManagerKey, &MockSshManager{})
+			ctx := context.WithValue(context.Background(), core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			newConn, err := applyUpdate(initialMock, ctx, "test-router", tt.updateCmd, "Test update", deps)
 
@@ -1093,7 +1046,7 @@ func TestApplyComponentUpdate(t *testing.T) {
 			runCalled := false
 			closeCalled := false
 
-			initialMock := &MockSshRunner{
+			initialMock := &sshmocks_test.MockRunner{
 				RunFunc: func(cmd string) (string, error) {
 					runCalled = true
 					return "", tt.updateError
@@ -1105,8 +1058,8 @@ func TestApplyComponentUpdate(t *testing.T) {
 			}
 
 			// Mock the SSH connection factory to return a new mock after "reconnection"
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
-				return &MockSshRunner{
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+				return &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						if cmd == "/system/package/update/check-for-updates" {
 							return tt.osOutputAfterUpdate, nil
@@ -1127,7 +1080,7 @@ func TestApplyComponentUpdate(t *testing.T) {
 				ReconnectDelay:       1 * time.Millisecond, // Speed up tests
 			}
 
-			ctx := context.WithValue(context.Background(), core.SshManagerKey, &MockSshManager{})
+			ctx := context.WithValue(context.Background(), core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			err := applyComponentUpdate(initialMock, ctx, "test-router", tt.component, tt.updateCmd, tt.checkBoth, deps)
 

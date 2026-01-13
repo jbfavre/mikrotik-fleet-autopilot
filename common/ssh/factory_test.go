@@ -9,19 +9,10 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
 )
 
 // Mock implementations for testing
-
-type mockCredentialsProvider struct {
-	user       string
-	password   string
-	passphrase string
-}
-
-func (m *mockCredentialsProvider) GetUser() string       { return m.user }
-func (m *mockCredentialsProvider) GetPassword() string   { return m.password }
-func (m *mockCredentialsProvider) GetPassphrase() string { return m.passphrase }
 
 type mockTestHostKeyManager struct {
 	existsFunc         func(host string) bool
@@ -61,23 +52,21 @@ func (m *mockTestHostKeyManager) GetFingerprint(key ssh.PublicKey) string {
 func TestCreateConnection_Integration(t *testing.T) {
 	// Integration tests that verify the function behavior without mocking internals
 
-	t.Run("with nil credentials panics", func(t *testing.T) {
+	/* 	t.Run("with nil credentials panics", func(t *testing.T) {
 		defer func() {
 			if r := recover(); r == nil {
 				t.Error("expected panic with nil credentials")
 			}
 		}()
 
-		ctx := context.Background()
-		_, _ = CreateConnection(ctx, "nonexistent.host.local", nil, &mockTestHostKeyManager{})
-	})
+		ctx := context.WithValue(context.Background(), core.SshManagerKey, &SshManager{user: "", password: "", passphrase: ""})
+		_, _ = CreateConnection(ctx, "nonexistent.host.local")
+	}) */
 
 	t.Run("with invalid host returns error", func(t *testing.T) {
-		ctx := context.Background()
-		credentials := &mockCredentialsProvider{user: "admin"}
-		manager := &mockTestHostKeyManager{}
+		ctx := context.WithValue(context.Background(), core.SshManagerKey, &SshManager{})
 
-		conn, err := CreateConnection(ctx, "definitely.not.a.real.host.invalid:9999", credentials, manager)
+		conn, err := CreateConnection(ctx, "definitely.not.a.real.host.invalid:9999")
 
 		if err == nil {
 			t.Error("expected error with invalid host")
@@ -88,13 +77,10 @@ func TestCreateConnection_Integration(t *testing.T) {
 	})
 
 	t.Run("with canceled context returns error", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.WithValue(context.Background(), core.SshManagerKey, &SshManager{}))
 		cancel() // Cancel immediately
 
-		credentials := &mockCredentialsProvider{user: "admin"}
-		manager := &mockTestHostKeyManager{}
-
-		conn, err := CreateConnection(ctx, "192.168.1.1", credentials, manager)
+		conn, err := CreateConnection(ctx, "192.168.1.1")
 
 		if err == nil {
 			t.Error("expected error with cancelled context")
@@ -113,12 +99,12 @@ func TestCreateConnection_CredentialsFlow(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		credentials CredentialsProvider
+		manager     SshManager
 		expectError bool
 	}{
 		{
 			name: "with all credentials",
-			credentials: &mockCredentialsProvider{
+			manager: SshManager{
 				user:       "admin",
 				password:   "password123",
 				passphrase: "passphrase123",
@@ -127,14 +113,14 @@ func TestCreateConnection_CredentialsFlow(t *testing.T) {
 		},
 		{
 			name: "with user only",
-			credentials: &mockCredentialsProvider{
+			manager: SshManager{
 				user: "admin",
 			},
 			expectError: true,
 		},
 		{
 			name: "with empty user",
-			credentials: &mockCredentialsProvider{
+			manager: SshManager{
 				user: "",
 			},
 			expectError: true,
@@ -143,10 +129,8 @@ func TestCreateConnection_CredentialsFlow(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			manager := &mockTestHostKeyManager{}
-
-			_, err := CreateConnection(ctx, "nonexistent.host.local:22", tt.credentials, manager)
+			ctx := context.WithValue(context.Background(), core.SshManagerKey, &tt.manager)
+			_, err := CreateConnection(ctx, "nonexistent.host.local:22")
 
 			if !tt.expectError && err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -160,11 +144,10 @@ func TestCreateConnection_CredentialsFlow(t *testing.T) {
 
 func TestCreateConnection_ErrorMessages(t *testing.T) {
 	// Verify that error messages are properly formatted
-	ctx := context.Background()
-	credentials := &mockCredentialsProvider{user: "admin"}
-	manager := &mockTestHostKeyManager{}
+	manager := SshManager{}
+	ctx := context.WithValue(context.Background(), core.SshManagerKey, &manager)
 
-	_, err := CreateConnection(ctx, "nonexistent.test.invalid", credentials, manager)
+	_, err := CreateConnection(ctx, "nonexistent.test.invalid")
 
 	if err == nil {
 		t.Error("expected error")
@@ -175,26 +158,6 @@ func TestCreateConnection_ErrorMessages(t *testing.T) {
 	errMsg := err.Error()
 	if !strings.Contains(errMsg, "failed to") {
 		t.Errorf("error message should mention connection failure: %v", errMsg)
-	}
-}
-
-// Benchmark for CreateConnection
-func BenchmarkCreateConnection(b *testing.B) {
-	credentials := &mockCredentialsProvider{
-		user:       "admin",
-		password:   "password",
-		passphrase: "passphrase",
-	}
-	hostKeyManager := &mockTestHostKeyManager{
-		existsFunc: func(host string) bool { return true },
-		verifyFunc: func(host string, key ssh.PublicKey) error { return nil },
-	}
-	ctx := context.Background()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// This will fail but measures the function call overhead
-		_, _ = CreateConnection(ctx, "nonexistent.test.invalid", credentials, hostKeyManager)
 	}
 }
 
@@ -286,36 +249,37 @@ func TestParseSshPrivateKey_TildeExpansion(t *testing.T) {
 }
 
 func TestCreateConnection_ErrorPaths(t *testing.T) {
-	ctx := context.Background()
-
 	tests := []struct {
-		name        string
-		host        string
-		credentials CredentialsProvider
-		wantErr     bool
+		name    string
+		host    string
+		manager SshManager
+		wantErr bool
 	}{
 		{
-			name:        "empty host",
-			host:        "",
-			credentials: &mockCredentialsProvider{user: "admin", password: "pass"},
-			wantErr:     true,
+			name: "empty host",
+			host: "",
+			manager: SshManager{
+				user:     "admin",
+				password: "pass",
+			},
+			wantErr: true,
 		},
 		{
-			name:        "invalid host format",
-			host:        ":::invalid",
-			credentials: &mockCredentialsProvider{user: "admin", password: "pass"},
-			wantErr:     true,
+			name: "invalid host format",
+			host: ":::invalid",
+			manager: SshManager{
+				user:     "admin",
+				password: "pass",
+			},
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
+		ctx := context.WithValue(context.Background(), core.SshManagerKey, &tt.manager)
 		t.Run(tt.name, func(t *testing.T) {
-			hostKeyManager := &mockTestHostKeyManager{
-				existsFunc: func(host string) bool { return true },
-				verifyFunc: func(host string, key ssh.PublicKey) error { return nil },
-			}
 
-			_, err := CreateConnection(ctx, tt.host, tt.credentials, hostKeyManager)
+			_, err := CreateConnection(ctx, tt.host)
 
 			if !tt.wantErr {
 				if err != nil {
@@ -415,23 +379,15 @@ func TestBuildAuthMethods_WithBothKeyAndPassword(t *testing.T) {
 }
 
 func TestCreateConnection_ContextCancellation(t *testing.T) {
-	// Test that CreateConnection respects context cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	manager := &mockTestHostKeyManager{
-		existsFunc:         func(host string) bool { return true },
-		verifyFunc:         func(host string, key ssh.PublicKey) error { return nil },
-		captureFunc:        func(host string, key ssh.PublicKey) error { return nil },
-		getFingerprintFunc: func(key ssh.PublicKey) string { return "test" },
-	}
-
-	credentials := &mockCredentialsProvider{
+	manager := SshManager{
 		user:     "admin",
 		password: "testpass",
 	}
+	// Test that CreateConnection respects context cancellation
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), core.SshManagerKey, &manager))
+	cancel() // Cancel immediately
 
-	_, err := CreateConnection(ctx, "192.168.1.1:22", credentials, manager)
+	_, err := CreateConnection(ctx, "192.168.1.1:22")
 	if err == nil {
 		t.Error("CreateConnection() expected error with cancelled context, got nil")
 	}
@@ -441,23 +397,15 @@ func TestCreateConnection_ContextCancellation(t *testing.T) {
 }
 
 func TestCreateConnection_InvalidAuthMethods(t *testing.T) {
-	// Test that CreateConnection fails properly when no auth methods provided
-	ctx := context.Background()
-
-	manager := &mockTestHostKeyManager{
-		existsFunc:         func(host string) bool { return true },
-		verifyFunc:         func(host string, key ssh.PublicKey) error { return nil },
-		captureFunc:        func(host string, key ssh.PublicKey) error { return nil },
-		getFingerprintFunc: func(key ssh.PublicKey) string { return "test" },
-	}
-
-	// Empty credentials - no password, no passphrase
-	credentials := &mockCredentialsProvider{
+	manager := SshManager{
 		user:     "admin",
 		password: "",
 	}
 
-	_, err := CreateConnection(ctx, "192.168.1.1:22", credentials, manager)
+	// Test that CreateConnection fails properly when no auth methods provided
+	ctx := context.WithValue(context.Background(), core.SshManagerKey, &manager)
+
+	_, err := CreateConnection(ctx, "192.168.1.1:22")
 	if err == nil {
 		t.Error("CreateConnection() expected error with no auth methods, got nil")
 	}

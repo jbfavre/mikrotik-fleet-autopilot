@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
 )
 
 // HostKeyManager provides host key validation operations
@@ -202,12 +203,12 @@ func BuildHostKeyCallback(ctx context.Context, host string, manager HostKeyManag
 		// Debug: check what's in the context
 		slog.Debug("host key callback invoked",
 			"host", host,
-			"configKey", ctx.Value("config") != nil,
-			"enrollmentKey", ctx.Value("enrollment") != nil)
+			"configKey", ctx.Value(core.ConfigKey) != nil,
+			"enrollmentKey", ctx.Value(core.EnrollmentKey) != nil)
 
 		// Check if user wants to skip host key verification (INSECURE)
 		var skipVerification bool
-		if ctxValue := ctx.Value("config"); ctxValue != nil {
+		if ctxValue := ctx.Value(core.ConfigKey); ctxValue != nil {
 			if cfg, ok := ctxValue.(configGetter); ok {
 				skipVerification = cfg.GetSkipHostKeyCheck()
 			}
@@ -218,7 +219,7 @@ func BuildHostKeyCallback(ctx context.Context, host string, manager HostKeyManag
 
 			// Even when skipping verification, still capture the host key during enrollment
 			isEnrollment := false
-			if ctxValue := ctx.Value("enrollment"); ctxValue != nil {
+			if ctxValue := ctx.Value(core.EnrollmentKey); ctxValue != nil {
 				if val, ok := ctxValue.(bool); ok {
 					isEnrollment = val
 				}
@@ -258,7 +259,7 @@ func BuildHostKeyCallback(ctx context.Context, host string, manager HostKeyManag
 
 		// No host key exists - check if we're in enrollment mode
 		isEnrollment := false
-		if ctxValue := ctx.Value("enrollment"); ctxValue != nil {
+		if ctxValue := ctx.Value(core.EnrollmentKey); ctxValue != nil {
 			if val, ok := ctxValue.(bool); ok {
 				isEnrollment = val
 			}

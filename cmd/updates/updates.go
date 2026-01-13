@@ -127,6 +127,40 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 				fmt.Printf("❓ %s updates apply failed\n", host)
 				return err
 			}
+			// After RouterOS update, reconnect and re-check RouterBoard status only
+			// (RouterOS update may have staged new RouterBoard firmware)
+			// We don't need to re-check RouterOS status since we just updated it,
+			// and checking RouterOS requires DNS which may have been reconfigured
+			if boardStatus != nil {
+				conn, err = deps.SSHConnectionFactory(ctx, host)
+				if err != nil {
+					slog.Error("failed to reconnect after RouterOS update", "host", host, "error", err)
+					return fmt.Errorf("failed to reconnect after RouterOS update: %w", err)
+				}
+				defer func() {
+					_ = conn.Close()
+				}()
+
+				// Only re-check RouterBoard status (not RouterOS which requires working DNS)
+				slog.Info("Re-checking RouterBoard status after RouterOS update")
+				boardStatus, err = getUpdateStatus(
+					conn,
+					"/system/routerboard/print",
+					"RouterBoard",
+					regexp.MustCompile(`.*current-firmware: (\S+)`),
+					regexp.MustCompile(`.*upgrade-firmware: (\S+)`),
+					true,
+				)
+				if err != nil {
+					slog.Warn("failed to re-check RouterBoard status after RouterOS update", "error", err)
+				} else if boardStatus != nil {
+					boardUpToDate = boardStatus.Installed == boardStatus.Available
+					slog.Info("RouterBoard status after RouterOS update",
+						"current", boardStatus.Installed,
+						"upgrade", boardStatus.Available,
+						"upToDate", boardUpToDate)
+				}
+			}
 		}
 
 		// Apply RouterBoard update if needed (only for physical routers)

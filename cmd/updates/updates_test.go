@@ -1106,3 +1106,192 @@ func TestApplyComponentUpdate(t *testing.T) {
 		})
 	}
 }
+
+// TestUpdatesRouterOSStagingRouterBoardFirmware tests the critical scenario where:
+// 1. RouterOS update is needed
+// 2. RouterBoard appears up-to-date initially (matching current RouterOS)
+// 3. After RouterOS update, RouterOS stages new RouterBoard firmware
+// 4. We must reconnect and re-check RouterBoard status
+// 5. Then apply RouterBoard reboot if firmware was staged
+func TestUpdatesRouterOSStagingRouterBoardFirmware(t *testing.T) {
+	tests := []struct {
+		name                        string
+		osInstalledInitial          string
+		osAvailableInitial          string
+		boardInstalledInitial       string
+		boardAvailableInitial       string
+		boardInstalledAfterOsUpdate string
+		boardAvailableAfterOsUpdate string
+		expectReconnect             bool
+		expectBoardReboot           bool
+	}{
+		{
+			name:                        "RouterOS update stages RouterBoard firmware",
+			osInstalledInitial:          "7.11.3",
+			osAvailableInitial:          "7.12.1",
+			boardInstalledInitial:       "7.11.3",
+			boardAvailableInitial:       "7.11.3", // Matches current RouterOS
+			boardInstalledAfterOsUpdate: "7.11.3", // Current firmware still old
+			boardAvailableAfterOsUpdate: "7.12.1", // Staged by RouterOS update
+			expectReconnect:             true,
+			expectBoardReboot:           true,
+		},
+		{
+			name:                        "RouterOS update but no RouterBoard firmware staged",
+			osInstalledInitial:          "7.11.3",
+			osAvailableInitial:          "7.12.1",
+			boardInstalledInitial:       "7.12.1",
+			boardAvailableInitial:       "7.12.1", // Already has compatible firmware
+			boardInstalledAfterOsUpdate: "7.12.1",
+			boardAvailableAfterOsUpdate: "7.12.1",
+			expectReconnect:             true,
+			expectBoardReboot:           false, // No reboot needed
+		},
+		{
+			name:                        "RouterOS update stages different RouterBoard version",
+			osInstalledInitial:          "7.10",
+			osAvailableInitial:          "7.12.1",
+			boardInstalledInitial:       "7.10",
+			boardAvailableInitial:       "7.10",
+			boardInstalledAfterOsUpdate: "7.10",
+			boardAvailableAfterOsUpdate: "7.12.1", // Staged compatible firmware
+			expectReconnect:             true,
+			expectBoardReboot:           true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var connectionCount int
+			var executedCommands []string
+			var osUpdateApplied bool
+
+			// Mock SSH connection factory that changes behavior after OS update
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+				connectionCount++
+
+				return &sshmocks_test.MockRunner{
+					RunFunc: func(cmd string) (string, error) {
+						executedCommands = append(executedCommands, cmd)
+
+						switch cmd {
+						case "/system/package/update/check-for-updates":
+							if osUpdateApplied {
+								// After OS update, RouterOS is up to date
+								return fmt.Sprintf(`  status: Updated
+  installed-version: %s
+  latest-version: %s`, tt.osAvailableInitial, tt.osAvailableInitial), nil
+							}
+							// Before OS update
+							return fmt.Sprintf(`  status: New version available
+  installed-version: %s
+  latest-version: %s`, tt.osInstalledInitial, tt.osAvailableInitial), nil
+
+						case "/system/routerboard/print":
+							if osUpdateApplied {
+								// After OS update, RouterBoard status reflects staged firmware
+								return fmt.Sprintf(`  routerboard: yes
+  current-firmware: %s
+  upgrade-firmware: %s`, tt.boardInstalledAfterOsUpdate, tt.boardAvailableAfterOsUpdate), nil
+							}
+							// Before OS update
+							return fmt.Sprintf(`  routerboard: yes
+  current-firmware: %s
+  upgrade-firmware: %s`, tt.boardInstalledInitial, tt.boardAvailableInitial), nil
+
+						case "/system/package/update/install":
+							osUpdateApplied = true
+							return "System will reboot", nil
+
+						case "/system/reboot":
+							return "System is rebooting", nil
+						}
+
+						return "", nil
+					},
+					CloseFunc: func() error {
+						return nil
+					},
+				}, nil
+			}
+
+			// Build test configuration
+			cfg := UpdatesConfig{
+				UpdatesApply: true, // Must apply updates to trigger the scenario
+			}
+
+			deps := UpdatesDependencies{
+				SSHConnectionFactory: mockSSHFactory,
+				ReconnectDelay:       10 * time.Millisecond,
+			}
+
+			// Create context
+			coreCfg := &core.Config{
+				Hosts: []string{"router.example.com"},
+				User:  "admin",
+			}
+			ctx := context.WithValue(context.Background(), core.ConfigKey, coreCfg)
+			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
+
+			// Execute the function
+			err := updates(ctx, "router.example.com", cfg, deps)
+
+			// Should not error
+			if err != nil {
+				t.Fatalf("updates() unexpected error = %v", err)
+			}
+
+			// Verify RouterOS update was applied
+			osUpdateFound := false
+			for _, cmd := range executedCommands {
+				if cmd == "/system/package/update/install" {
+					osUpdateFound = true
+					break
+				}
+			}
+			if !osUpdateFound {
+				t.Error("RouterOS update command was not executed")
+			}
+
+			// Verify reconnection happened after RouterOS update
+			if tt.expectReconnect {
+				if connectionCount < 2 {
+					t.Errorf("Expected at least 2 connections (initial + reconnect), got %d", connectionCount)
+				}
+			}
+
+			// Note: RouterOS status may be checked multiple times:
+			// 1. Initially before updates
+			// 2. After RouterOS update in applyComponentUpdate
+			// 3. After RouterBoard update in applyComponentUpdate (if board update happens)
+			// What we want to verify is that we DON'T call checkCurrentStatus after RouterOS update
+			// (which would fail with DNS issues), we only check RouterBoard directly
+
+			// Verify RouterBoard status was re-checked after RouterOS update
+			checkCount := 0
+			for _, cmd := range executedCommands {
+				if cmd == "/system/routerboard/print" {
+					checkCount++
+				}
+			}
+			if tt.expectReconnect && checkCount < 2 {
+				t.Errorf("Expected RouterBoard status to be checked at least twice (before + after OS update), got %d", checkCount)
+			}
+
+			// Verify RouterBoard reboot was executed if firmware was staged
+			boardRebootFound := false
+			for _, cmd := range executedCommands {
+				if cmd == "/system/reboot" {
+					boardRebootFound = true
+					break
+				}
+			}
+			if tt.expectBoardReboot && !boardRebootFound {
+				t.Error("Expected RouterBoard reboot command but it was not executed")
+			}
+			if !tt.expectBoardReboot && boardRebootFound {
+				t.Error("Did not expect RouterBoard reboot command but it was executed")
+			}
+		})
+	}
+}

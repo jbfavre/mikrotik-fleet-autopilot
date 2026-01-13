@@ -19,8 +19,8 @@ import (
 // This is the main entry point for creating SSH connections in the application.
 func CreateConnection(ctx context.Context, host string) (RunnerInterface, error) {
 	// Get manager from context
-	manager := ctx.Value(core.SshManagerKey).(*SshManager)
-	if manager == nil {
+	manager, ok := ctx.Value(core.SshManagerKey).(*SshManager)
+	if !ok || manager == nil {
 		return nil, fmt.Errorf("failed to get manager from context")
 	}
 	// Get host key manager

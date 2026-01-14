@@ -11,8 +11,8 @@ import (
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
-	core "jb.favre/mikrotik-fleet-autopilot/common/core"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 // EnrollConfig holds all enrollment configuration options
@@ -29,7 +29,7 @@ type EnrollConfig struct {
 
 // EnrollDependencies holds injectable dependencies for testing
 type EnrollDependencies struct {
-	SSHConnectionFactory func(context.Context, string) (sshpkg.Runner, error)
+	SSHConnectionFactory func(context.Context, string) (ssh.RunnerInterface, error)
 	ApplyUpdatesFunc     func(context.Context, string) error
 	ExportConfigFunc     func(context.Context, string, string, bool, string) error
 }
@@ -96,7 +96,7 @@ var Command = []*cli.Command{
 
 			// Build dependencies for all operations
 			deps := EnrollDependencies{
-				SSHConnectionFactory: core.CreateConnection,
+				SSHConnectionFactory: ssh.CreateConnection,
 				ApplyUpdatesFunc:     updates.Updates,
 				ExportConfigFunc:     export.Export,
 			}
@@ -268,7 +268,7 @@ func processMultiHostKeyUpdate(ctx context.Context, hosts []string, deps EnrollD
 }
 
 // connectToRouter establishes an SSH connection to the router
-func connectToRouter(ctx context.Context, host string, deps EnrollDependencies) (sshpkg.Runner, error) {
+func connectToRouter(ctx context.Context, host string, deps EnrollDependencies) (ssh.RunnerInterface, error) {
 	slog.Debug("connecting to router", "host", host)
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
@@ -281,7 +281,7 @@ func connectToRouter(ctx context.Context, host string, deps EnrollDependencies) 
 }
 
 // applyPreEnrollScript applies the pre-enrollment configuration script
-func applyPreEnrollScript(conn sshpkg.Runner, cfg EnrollConfig) error {
+func applyPreEnrollScript(conn ssh.RunnerInterface, cfg EnrollConfig) error {
 	slog.Debug("applying pre-enroll configuration file")
 	if err := applyConfigFile(conn, cfg.PreEnrollScript); err != nil {
 		return fmt.Errorf("failed to apply pre-enroll configuration file: %w", err)
@@ -299,7 +299,7 @@ func applyUpdates(ctx context.Context, host string, deps EnrollDependencies) err
 }
 
 // exportConfiguration exports the router configuration and recreates SSH connection
-func exportConfiguration(ctx context.Context, host string, enrollCfg EnrollConfig, deps EnrollDependencies, conn sshpkg.Runner) (sshpkg.Runner, error) {
+func exportConfiguration(ctx context.Context, host string, enrollCfg EnrollConfig, deps EnrollDependencies, conn ssh.RunnerInterface) (ssh.RunnerInterface, error) {
 	slog.Debug("exporting final configuration", "host", host)
 	if err := deps.ExportConfigFunc(ctx, host, enrollCfg.OutputDir, false, enrollCfg.Hostname); err != nil {
 		slog.Error("failed to export configuration", "host", host, "error", err)
@@ -319,7 +319,7 @@ func exportConfiguration(ctx context.Context, host string, enrollCfg EnrollConfi
 }
 
 // applyPostEnrollScript applies the post-enrollment configuration script
-func applyPostEnrollScript(conn sshpkg.Runner, cfg EnrollConfig) error {
+func applyPostEnrollScript(conn ssh.RunnerInterface, cfg EnrollConfig) error {
 	slog.Debug("applying post-enroll configuration file")
 	if err := applyConfigFile(conn, cfg.PostEnrollScript); err != nil {
 		return fmt.Errorf("failed to apply post-enroll configuration file: %w", err)
@@ -328,7 +328,7 @@ func applyPostEnrollScript(conn sshpkg.Runner, cfg EnrollConfig) error {
 }
 
 // applyConfigFile reads and executes RouterOS commands from a file
-func applyConfigFile(conn sshpkg.Runner, filePath string) error {
+func applyConfigFile(conn ssh.RunnerInterface, filePath string) error {
 	// Read file
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -365,7 +365,7 @@ func applyConfigFile(conn sshpkg.Runner, filePath string) error {
 }
 
 // setRouterIdentity sets the system identity (hostname) on the router
-func setRouterIdentity(conn sshpkg.Runner, hostname string) error {
+func setRouterIdentity(conn ssh.RunnerInterface, hostname string) error {
 	if hostname == "" {
 		slog.Debug("skipping router identity set, hostname is empty")
 		fmt.Printf("❓ Router identity set skipped. --hostname not provided\n")
@@ -392,7 +392,7 @@ func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (s
 	slog.Info("starting host key update", "host", host)
 
 	// Load existing host key info if it exists
-	oldInfo, err := core.LoadHostKeyInfo(host)
+	oldInfo, err := ssh.LoadHostKeyInfo(host)
 	if err == nil {
 		slog.Debug("loaded existing host key", "host", host, "algorithm", oldInfo.Algorithm, "fingerprint", oldInfo.Fingerprint)
 	} else {
@@ -412,7 +412,7 @@ func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (s
 	slog.Debug("successfully connected and captured host key", "host", host)
 
 	// Load new host key info
-	newInfo, err := core.LoadHostKeyInfo(host)
+	newInfo, err := ssh.LoadHostKeyInfo(host)
 	if err != nil {
 		slog.Error("failed to load new host key", "host", host, "error", err)
 		return "", fmt.Errorf("failed to load new host key: %w", err)
@@ -437,9 +437,9 @@ func deleteExistingEnrollment(host string) error {
 	slog.Info("deleting existing enrollment artifacts", "host", host)
 
 	// Delete host key
-	if core.HostKeyExists(host) {
+	if ssh.HostKeyExists(host) {
 		slog.Debug("deleting host key", "host", host)
-		if err := core.DeleteHostKey(host); err != nil {
+		if err := ssh.DeleteHostKey(host); err != nil {
 			slog.Error("failed to delete host key", "host", host, "error", err)
 			return fmt.Errorf("failed to delete host key: %w", err)
 		}
@@ -447,7 +447,7 @@ func deleteExistingEnrollment(host string) error {
 	}
 
 	// Delete config file
-	parsedHost := sshpkg.ParseHost(host)
+	parsedHost := ssh.ParseHost(host)
 	configFile := fmt.Sprintf("%s.rsc", parsedHost.ShortName)
 	if _, err := os.Stat(configFile); err == nil {
 		slog.Debug("deleting config file", "file", configFile)

@@ -9,17 +9,19 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// DefaultRunner implements Runner interface
-type DefaultRunner struct {
+// RunnerInterface defines the methods for SSH operations
+type RunnerInterface interface {
+	Close() error
+	IsAlreadyClosedError(err error) bool
+	Run(cmd string) (string, error)
+}
+
+// Runner implements RunnerInterface using an SSH client
+type Runner struct {
 	client *ssh.Client
 }
 
-// GetClient returns the underlying SSH client (for backward compatibility)
-func (r *DefaultRunner) GetClient() *ssh.Client {
-	return r.client
-}
-
-func (r *DefaultRunner) Close() error {
+func (r *Runner) Close() error {
 	if r.client == nil {
 		return nil
 	}
@@ -31,7 +33,7 @@ func (r *DefaultRunner) Close() error {
 	return nil
 }
 
-func (r *DefaultRunner) IsAlreadyClosedError(err error) bool {
+func (r *Runner) IsAlreadyClosedError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -40,7 +42,7 @@ func (r *DefaultRunner) IsAlreadyClosedError(err error) bool {
 		strings.Contains(errMsg, "connection already closed")
 }
 
-func (r *DefaultRunner) Run(cmd string) (string, error) {
+func (r *Runner) Run(cmd string) (string, error) {
 	if r.client == nil {
 		slog.Warn("SSH connection not established")
 		return "", fmt.Errorf("SSH connection not established")
@@ -62,4 +64,9 @@ func (r *DefaultRunner) Run(cmd string) (string, error) {
 		return "", fmt.Errorf("failed to run command: %v", err)
 	}
 	return b.String(), nil
+}
+
+// getClient returns the underlying SSH client
+func (r *Runner) getClient() *ssh.Client {
+	return r.client
 }

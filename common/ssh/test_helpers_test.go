@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
@@ -54,7 +55,7 @@ func startMockSSHServer(t *testing.T) (*mockSSHServer, int) {
 		stopped:  make(chan struct{}),
 	}
 
-	go server.acceptConnections(t)
+	go server.acceptConnections()
 
 	// Get the port
 	_, portStr, _ := net.SplitHostPort(listener.Addr().String())
@@ -66,7 +67,7 @@ func startMockSSHServer(t *testing.T) (*mockSSHServer, int) {
 	return server, port
 }
 
-func (s *mockSSHServer) acceptConnections(t *testing.T) {
+func (s *mockSSHServer) acceptConnections() {
 	defer close(s.stopped)
 
 	for {
@@ -75,11 +76,11 @@ func (s *mockSSHServer) acceptConnections(t *testing.T) {
 			return // Server stopped
 		}
 
-		go s.handleConnection(conn, t)
+		go s.handleConnection(conn)
 	}
 }
 
-func (s *mockSSHServer) handleConnection(netConn net.Conn, t *testing.T) {
+func (s *mockSSHServer) handleConnection(netConn net.Conn) {
 	defer func() {
 		_ = netConn.Close()
 	}()
@@ -140,19 +141,19 @@ func (s *mockSSHServer) stop() {
 func buildTestConnection(ctx context.Context, host, username, password, passphrase string, hostKeyCallback HostKeyCallback) (Runner, error) {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled before connection: %w", err)
+		return Runner{}, fmt.Errorf("context cancelled before connection: %w", err)
 	}
 
 	// Read SSH configuration
 	hostInfo, err := readConfig(host)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read SSH config: %w", err)
+		return Runner{}, fmt.Errorf("failed to read SSH config: %w", err)
 	}
 
 	// Build authentication methods
 	authMethods, err := buildAuthMethods(hostInfo, password, passphrase)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build auth methods: %w", err)
+		return Runner{}, fmt.Errorf("failed to build auth methods: %w", err)
 	}
 
 	// Determine which username to use
@@ -176,7 +177,7 @@ func buildTestConnection(ctx context.Context, host, username, password, passphra
 
 	// Check context before dialing
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled before dial: %w", err)
+		return Runner{}, fmt.Errorf("context cancelled before dial: %w", err)
 	}
 
 	// Create a dialer that respects context
@@ -185,18 +186,18 @@ func buildTestConnection(ctx context.Context, host, username, password, passphra
 	}
 	netConn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial %s: %w", address, err)
+		return Runner{}, fmt.Errorf("failed to dial %s: %w", address, err)
 	}
 
 	// Perform SSH handshake
 	c, chans, reqs, err := ssh.NewClientConn(netConn, address, config)
 	if err != nil {
 		_ = netConn.Close()
-		return nil, fmt.Errorf("SSH handshake failed for %s: %w", address, err)
+		return Runner{}, fmt.Errorf("SSH handshake failed for %s: %w", address, err)
 	}
 
 	client := ssh.NewClient(c, chans, reqs)
-	return &DefaultRunner{client: client}, nil
+	return Runner{client: client}, nil
 }
 
 // containsAny checks if string s contains any of the substrings
@@ -222,4 +223,27 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// testConfigSkipCheck is a mock config that returns true for skip host key check
+type testConfigSkipCheck struct{}
+
+func (c *testConfigSkipCheck) GetSkipHostKeyCheck() bool {
+	return true
+}
+
+// generateTestKeyEd25519 generates an ed25519 SSH key pair for testing.
+// This is the preferred key type for tests as it's faster and more modern than RSA.
+func generateTestKeyEd25519() (ssh.PublicKey, error) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return signer.PublicKey(), nil
 }

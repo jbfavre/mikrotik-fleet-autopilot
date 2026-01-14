@@ -10,7 +10,7 @@ import (
 )
 
 func TestDefaultRunner_IsAlreadyClosedError(t *testing.T) {
-	runner := &DefaultRunner{}
+	runner := &Runner{}
 
 	tests := []struct {
 		name     string
@@ -65,18 +65,18 @@ func TestDefaultRunner_IsAlreadyClosedError(t *testing.T) {
 }
 
 func TestDefaultRunner_GetClient(t *testing.T) {
-	runner := &DefaultRunner{
+	runner := &Runner{
 		client: nil,
 	}
 
-	client := runner.GetClient()
+	client := runner.getClient()
 	if client != nil {
-		t.Errorf("GetClient() = %v, want nil", client)
+		t.Errorf("getClient() = %v, want nil", client)
 	}
 }
 
 func TestDefaultRunner_Close_NilClient(t *testing.T) {
-	runner := &DefaultRunner{
+	runner := &Runner{
 		client: nil,
 	}
 
@@ -87,7 +87,7 @@ func TestDefaultRunner_Close_NilClient(t *testing.T) {
 }
 
 func TestDefaultRunner_Run_NilClient(t *testing.T) {
-	runner := &DefaultRunner{
+	runner := &Runner{
 		client: nil,
 	}
 

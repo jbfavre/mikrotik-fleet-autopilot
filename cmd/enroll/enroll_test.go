@@ -12,8 +12,9 @@ import (
 
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
-	core "jb.favre/mikrotik-fleet-autopilot/common/core"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/sshmocks_test"
 )
 
 // copyFile copies a file from src to dst
@@ -23,36 +24,6 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, data, 0600)
-}
-
-// MockSshRunner is a mock implementation of SshRunner for testing
-type MockSshRunner struct {
-	CloseFunc                func() error
-	IsAlreadyClosedErrorFunc func(err error) bool
-	RunFunc                  func(cmd string) (string, error)
-	commandHistory           []string
-}
-
-func (m *MockSshRunner) Close() error {
-	if m.CloseFunc != nil {
-		return m.CloseFunc()
-	}
-	return nil
-}
-
-func (m *MockSshRunner) IsAlreadyClosedError(err error) bool {
-	if m.IsAlreadyClosedErrorFunc != nil {
-		return m.IsAlreadyClosedErrorFunc(err)
-	}
-	return false
-}
-
-func (m *MockSshRunner) Run(cmd string) (string, error) {
-	m.commandHistory = append(m.commandHistory, cmd)
-	if m.RunFunc != nil {
-		return m.RunFunc(cmd)
-	}
-	return "", nil
 }
 
 func TestApplyConfigFile(t *testing.T) {
@@ -120,7 +91,7 @@ func TestApplyConfigFile(t *testing.T) {
 			}
 
 			// Create mock SSH runner
-			mockConn := &MockSshRunner{
+			mockConn := &sshmocks_test.MockRunner{
 				RunFunc: tt.runFunc,
 			}
 
@@ -141,16 +112,16 @@ func TestApplyConfigFile(t *testing.T) {
 
 			// Check executed commands
 			if !tt.wantErr {
-				if len(mockConn.commandHistory) != len(tt.expectedCmds) {
-					t.Errorf("Expected %d commands, got %d", len(tt.expectedCmds), len(mockConn.commandHistory))
+				if len(mockConn.CommandHistory) != len(tt.expectedCmds) {
+					t.Errorf("Expected %d commands, got %d", len(tt.expectedCmds), len(mockConn.CommandHistory))
 				}
 				for i, expectedCmd := range tt.expectedCmds {
-					if i >= len(mockConn.commandHistory) {
+					if i >= len(mockConn.CommandHistory) {
 						t.Errorf("Missing command at index %d: %s", i, expectedCmd)
 						continue
 					}
-					if mockConn.commandHistory[i] != expectedCmd {
-						t.Errorf("Command %d = %q, want %q", i, mockConn.commandHistory[i], expectedCmd)
+					if mockConn.CommandHistory[i] != expectedCmd {
+						t.Errorf("Command %d = %q, want %q", i, mockConn.CommandHistory[i], expectedCmd)
 					}
 				}
 			}
@@ -159,7 +130,7 @@ func TestApplyConfigFile(t *testing.T) {
 }
 
 func TestApplyConfigFileInvalidFile(t *testing.T) {
-	mockConn := &MockSshRunner{}
+	mockConn := &sshmocks_test.MockRunner{}
 	err := applyConfigFile(mockConn, "/nonexistent/file.rsc")
 	if err == nil {
 		t.Error("applyConfigFile() should fail with nonexistent file")
@@ -209,7 +180,7 @@ func TestSetRouterIdentity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockConn := &MockSshRunner{
+			mockConn := &sshmocks_test.MockRunner{
 				RunFunc: tt.runFunc,
 			}
 
@@ -229,13 +200,13 @@ func TestSetRouterIdentity(t *testing.T) {
 			if !tt.wantErr {
 				if tt.hostname == "" {
 					// Empty hostname should not execute any command
-					if len(mockConn.commandHistory) != 0 {
-						t.Errorf("Expected 0 commands for empty hostname, got %d", len(mockConn.commandHistory))
+					if len(mockConn.CommandHistory) != 0 {
+						t.Errorf("Expected 0 commands for empty hostname, got %d", len(mockConn.CommandHistory))
 					}
-				} else if len(mockConn.commandHistory) != 1 {
-					t.Errorf("Expected 1 command, got %d", len(mockConn.commandHistory))
-				} else if mockConn.commandHistory[0] != tt.expectedCmd {
-					t.Errorf("Command = %q, want %q", mockConn.commandHistory[0], tt.expectedCmd)
+				} else if len(mockConn.CommandHistory) != 1 {
+					t.Errorf("Expected 1 command, got %d", len(mockConn.CommandHistory))
+				} else if mockConn.CommandHistory[0] != tt.expectedCmd {
+					t.Errorf("Command = %q, want %q", mockConn.CommandHistory[0], tt.expectedCmd)
 				}
 			}
 		})
@@ -247,7 +218,7 @@ func TestUpdateHostKey(t *testing.T) {
 		name             string
 		host             string
 		setupHostKey     bool
-		existingHostKey  *core.HostKeyInfo
+		existingHostKey  *ssh.HostKeyInfo
 		connectionError  bool
 		wantErr          bool
 		errContains      string
@@ -257,7 +228,7 @@ func TestUpdateHostKey(t *testing.T) {
 			name:             "successful host key update with existing key",
 			host:             "192.168.1.1",
 			setupHostKey:     true,
-			existingHostKey:  &core.HostKeyInfo{Algorithm: "ssh-rsa", Fingerprint: "SHA256:old123fingerprint"},
+			existingHostKey:  &ssh.HostKeyInfo{Algorithm: "ssh-rsa", Fingerprint: "SHA256:old123fingerprint"},
 			connectionError:  false,
 			wantErr:          false,
 			verifyHostKeySet: true,
@@ -311,14 +282,14 @@ func TestUpdateHostKey(t *testing.T) {
 			if tt.setupHostKey && tt.existingHostKey != nil {
 				// Copy fixture host key file
 				srcFile := filepath.Join(originalWd, "testdata/hostkeys/192.168.1.1.hostkey")
-				dstFile := core.HostKeyFilePath(tt.host)
+				dstFile := ssh.HostKeyFilePath(tt.host)
 				if err := copyFile(srcFile, dstFile); err != nil {
 					t.Fatalf("Failed to setup test host key: %v", err)
 				}
 			}
 
 			// Create mock SSH connection factory
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 				if tt.connectionError {
 					return nil, fmt.Errorf("connection failed")
 				}
@@ -328,11 +299,11 @@ func TestUpdateHostKey(t *testing.T) {
 				if !tt.setupHostKey {
 					// Copy a new host key from testdata to simulate capture
 					srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
-					dstFile := core.HostKeyFilePath(host)
+					dstFile := ssh.HostKeyFilePath(host)
 					_ = copyFile(srcFile, dstFile)
 				}
 
-				return &MockSshRunner{
+				return &sshmocks_test.MockRunner{
 					CloseFunc: func() error { return nil },
 					RunFunc:   func(cmd string) (string, error) { return "", nil },
 				}, nil
@@ -360,7 +331,7 @@ func TestUpdateHostKey(t *testing.T) {
 
 			// Verify host key was captured
 			if !tt.wantErr && tt.verifyHostKeySet {
-				if !core.HostKeyExists(tt.host) {
+				if !ssh.HostKeyExists(tt.host) {
 					t.Error("Expected host key to be captured, but it doesn't exist")
 				}
 			}
@@ -426,7 +397,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 
 			// Setup host key if needed
 			if tt.setupHostKey {
-				hostKeyFile := core.HostKeyFilePath(tt.host)
+				hostKeyFile := ssh.HostKeyFilePath(tt.host)
 				err := os.WriteFile(hostKeyFile, []byte(`{"host":"test","algorithm":"ssh-rsa","fingerprint":"SHA256:test","publicKey":"dummy","capturedAt":"2025-12-18T00:00:00Z"}`), 0600)
 				if err != nil {
 					t.Fatalf("Failed to setup test host key: %v", err)
@@ -435,7 +406,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 
 			// Setup config file if needed
 			if tt.setupConfigFile {
-				parsedHost := sshpkg.ParseHost(tt.host)
+				parsedHost := ssh.ParseHost(tt.host)
 				configFile := fmt.Sprintf("%s.rsc", parsedHost.ShortName)
 				err := os.WriteFile(configFile, []byte("# test config"), 0600)
 				if err != nil {
@@ -460,14 +431,14 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 
 			// Verify host key was deleted
 			if !tt.wantErr && tt.setupHostKey {
-				if core.HostKeyExists(tt.host) {
+				if ssh.HostKeyExists(tt.host) {
 					t.Error("Expected host key to be deleted, but it still exists")
 				}
 			}
 
 			// Verify config file was deleted
 			if !tt.wantErr && tt.setupConfigFile {
-				parsedHost := sshpkg.ParseHost(tt.host)
+				parsedHost := ssh.ParseHost(tt.host)
 				configFile := fmt.Sprintf("%s.rsc", parsedHost.ShortName)
 				if _, err := os.Stat(configFile); !os.IsNotExist(err) {
 					t.Error("Expected config file to be deleted, but it still exists")
@@ -558,7 +529,7 @@ func TestUpdateHostKeyBatchMode(t *testing.T) {
 			for host, setup := range tt.setupHostKeys {
 				if setup {
 					srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
-					dstFile := core.HostKeyFilePath(host)
+					dstFile := ssh.HostKeyFilePath(host)
 					if err := copyFile(srcFile, dstFile); err != nil {
 						t.Fatalf("Failed to setup test host key for %s: %v", host, err)
 					}
@@ -566,17 +537,17 @@ func TestUpdateHostKeyBatchMode(t *testing.T) {
 			}
 
 			// Create mock SSH connection factory
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 				if tt.connectionErrors[host] {
 					return nil, fmt.Errorf("connection failed for %s", host)
 				}
 
 				// Simulate host key capture
 				srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
-				dstFile := core.HostKeyFilePath(host)
+				dstFile := ssh.HostKeyFilePath(host)
 				_ = copyFile(srcFile, dstFile)
 
-				return &MockSshRunner{
+				return &sshmocks_test.MockRunner{
 					CloseFunc: func() error { return nil },
 					RunFunc:   func(cmd string) (string, error) { return "", nil },
 				}, nil
@@ -618,7 +589,7 @@ func TestUpdateHostKeyBatchMode(t *testing.T) {
 			// Verify host keys were updated for successful hosts
 			for _, host := range tt.hosts {
 				if !tt.connectionErrors[host] {
-					if !core.HostKeyExists(host) {
+					if !ssh.HostKeyExists(host) {
 						t.Errorf("Expected host key for %s to exist after successful update", host)
 					}
 				}
@@ -728,7 +699,7 @@ func TestHandleUpdateHostKeyOnly(t *testing.T) {
 			for host, setup := range tt.setupHostKeys {
 				if setup {
 					srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
-					dstFile := core.HostKeyFilePath(host)
+					dstFile := ssh.HostKeyFilePath(host)
 					if err := copyFile(srcFile, dstFile); err != nil {
 						t.Fatalf("Failed to setup test host key for %s: %v", host, err)
 					}
@@ -736,17 +707,17 @@ func TestHandleUpdateHostKeyOnly(t *testing.T) {
 			}
 
 			// Create mock SSH connection factory
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 				if tt.connectionErrors[host] {
 					return nil, fmt.Errorf("connection failed for %s", host)
 				}
 
 				// Simulate host key capture
 				srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
-				dstFile := core.HostKeyFilePath(host)
+				dstFile := ssh.HostKeyFilePath(host)
 				_ = copyFile(srcFile, dstFile)
 
-				return &MockSshRunner{
+				return &sshmocks_test.MockRunner{
 					CloseFunc: func() error { return nil },
 					RunFunc:   func(cmd string) (string, error) { return "", nil },
 				}, nil
@@ -777,7 +748,7 @@ func TestHandleUpdateHostKeyOnly(t *testing.T) {
 			if !tt.wantErr {
 				for _, host := range tt.hosts {
 					if !tt.connectionErrors[host] {
-						if !core.HostKeyExists(host) {
+						if !ssh.HostKeyExists(host) {
 							t.Errorf("Expected host key for %s to exist after successful update", host)
 						}
 					}
@@ -879,13 +850,13 @@ func TestEnrollActionValidation(t *testing.T) {
 			ctx = context.WithValue(ctx, core.EnrollmentKey, true)
 
 			// Create mock SSH connection factory
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 				// Simulate host key capture
 				srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
-				dstFile := core.HostKeyFilePath(host)
+				dstFile := ssh.HostKeyFilePath(host)
 				_ = copyFile(srcFile, dstFile)
 
-				return &MockSshRunner{
+				return &sshmocks_test.MockRunner{
 					CloseFunc: func() error { return nil },
 					RunFunc:   func(cmd string) (string, error) { return "", nil },
 				}, nil
@@ -894,7 +865,7 @@ func TestEnrollActionValidation(t *testing.T) {
 			// Execute the Action logic directly (simulating the CLI command execution)
 			var err error
 
-			// Build dependencies from test mocks
+			// Build dependencies from test sshmocks_test
 			deps := EnrollDependencies{
 				SSHConnectionFactory: mockSSHFactory,
 				ApplyUpdatesFunc:     updates.Updates,
@@ -957,7 +928,7 @@ func TestEnrollActionValidation(t *testing.T) {
 			if !tt.wantErr && tt.updateHostKeyOnly {
 				actualCount := 0
 				for _, host := range tt.hosts {
-					if core.HostKeyExists(host) {
+					if ssh.HostKeyExists(host) {
 						actualCount++
 					}
 				}
@@ -997,11 +968,11 @@ func TestConnectToRouter(t *testing.T) {
 			ctx := context.Background()
 
 			// Create mock SSH connection factory
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 				if tt.connectionError {
 					return nil, fmt.Errorf("connection error")
 				}
-				return &MockSshRunner{
+				return &sshmocks_test.MockRunner{
 					CloseFunc: func() error { return nil },
 					RunFunc:   func(cmd string) (string, error) { return "", nil },
 				}, nil
@@ -1101,7 +1072,7 @@ func TestApplyPreEnrollScript(t *testing.T) {
 			}
 
 			// Create mock connection
-			mockConn := &MockSshRunner{
+			mockConn := &sshmocks_test.MockRunner{
 				RunFunc: tt.runFunc,
 			}
 
@@ -1122,15 +1093,15 @@ func TestApplyPreEnrollScript(t *testing.T) {
 
 			// Check executed commands
 			if !tt.wantErr && tt.expectedCmds != nil {
-				if len(mockConn.commandHistory) != len(tt.expectedCmds) {
-					t.Errorf("Expected %d commands, got %d", len(tt.expectedCmds), len(mockConn.commandHistory))
+				if len(mockConn.CommandHistory) != len(tt.expectedCmds) {
+					t.Errorf("Expected %d commands, got %d", len(tt.expectedCmds), len(mockConn.CommandHistory))
 				}
 				for i, expectedCmd := range tt.expectedCmds {
-					if i >= len(mockConn.commandHistory) {
+					if i >= len(mockConn.CommandHistory) {
 						break
 					}
-					if mockConn.commandHistory[i] != expectedCmd {
-						t.Errorf("Command %d = %q, want %q", i, mockConn.commandHistory[i], expectedCmd)
+					if mockConn.CommandHistory[i] != expectedCmd {
+						t.Errorf("Command %d = %q, want %q", i, mockConn.CommandHistory[i], expectedCmd)
 					}
 				}
 			}
@@ -1202,7 +1173,7 @@ func TestApplyPostEnrollScript(t *testing.T) {
 			}
 
 			// Create mock connection
-			mockConn := &MockSshRunner{
+			mockConn := &sshmocks_test.MockRunner{
 				RunFunc: tt.runFunc,
 			}
 
@@ -1223,15 +1194,15 @@ func TestApplyPostEnrollScript(t *testing.T) {
 
 			// Check executed commands
 			if !tt.wantErr && tt.expectedCmds != nil {
-				if len(mockConn.commandHistory) != len(tt.expectedCmds) {
-					t.Errorf("Expected %d commands, got %d", len(tt.expectedCmds), len(mockConn.commandHistory))
+				if len(mockConn.CommandHistory) != len(tt.expectedCmds) {
+					t.Errorf("Expected %d commands, got %d", len(tt.expectedCmds), len(mockConn.CommandHistory))
 				}
 				for i, expectedCmd := range tt.expectedCmds {
-					if i >= len(mockConn.commandHistory) {
+					if i >= len(mockConn.CommandHistory) {
 						break
 					}
-					if mockConn.commandHistory[i] != expectedCmd {
-						t.Errorf("Command %d = %q, want %q", i, mockConn.commandHistory[i], expectedCmd)
+					if mockConn.CommandHistory[i] != expectedCmd {
+						t.Errorf("Command %d = %q, want %q", i, mockConn.CommandHistory[i], expectedCmd)
 					}
 				}
 			}
@@ -1346,7 +1317,7 @@ func TestExportConfiguration(t *testing.T) {
 			closeCalled := false
 
 			// Create mock original connection
-			mockConn := &MockSshRunner{
+			mockConn := &sshmocks_test.MockRunner{
 				CloseFunc: func() error {
 					closeCalled = true
 					return nil
@@ -1355,12 +1326,12 @@ func TestExportConfiguration(t *testing.T) {
 
 			// Create mock SSH connection factory
 			reconnectAttempted := false
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 				reconnectAttempted = true
 				if tt.reconnectError {
 					return nil, fmt.Errorf("reconnect failed")
 				}
-				return &MockSshRunner{
+				return &sshmocks_test.MockRunner{
 					CloseFunc: func() error { return nil },
 					RunFunc:   func(cmd string) (string, error) { return "", nil },
 				}, nil
@@ -1615,7 +1586,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 			if tt.setupExistingHostKey {
 				for _, host := range tt.hosts {
 					srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
-					dstFile := core.HostKeyFilePath(host)
+					dstFile := ssh.HostKeyFilePath(host)
 					_ = copyFile(srcFile, dstFile)
 				}
 			}
@@ -1645,21 +1616,21 @@ func TestEnrollMainWorkflow(t *testing.T) {
 
 			// Track SSH connections for proper lifecycle verification
 			connectionCount := 0
-			var connections []*MockSshRunner
+			var connections []*sshmocks_test.MockRunner
 
 			// Create mock SSH connection factory
-			mockSSHFactory := func(ctx context.Context, host string) (sshpkg.Runner, error) {
+			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 				if tt.connectionError {
 					return nil, fmt.Errorf("connection failed")
 				}
 
 				// Simulate host key capture
 				srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
-				dstFile := core.HostKeyFilePath(host)
+				dstFile := ssh.HostKeyFilePath(host)
 				_ = copyFile(srcFile, dstFile)
 
 				connectionCount++
-				mockConn := &MockSshRunner{
+				mockConn := &sshmocks_test.MockRunner{
 					CloseFunc: func() error { return nil },
 					RunFunc: func(cmd string) (string, error) {
 						// Simulate various errors based on command
@@ -1760,7 +1731,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 					}
 
 					// Step 2: Establish connection
-					var conn sshpkg.Runner
+					var conn ssh.RunnerInterface
 					if err == nil {
 						conn, err = connectToRouter(ctx, host, deps)
 					}
@@ -1831,7 +1802,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 			// Verify host keys were created for successful scenarios
 			if !tt.wantErr && !tt.connectionError {
 				for _, host := range tt.hosts {
-					if !core.HostKeyExists(host) {
+					if !ssh.HostKeyExists(host) {
 						t.Errorf("Expected host key for %s to exist after enrollment", host)
 					}
 				}
@@ -1854,7 +1825,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 func TestEnrollWorkflow(t *testing.T) {
 	// Helper to write valid JSON host key files
 	writeHostKeyFile := func(hostname string) error {
-		hostKeyInfo := core.HostKeyInfo{
+		hostKeyInfo := ssh.HostKeyInfo{
 			Host:        hostname,
 			CapturedAt:  time.Now(),
 			Algorithm:   "ssh-ed25519",
@@ -1887,13 +1858,13 @@ func TestEnrollWorkflow(t *testing.T) {
 			name:     "successful full enrollment",
 			hostname: "test-router1",
 			setupMocks: func(t *testing.T) EnrollDependencies {
-				mockRunner := &MockSshRunner{
+				mockRunner := &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "", nil
 					},
 				}
 				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (sshpkg.Runner, error) {
+					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 						if err := writeHostKeyFile(host); err != nil {
 							return nil, fmt.Errorf("failed to write host key: %w", err)
 						}
@@ -1925,13 +1896,13 @@ func TestEnrollWorkflow(t *testing.T) {
 			hostname:    "test-router2",
 			skipUpdates: true,
 			setupMocks: func(t *testing.T) EnrollDependencies {
-				mockRunner := &MockSshRunner{
+				mockRunner := &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "", nil
 					},
 				}
 				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (sshpkg.Runner, error) {
+					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 						if err := writeHostKeyFile(host); err != nil {
 							return nil, fmt.Errorf("failed to write host key: %w", err)
 						}
@@ -1958,13 +1929,13 @@ func TestEnrollWorkflow(t *testing.T) {
 			hostname:   "test-router3",
 			skipExport: true,
 			setupMocks: func(t *testing.T) EnrollDependencies {
-				mockRunner := &MockSshRunner{
+				mockRunner := &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "", nil
 					},
 				}
 				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (sshpkg.Runner, error) {
+					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 						if err := writeHostKeyFile(host); err != nil {
 							return nil, fmt.Errorf("failed to write host key: %w", err)
 						}
@@ -1992,13 +1963,13 @@ func TestEnrollWorkflow(t *testing.T) {
 			skipUpdates: true,
 			skipExport:  true,
 			setupMocks: func(t *testing.T) EnrollDependencies {
-				mockRunner := &MockSshRunner{
+				mockRunner := &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "", nil
 					},
 				}
 				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (sshpkg.Runner, error) {
+					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 						if err := writeHostKeyFile(host); err != nil {
 							return nil, fmt.Errorf("failed to write host key: %w", err)
 						}
@@ -2026,7 +1997,7 @@ func TestEnrollWorkflow(t *testing.T) {
 			hostname: "test-router5",
 			setupMocks: func(t *testing.T) EnrollDependencies {
 				preScriptExecuted := false
-				mockRunner := &MockSshRunner{
+				mockRunner := &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						if strings.Contains(cmd, "pre-test-command") {
 							preScriptExecuted = true
@@ -2035,7 +2006,7 @@ func TestEnrollWorkflow(t *testing.T) {
 					},
 				}
 				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (sshpkg.Runner, error) {
+					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 						if err := writeHostKeyFile(host); err != nil {
 							return nil, fmt.Errorf("failed to write host key: %w", err)
 						}
@@ -2066,7 +2037,7 @@ func TestEnrollWorkflow(t *testing.T) {
 			hostname: "test-router6",
 			setupMocks: func(t *testing.T) EnrollDependencies {
 				postScriptExecuted := false
-				mockRunner := &MockSshRunner{
+				mockRunner := &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						if strings.Contains(cmd, "post-test-command") {
 							postScriptExecuted = true
@@ -2075,7 +2046,7 @@ func TestEnrollWorkflow(t *testing.T) {
 					},
 				}
 				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (sshpkg.Runner, error) {
+					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 						if err := writeHostKeyFile(host); err != nil {
 							return nil, fmt.Errorf("failed to write host key: %w", err)
 						}
@@ -2109,13 +2080,13 @@ func TestEnrollWorkflow(t *testing.T) {
 			hostname: "test-router7",
 			force:    true,
 			setupMocks: func(t *testing.T) EnrollDependencies {
-				mockRunner := &MockSshRunner{
+				mockRunner := &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "", nil
 					},
 				}
 				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (sshpkg.Runner, error) {
+					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 						if err := writeHostKeyFile(host); err != nil {
 							return nil, fmt.Errorf("failed to write host key: %w", err)
 						}
@@ -2154,13 +2125,13 @@ func TestEnrollWorkflow(t *testing.T) {
 			hostname:          "test-router8",
 			updateHostKeyOnly: true,
 			setupMocks: func(t *testing.T) EnrollDependencies {
-				mockRunner := &MockSshRunner{
+				mockRunner := &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "", nil
 					},
 				}
 				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (sshpkg.Runner, error) {
+					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 						if err := writeHostKeyFile(host); err != nil {
 							return nil, fmt.Errorf("failed to write host key: %w", err)
 						}
@@ -2191,13 +2162,13 @@ func TestEnrollWorkflow(t *testing.T) {
 			updateHostKeyOnly: true,
 			setupMocks: func(t *testing.T) EnrollDependencies {
 				hostsUpdated := make(map[string]bool)
-				mockRunner := &MockSshRunner{
+				mockRunner := &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "", nil
 					},
 				}
 				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (sshpkg.Runner, error) {
+					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 						hostsUpdated[host] = true
 						if err := writeHostKeyFile(host); err != nil {
 							return nil, fmt.Errorf("failed to write host key: %w", err)
@@ -2252,7 +2223,7 @@ func TestEnrollWorkflow(t *testing.T) {
 			hostname: "test-router15",
 			setupMocks: func(t *testing.T) EnrollDependencies {
 				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (sshpkg.Runner, error) {
+					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 						return nil, fmt.Errorf("connection refused")
 					},
 					ApplyUpdatesFunc: func(ctx context.Context, host string) error {
@@ -2271,13 +2242,13 @@ func TestEnrollWorkflow(t *testing.T) {
 			name:     "non-fatal: updates failure doesn't stop enrollment",
 			hostname: "test-router16",
 			setupMocks: func(t *testing.T) EnrollDependencies {
-				mockRunner := &MockSshRunner{
+				mockRunner := &sshmocks_test.MockRunner{
 					RunFunc: func(cmd string) (string, error) {
 						return "", nil
 					},
 				}
 				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (sshpkg.Runner, error) {
+					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 						if err := writeHostKeyFile(host); err != nil {
 							return nil, fmt.Errorf("failed to write host key: %w", err)
 						}

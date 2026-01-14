@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v3"
-	core "jb.favre/mikrotik-fleet-autopilot/common/core"
-	sshpkg "jb.favre/mikrotik-fleet-autopilot/common/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 // UpdatesConfig holds all updates configuration options
@@ -19,7 +19,7 @@ type UpdatesConfig struct {
 
 // UpdatesDependencies holds injectable dependencies for testing
 type UpdatesDependencies struct {
-	SSHConnectionFactory func(context.Context, string) (sshpkg.Runner, error)
+	SSHConnectionFactory func(context.Context, string) (ssh.RunnerInterface, error)
 	ReconnectDelay       time.Duration
 }
 
@@ -47,7 +47,7 @@ var Command = []*cli.Command{
 
 			// Build dependencies
 			deps := UpdatesDependencies{
-				SSHConnectionFactory: core.CreateConnection,
+				SSHConnectionFactory: ssh.CreateConnection,
 				ReconnectDelay:       10 * time.Second,
 			}
 
@@ -76,7 +76,7 @@ func Updates(ctx context.Context, host string) error {
 		UpdatesApply: true,
 	}
 	deps := UpdatesDependencies{
-		SSHConnectionFactory: core.CreateConnection,
+		SSHConnectionFactory: ssh.CreateConnection,
 		ReconnectDelay:       10 * time.Second,
 	}
 	return updates(ctx, host, cfg, deps)
@@ -127,6 +127,40 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 				fmt.Printf("❓ %s updates apply failed\n", host)
 				return err
 			}
+			// After RouterOS update, reconnect and re-check RouterBoard status only
+			// (RouterOS update may have staged new RouterBoard firmware)
+			// We don't need to re-check RouterOS status since we just updated it,
+			// and checking RouterOS requires DNS which may have been reconfigured
+			if boardStatus != nil {
+				conn, err = deps.SSHConnectionFactory(ctx, host)
+				if err != nil {
+					slog.Error("failed to reconnect after RouterOS update", "host", host, "error", err)
+					return fmt.Errorf("failed to reconnect after RouterOS update: %w", err)
+				}
+				defer func() {
+					_ = conn.Close()
+				}()
+
+				// Only re-check RouterBoard status (not RouterOS which requires working DNS)
+				slog.Info("Re-checking RouterBoard status after RouterOS update")
+				boardStatus, err = getUpdateStatus(
+					conn,
+					"/system/routerboard/print",
+					"RouterBoard",
+					regexp.MustCompile(`.*current-firmware: (\S+)`),
+					regexp.MustCompile(`.*upgrade-firmware: (\S+)`),
+					true,
+				)
+				if err != nil {
+					slog.Warn("failed to re-check RouterBoard status after RouterOS update", "error", err)
+				} else if boardStatus != nil {
+					boardUpToDate = boardStatus.Installed == boardStatus.Available
+					slog.Info("RouterBoard status after RouterOS update",
+						"current", boardStatus.Installed,
+						"upgrade", boardStatus.Available,
+						"upToDate", boardUpToDate)
+				}
+			}
 		}
 
 		// Apply RouterBoard update if needed (only for physical routers)
@@ -143,7 +177,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 }
 
 // checkCurrentStatus retrieves the current RouterOS and RouterBoard status
-func checkCurrentStatus(conn sshpkg.Runner) (UpdateStatus, *UpdateStatus, error) {
+func checkCurrentStatus(conn ssh.RunnerInterface) (UpdateStatus, *UpdateStatus, error) {
 	slog.Info("Checking RouterOS update status")
 	osStatusPtr, err := getUpdateStatus(
 		conn,
@@ -192,7 +226,7 @@ func checkCurrentStatus(conn sshpkg.Runner) (UpdateStatus, *UpdateStatus, error)
 }
 
 // applyComponentUpdate applies an update to RouterOS or RouterBoard and displays the result
-func applyComponentUpdate(conn sshpkg.Runner, ctx context.Context, host, component, updateCmd string, checkBoth bool, deps UpdatesDependencies) error {
+func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, component, updateCmd string, checkBoth bool, deps UpdatesDependencies) error {
 	slog.Info("component update needed, applying updates", "component", component)
 	slog.Debug("applying component updates", "component", component, "host", host)
 
@@ -293,7 +327,7 @@ func formatAndDisplayResult(host string, osStatus UpdateStatus, boardStatus *Upd
 }
 
 // Generic update status fetcher for RouterOS and RouterBoard
-func getUpdateStatus(conn sshpkg.Runner, sshCmd, subSystem string, installedRe, availableRe *regexp.Regexp, skipIfNoRouterBoard bool) (*UpdateStatus, error) {
+func getUpdateStatus(conn ssh.RunnerInterface, sshCmd, subSystem string, installedRe, availableRe *regexp.Regexp, skipIfNoRouterBoard bool) (*UpdateStatus, error) {
 	slog.Debug("executing command", "command", sshCmd)
 	result, err := conn.Run(sshCmd)
 	if err != nil {
@@ -334,7 +368,7 @@ func getUpdateStatus(conn sshpkg.Runner, sshCmd, subSystem string, installedRe, 
 }
 
 // Generic function to apply updates and wait for router to come back
-func applyUpdate(conn sshpkg.Runner, ctx context.Context, host, updateCmd, waitMsg string, deps UpdatesDependencies) (sshpkg.Runner, error) {
+func applyUpdate(conn ssh.RunnerInterface, ctx context.Context, host, updateCmd, waitMsg string, deps UpdatesDependencies) (ssh.RunnerInterface, error) {
 	_, err := conn.Run(updateCmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to run SSH command: %w", err)
@@ -342,7 +376,7 @@ func applyUpdate(conn sshpkg.Runner, ctx context.Context, host, updateCmd, waitM
 	_ = conn.Close()
 	fmt.Printf("⏳ %s\n", waitMsg)
 
-	var newConn sshpkg.Runner
+	var newConn ssh.RunnerInterface
 	for {
 		// Check if context was cancelled during reconnection
 		if err := ctx.Err(); err != nil {

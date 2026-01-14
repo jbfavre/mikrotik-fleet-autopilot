@@ -53,8 +53,8 @@ func TestNewSshManager(t *testing.T) {
 			}
 
 			// Verify user is accessible (non-sensitive)
-			if manager.GetUser() != tt.user {
-				t.Errorf("GetUser() = %q, want %q", manager.GetUser(), tt.user)
+			if manager.getUser() != tt.user {
+				t.Errorf("getUser() = %q, want %q", manager.getUser(), tt.user)
 			}
 
 			// Verify credentials are stored (but not accessible directly)
@@ -102,8 +102,8 @@ func TestSshManager_GetUser(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := NewSshManager(tt.user, "password", "passphrase")
-			if got := manager.GetUser(); got != tt.wantUser {
-				t.Errorf("GetUser() = %q, want %q", got, tt.wantUser)
+			if got := manager.getUser(); got != tt.wantUser {
+				t.Errorf("getUser() = %q, want %q", got, tt.wantUser)
 			}
 		})
 	}
@@ -135,8 +135,8 @@ func TestSshManager_GetPassword(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := NewSshManager("admin", tt.password, "")
-			if got := manager.GetPassword(); got != tt.wantPassword {
-				t.Errorf("GetPassword() = %q, want %q", got, tt.wantPassword)
+			if got := manager.getPassword(); got != tt.wantPassword {
+				t.Errorf("getPassword() = %q, want %q", got, tt.wantPassword)
 			}
 		})
 	}
@@ -168,8 +168,8 @@ func TestSshManager_GetPassphrase(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := NewSshManager("admin", "", tt.passphrase)
-			if got := manager.GetPassphrase(); got != tt.wantPassphrase {
-				t.Errorf("GetPassphrase() = %q, want %q", got, tt.wantPassphrase)
+			if got := manager.getPassphrase(); got != tt.wantPassphrase {
+				t.Errorf("getPassphrase() = %q, want %q", got, tt.wantPassphrase)
 			}
 		})
 	}
@@ -182,9 +182,9 @@ func TestSshManager_CredentialsIsolation(t *testing.T) {
 
 	manager := NewSshManager("admin", password, passphrase)
 
-	// GetUser should return the user (non-sensitive)
-	if user := manager.GetUser(); user != "admin" {
-		t.Errorf("GetUser() = %q, want %q", user, "admin")
+	// getUser should return the user (non-sensitive)
+	if user := manager.getUser(); user != "admin" {
+		t.Errorf("getUser() = %q, want %q", user, "admin")
 	}
 
 	// Verify we cannot access password or passphrase through public API
@@ -210,7 +210,7 @@ func BenchmarkSshManager_GetUser(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = manager.GetUser()
+		_ = manager.getUser()
 	}
 }
 

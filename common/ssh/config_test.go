@@ -373,23 +373,6 @@ func TestParseHost_Hostname(t *testing.T) {
 	}
 }
 
-// BenchmarkParseHost benchmarks the ParseHost function
-func BenchmarkParseHost(b *testing.B) {
-	testInputs := []string{
-		"192.168.1.1",
-		"router1.home.local",
-		"router1",
-		"192.168.1.1:2222",
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		for _, input := range testInputs {
-			ParseHost(input)
-		}
-	}
-}
-
 func TestBuild_WithSSHConfigUsername(t *testing.T) {
 	// Create temporary SSH config with username
 	tmpDir := t.TempDir()
@@ -437,7 +420,7 @@ Host testhost
 		}
 	}()
 
-	if conn == nil {
-		t.Error("Build() returned nil connection")
+	if conn.client == nil {
+		t.Error("Build() returned empty Runner")
 	}
 }

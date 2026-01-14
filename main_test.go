@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	core "jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 

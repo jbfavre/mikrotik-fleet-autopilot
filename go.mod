@@ -2,7 +2,7 @@ module jb.favre/mikrotik-fleet-autopilot
 
 go 1.25.4
 
-require github.com/urfave/cli/v3 v3.6.1
+require github.com/urfave/cli/v3 v3.6.2
 
 require github.com/kevinburke/ssh_config v1.4.0
 

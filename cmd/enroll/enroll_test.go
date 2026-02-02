@@ -1031,6 +1031,7 @@ func TestApplyUpdates(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			host := "router1"
+			hostname := "router1"
 
 			// Create mock update function
 			mockUpdateFunc := func(ctx context.Context, host string) error {
@@ -1045,7 +1046,7 @@ func TestApplyUpdates(t *testing.T) {
 			}
 
 			// Execute
-			err := applyUpdates(ctx, host, host, deps)
+			err := applyUpdates(ctx, host, hostname, deps)
 
 			// Verify
 			if (err != nil) != tt.wantErr {

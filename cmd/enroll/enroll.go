@@ -108,6 +108,10 @@ var Command = []*cli.Command{
 			}
 
 			var lastErr error
+			if len(coreCfg.Hosts) == 0 {
+				slog.Warn("no hosts defined in configuration, nothing to enroll")
+				lastErr = fmt.Errorf("no hosts defined in configuration")
+			}
 			for _, host := range coreCfg.Hosts {
 				if err := enroll(ctx, host, enrollCfg, deps); err != nil {
 					lastErr = err

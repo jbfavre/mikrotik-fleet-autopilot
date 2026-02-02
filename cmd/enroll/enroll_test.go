@@ -17,15 +17,6 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/common/sshmocks_test"
 )
 
-// copyFile copies a file from src to dst
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0600)
-}
-
 func TestApplyConfigFile(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -343,6 +334,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 	tests := []struct {
 		name            string
 		host            string
+		hostname        string
 		setupHostKey    bool
 		setupConfigFile bool
 		wantErr         bool
@@ -351,6 +343,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		{
 			name:            "delete both host key and config file",
 			host:            "192.168.1.1",
+			hostname:        "router1",
 			setupHostKey:    true,
 			setupConfigFile: true,
 			wantErr:         false,
@@ -358,6 +351,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		{
 			name:            "delete only host key",
 			host:            "192.168.1.2",
+			hostname:        "router2",
 			setupHostKey:    true,
 			setupConfigFile: false,
 			wantErr:         false,
@@ -365,6 +359,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		{
 			name:            "delete only config file",
 			host:            "192.168.1.3",
+			hostname:        "router3",
 			setupHostKey:    false,
 			setupConfigFile: true,
 			wantErr:         false,
@@ -372,6 +367,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		{
 			name:            "nothing to delete",
 			host:            "192.168.1.4",
+			hostname:        "router4",
 			setupHostKey:    false,
 			setupConfigFile: false,
 			wantErr:         false,
@@ -379,6 +375,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		{
 			name:            "host with port - delete both",
 			host:            "192.168.1.5:2222",
+			hostname:        "router5",
 			setupHostKey:    true,
 			setupConfigFile: true,
 			wantErr:         false,
@@ -415,7 +412,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			}
 
 			// Execute
-			err := deleteExistingEnrollment(tt.host, tt.host)
+			err := deleteExistingEnrollment(tt.host, tt.hostname)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
@@ -2072,7 +2069,17 @@ func TestEnrollWorkflow(t *testing.T) {
 	}
 }
 
+// fileExists checks if a file exists at the given path
 func fileExists(filename string) bool {
 	_, err := os.Stat(filename)
 	return !os.IsNotExist(err)
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0600)
 }

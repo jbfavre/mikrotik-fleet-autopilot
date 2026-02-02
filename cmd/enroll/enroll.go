@@ -109,7 +109,7 @@ var Command = []*cli.Command{
 
 			var lastErr error
 			for _, host := range coreCfg.Hosts {
-				if err := enroll(ctx, host, enrollCfg, deps); err != nil { // Empty preferred filename = derive automatically
+				if err := enroll(ctx, host, enrollCfg, deps); err != nil {
 					lastErr = err
 					// Continue with other hosts even if one fails
 				}

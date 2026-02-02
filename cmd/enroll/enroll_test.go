@@ -1096,6 +1096,9 @@ func TestExportConfiguration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			host := "router1"
+			hostname := "router1"
+
+			// Setup temporary output directory
 			outputDir := t.TempDir()
 
 			enrollCfg := EnrollConfig{
@@ -1141,7 +1144,7 @@ func TestExportConfiguration(t *testing.T) {
 			}
 
 			// Execute
-			newConn, err := exportConfiguration(ctx, host, host, enrollCfg, deps, mockConn)
+			newConn, err := exportConfiguration(ctx, host, hostname, enrollCfg, deps, mockConn)
 
 			// Verify
 			if (err != nil) != tt.wantErr {

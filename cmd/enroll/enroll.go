@@ -344,49 +344,50 @@ func setRouterIdentity(conn ssh.RunnerInterface, hostname string) error {
 // updateHostKey captures the SSH host key for the first time or updates an existing one,
 // without performing full enrollment.
 func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (string, error) {
+	hostname := EnrollConfig{}.Hostname
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("context cancelled: %w", err)
 	}
 
-	slog.Info("starting host key update", "host", host, "hostname", host)
+	slog.Info("starting host key update", "host", host, "hostname", hostname)
 
 	// Load existing host key info if it exists
 	oldInfo, err := ssh.LoadHostKeyInfo(host)
 	if err == nil {
-		slog.Debug("loaded existing host key", "host", host, "hostname", host, "algorithm", oldInfo.Algorithm, "fingerprint", oldInfo.Fingerprint)
+		slog.Debug("loaded existing host key", "host", host, "hostname", hostname, "algorithm", oldInfo.Algorithm, "fingerprint", oldInfo.Fingerprint)
 	} else {
-		slog.Debug("no existing host key found", "host", host, "hostname", host)
+		slog.Debug("no existing host key found", "host", host, "hostname", hostname)
 	}
 
 	// Create SSH connection (this will capture the new host key)
-	slog.Debug("connecting to router to capture new host key", "host", host, "hostname", host)
+	slog.Debug("connecting to router to capture new host key", "host", host, "hostname", hostname)
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
-		slog.Error("failed to connect to router", "host", host, "hostname", host, "error", err)
+		slog.Error("failed to connect to router", "host", host, "hostname", hostname, "error", err)
 		return "", fmt.Errorf("failed to connect to device: %w", err)
 	}
 	defer func() {
 		_ = conn.Close()
 	}()
-	slog.Debug("successfully connected and captured host key", "host", host, "hostname", host)
+	slog.Debug("successfully connected and captured host key", "host", host, "hostname", hostname)
 
 	// Load new host key info
 	newInfo, err := ssh.LoadHostKeyInfo(host)
 	if err != nil {
-		slog.Error("failed to load new host key", "host", host, "hostname", host, "error", err)
+		slog.Error("failed to load new host key", "host", host, "hostname", hostname, "error", err)
 		return "", fmt.Errorf("failed to load new host key: %w", err)
 	}
 
 	// Log the details
 	if oldInfo != nil {
 		if oldInfo.Fingerprint == newInfo.Fingerprint {
-			slog.Debug("host key unchanged", "host", host, "hostname", host, "algorithm", newInfo.Algorithm, "fingerprint", newInfo.Fingerprint)
+			slog.Debug("host key unchanged", "host", host, "hostname", hostname, "algorithm", newInfo.Algorithm, "fingerprint", newInfo.Fingerprint)
 		} else {
-			slog.Warn("host key changed", "host", host, "hostname", host, "old_algorithm", oldInfo.Algorithm, "old_fingerprint", oldInfo.Fingerprint, "new_algorithm", newInfo.Algorithm, "new_fingerprint", newInfo.Fingerprint)
+			slog.Warn("host key changed", "host", host, "hostname", hostname, "old_algorithm", oldInfo.Algorithm, "old_fingerprint", oldInfo.Fingerprint, "new_algorithm", newInfo.Algorithm, "new_fingerprint", newInfo.Fingerprint)
 		}
 	} else {
-		slog.Info("host key captured for first time", "host", host, "hostname", host, "algorithm", newInfo.Algorithm, "fingerprint", newInfo.Fingerprint)
+		slog.Info("host key captured for first time", "host", host, "hostname", hostname, "algorithm", newInfo.Algorithm, "fingerprint", newInfo.Fingerprint)
 	}
 
 	return newInfo.Fingerprint, nil

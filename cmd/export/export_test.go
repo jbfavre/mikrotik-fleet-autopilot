@@ -28,7 +28,7 @@ func TestExport(t *testing.T) {
 	}{
 		{
 			name:              "context cancellation before export",
-			host:              "router.example.com",
+			host:              "router1.example.com",
 			outputDir:         "",
 			showSensitive:     false,
 			preferredFilename: "",
@@ -76,7 +76,7 @@ func TestExportParameterMapping(t *testing.T) {
 	}{
 		{
 			name:              "maps show-sensitive true",
-			host:              "test-router",
+			host:              "router1.example.com",
 			outputDir:         "/tmp/output",
 			showSensitive:     true,
 			preferredFilename: "custom-name",
@@ -94,7 +94,7 @@ func TestExportParameterMapping(t *testing.T) {
 		},
 		{
 			name:              "maps show-sensitive false",
-			host:              "test-router",
+			host:              "router2.example.com",
 			outputDir:         "/custom/path",
 			showSensitive:     false,
 			preferredFilename: "",

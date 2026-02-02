@@ -738,6 +738,7 @@ func TestConnectToRouter(t *testing.T) {
 	tests := []struct {
 		name            string
 		host            string
+		hostname        string
 		connectionError bool
 		wantErr         bool
 		errContains     string
@@ -745,12 +746,14 @@ func TestConnectToRouter(t *testing.T) {
 		{
 			name:            "successful connection",
 			host:            "router1",
+			hostname:        "router1",
 			connectionError: false,
 			wantErr:         false,
 		},
 		{
 			name:            "connection failure",
 			host:            "router1",
+			hostname:        "router1",
 			connectionError: true,
 			wantErr:         true,
 			errContains:     "failed to connect to router",
@@ -777,7 +780,7 @@ func TestConnectToRouter(t *testing.T) {
 			}
 
 			// Execute
-			conn, err := connectToRouter(ctx, tt.host, tt.host, deps)
+			conn, err := connectToRouter(ctx, tt.host, tt.hostname, deps)
 
 			// Verify
 			if (err != nil) != tt.wantErr {

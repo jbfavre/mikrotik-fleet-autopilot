@@ -138,6 +138,9 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		// and checking RouterOS requires DNS which may not be available yet,
 		// specifically for core routers due to internet not being connected yet.
 		slog.Debug("reconnecting after RouterOS update to re-check RouterBoard status", "host", host)
+		// Force connection close before reconnecting to avoid resource leaks
+		_ = conn.Close()
+
 		if boardStatus != nil {
 			conn, err = deps.SSHConnectionFactory(ctx, host)
 			if err != nil {

@@ -117,7 +117,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 
 	// Step 3: Apply updates if requested and needed
 	if !cfg.UpdatesApply {
-		// Onlly checking updates, not applying
+		// Only checking updates, not applying
 		slog.Info("Updates apply not requested, skipping update application")
 		return nil
 	}

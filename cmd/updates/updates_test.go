@@ -579,14 +579,14 @@ func TestFormatUpdateResult(t *testing.T) {
 	tests := []struct {
 		name        string
 		host        string
-		osStatus    UpdateStatus
+		osStatus    *UpdateStatus
 		boardStatus *UpdateStatus
 		want        string
 	}{
 		{
 			name: "Virtualized router - up to date",
 			host: "router1.example.com",
-			osStatus: UpdateStatus{
+			osStatus: &UpdateStatus{
 				Installed: "7.14.1",
 				Available: "7.14.1",
 			},
@@ -596,7 +596,7 @@ func TestFormatUpdateResult(t *testing.T) {
 		{
 			name: "Virtualized router - update available",
 			host: "router1.example.com",
-			osStatus: UpdateStatus{
+			osStatus: &UpdateStatus{
 				Installed: "7.14.0",
 				Available: "7.14.1",
 			},
@@ -606,7 +606,7 @@ func TestFormatUpdateResult(t *testing.T) {
 		{
 			name: "Physical router - both up to date",
 			host: "router2.example.com",
-			osStatus: UpdateStatus{
+			osStatus: &UpdateStatus{
 				Installed: "7.14.1",
 				Available: "7.14.1",
 			},
@@ -619,7 +619,7 @@ func TestFormatUpdateResult(t *testing.T) {
 		{
 			name: "Physical router - OS update available",
 			host: "router2.example.com",
-			osStatus: UpdateStatus{
+			osStatus: &UpdateStatus{
 				Installed: "7.14.0",
 				Available: "7.14.1",
 			},
@@ -632,7 +632,7 @@ func TestFormatUpdateResult(t *testing.T) {
 		{
 			name: "Physical router - Board update available",
 			host: "router2.example.com",
-			osStatus: UpdateStatus{
+			osStatus: &UpdateStatus{
 				Installed: "7.14.1",
 				Available: "7.14.1",
 			},
@@ -645,7 +645,7 @@ func TestFormatUpdateResult(t *testing.T) {
 		{
 			name: "Physical router - both updates available",
 			host: "router2.example.com",
-			osStatus: UpdateStatus{
+			osStatus: &UpdateStatus{
 				Installed: "7.13.5",
 				Available: "7.14.1",
 			},

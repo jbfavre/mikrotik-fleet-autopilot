@@ -186,9 +186,9 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 }
 
 // checkCurrentStatus retrieves the current RouterOS and RouterBoard status
-func checkCurrentStatus(conn ssh.RunnerInterface) (UpdateStatus, *UpdateStatus, error) {
+func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus, error) {
 	slog.Info("Checking RouterOS update status")
-	osStatusPtr, err := getUpdateStatus(
+	osStatus, err := getUpdateStatus(
 		conn,
 		"/system/package/update/check-for-updates",
 		"RouterOS",
@@ -197,9 +197,8 @@ func checkCurrentStatus(conn ssh.RunnerInterface) (UpdateStatus, *UpdateStatus, 
 		false,
 	)
 	if err != nil {
-		return UpdateStatus{}, nil, err
+		return &UpdateStatus{}, nil, err
 	}
-	osStatus := *osStatusPtr
 	slog.Debug("RouterOS status", "value", osStatus)
 	if osStatus.Installed == osStatus.Available {
 		slog.Info("RouterOS already up to date", "version", osStatus.Installed)
@@ -217,7 +216,7 @@ func checkCurrentStatus(conn ssh.RunnerInterface) (UpdateStatus, *UpdateStatus, 
 		true,
 	)
 	if err != nil {
-		return UpdateStatus{}, nil, err
+		return &UpdateStatus{}, nil, err
 	}
 
 	if boardStatus == nil {
@@ -252,7 +251,7 @@ func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, c
 	}()
 
 	// Check status after upgrade
-	osStatusPtr, osStatusErr := getUpdateStatus(
+	osStatus, osStatusErr := getUpdateStatus(
 		newConn,
 		"/system/package/update/check-for-updates",
 		"RouterOS",
@@ -264,7 +263,6 @@ func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, c
 	if !checkBoth {
 		// RouterOS only update
 		if osStatusErr == nil {
-			osStatus := *osStatusPtr
 			fmt.Println(formatUpdateResult(host, osStatus, nil))
 		} else {
 			slog.Warn("failed to check RouterOS status after update", "error", osStatusErr)
@@ -284,7 +282,6 @@ func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, c
 	)
 
 	if osStatusErr == nil && boardStatusErr == nil {
-		osStatus := *osStatusPtr
 		fmt.Println(formatUpdateResult(host, osStatus, boardStatus))
 	} else {
 		if osStatusErr != nil {
@@ -300,7 +297,7 @@ func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, c
 }
 
 // formatUpdateResult formats the update result into a string
-func formatUpdateResult(host string, osStatus UpdateStatus, boardStatus *UpdateStatus) string {
+func formatUpdateResult(host string, osStatus *UpdateStatus, boardStatus *UpdateStatus) string {
 	osUpToDate := osStatus.Installed == osStatus.Available
 	if boardStatus == nil {
 		// Virtualized router or RouterOS-only update
@@ -330,7 +327,7 @@ func formatUpdateResult(host string, osStatus UpdateStatus, boardStatus *UpdateS
 }
 
 // Generic update status fetcher for RouterOS and RouterBoard
-func getUpdateStatus(conn ssh.RunnerInterface, sshCmd, subSystem string, installedRe, availableRe *regexp.Regexp, skipIfNoRouterBoard bool) (*UpdateStatus, error) {
+func getUpdateStatus(conn ssh.RunnerInterface, sshCmd string, subSystem string, installedRe *regexp.Regexp, availableRe *regexp.Regexp, skipIfNoRouterBoard bool) (*UpdateStatus, error) {
 	slog.Debug("executing command", "command", sshCmd)
 	result, err := conn.Run(sshCmd)
 	if err != nil {
@@ -371,7 +368,7 @@ func getUpdateStatus(conn ssh.RunnerInterface, sshCmd, subSystem string, install
 }
 
 // Generic function to apply updates and wait for router to come back
-func applyUpdate(conn ssh.RunnerInterface, ctx context.Context, host, updateCmd, waitMsg string, deps UpdatesDependencies) (ssh.RunnerInterface, error) {
+func applyUpdate(conn ssh.RunnerInterface, ctx context.Context, host string, updateCmd string, waitMsg string, deps UpdatesDependencies) (ssh.RunnerInterface, error) {
 	_, err := conn.Run(updateCmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to run SSH command: %w", err)

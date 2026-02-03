@@ -113,63 +113,72 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 
 	// Step 2: Display current status
 	slog.Info("Displaying current update status")
-	formatAndDisplayResult(host, osStatus, boardStatus)
+	fmt.Println(formatUpdateResult(host, osStatus, boardStatus))
 
 	// Step 3: Apply updates if requested and needed
-	if cfg.UpdatesApply {
-		osUpToDate := osStatus.Installed == osStatus.Available
-		boardUpToDate := boardStatus == nil || boardStatus.Installed == boardStatus.Available
+	if !cfg.UpdatesApply {
+		// Only checking updates, not applying
+		slog.Info("Updates apply not requested, skipping update application")
+		return nil
+	}
 
-		// Apply RouterOS update if needed
-		if !osUpToDate {
-			slog.Info("Applying RouterOS updates")
-			if err := applyComponentUpdate(conn, ctx, host, "RouterOS", "/system/package/update/install", false, deps); err != nil {
-				fmt.Printf("❓ %s updates apply failed\n", host)
-				return err
+	osUpToDate := osStatus.Installed == osStatus.Available
+	boardUpToDate := boardStatus == nil || boardStatus.Installed == boardStatus.Available
+
+	// Apply RouterOS update if needed
+	if !osUpToDate {
+		slog.Info("Applying RouterOS updates")
+		if err := applyComponentUpdate(conn, ctx, host, "RouterOS", "/system/package/update/install", false, deps); err != nil {
+			fmt.Printf("❓ %s updates apply failed\n", host)
+			return err
+		}
+		// After RouterOS update, reconnect and re-check RouterBoard status only
+		// (RouterOS update may have staged new RouterBoard firmware)
+		// We don't need to re-check RouterOS status since we just updated it,
+		// and checking RouterOS requires DNS which may not be available yet,
+		// specifically for core routers due to internet not being connected yet.
+		slog.Debug("reconnecting after RouterOS update to re-check RouterBoard status", "host", host)
+		// Force connection close before reconnecting to avoid resource leaks
+		_ = conn.Close()
+
+		if boardStatus != nil {
+			conn, err = deps.SSHConnectionFactory(ctx, host)
+			if err != nil {
+				slog.Error("failed to reconnect after RouterOS update", "host", host, "error", err)
+				return fmt.Errorf("failed to reconnect after RouterOS update: %w", err)
 			}
-			// After RouterOS update, reconnect and re-check RouterBoard status only
-			// (RouterOS update may have staged new RouterBoard firmware)
-			// We don't need to re-check RouterOS status since we just updated it,
-			// and checking RouterOS requires DNS which may have been reconfigured
-			if boardStatus != nil {
-				conn, err = deps.SSHConnectionFactory(ctx, host)
-				if err != nil {
-					slog.Error("failed to reconnect after RouterOS update", "host", host, "error", err)
-					return fmt.Errorf("failed to reconnect after RouterOS update: %w", err)
-				}
-				defer func() {
-					_ = conn.Close()
-				}()
+			defer func() {
+				_ = conn.Close()
+			}()
 
-				// Only re-check RouterBoard status (not RouterOS which requires working DNS)
-				slog.Info("Re-checking RouterBoard status after RouterOS update")
-				boardStatus, err = getUpdateStatus(
-					conn,
-					"/system/routerboard/print",
-					"RouterBoard",
-					regexp.MustCompile(`.*current-firmware: (\S+)`),
-					regexp.MustCompile(`.*upgrade-firmware: (\S+)`),
-					true,
-				)
-				if err != nil {
-					slog.Warn("failed to re-check RouterBoard status after RouterOS update", "error", err)
-				} else if boardStatus != nil {
-					boardUpToDate = boardStatus.Installed == boardStatus.Available
-					slog.Info("RouterBoard status after RouterOS update",
-						"current", boardStatus.Installed,
-						"upgrade", boardStatus.Available,
-						"upToDate", boardUpToDate)
-				}
+			// Only re-check RouterBoard status (not RouterOS which requires working DNS)
+			slog.Info("Re-checking RouterBoard status after RouterOS update")
+			boardStatus, err = getUpdateStatus(
+				conn,
+				"/system/routerboard/print",
+				"RouterBoard",
+				regexp.MustCompile(`.*current-firmware: (\S+)`),
+				regexp.MustCompile(`.*upgrade-firmware: (\S+)`),
+				true,
+			)
+			if err != nil {
+				slog.Warn("failed to re-check RouterBoard status after RouterOS update", "error", err)
+			} else if boardStatus != nil {
+				boardUpToDate = boardStatus.Installed == boardStatus.Available
+				slog.Info("RouterBoard status after RouterOS update",
+					"current", boardStatus.Installed,
+					"upgrade", boardStatus.Available,
+					"upToDate", boardUpToDate)
 			}
 		}
+	}
 
-		// Apply RouterBoard update if needed (only for physical routers)
-		if !boardUpToDate && boardStatus != nil {
-			slog.Info("Applying RouterBoard updates")
-			if err := applyComponentUpdate(conn, ctx, host, "RouterBoard", "/system/reboot", true, deps); err != nil {
-				fmt.Printf("❓ %s reboot after RouterBoard updates failed\n", host)
-				return err
-			}
+	// Apply RouterBoard update if needed (only for physical routers)
+	if !boardUpToDate && boardStatus != nil {
+		slog.Info("Applying RouterBoard updates")
+		if err := applyComponentUpdate(conn, ctx, host, "RouterBoard", "/system/reboot", true, deps); err != nil {
+			fmt.Printf("❓ %s reboot after RouterBoard updates failed\n", host)
+			return err
 		}
 	}
 
@@ -256,7 +265,7 @@ func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, c
 		// RouterOS only update
 		if osStatusErr == nil {
 			osStatus := *osStatusPtr
-			formatAndDisplayResult(host, osStatus, nil)
+			fmt.Println(formatUpdateResult(host, osStatus, nil))
 		} else {
 			slog.Warn("failed to check RouterOS status after update", "error", osStatusErr)
 		}
@@ -293,7 +302,6 @@ func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, c
 // formatUpdateResult formats the update result into a string
 func formatUpdateResult(host string, osStatus UpdateStatus, boardStatus *UpdateStatus) string {
 	osUpToDate := osStatus.Installed == osStatus.Available
-
 	if boardStatus == nil {
 		// Virtualized router or RouterOS-only update
 		if osUpToDate {
@@ -319,11 +327,6 @@ func formatUpdateResult(host string, osStatus UpdateStatus, boardStatus *UpdateS
 		boardUpgrade = fmt.Sprintf("%s → %s", boardStatus.Installed, boardStatus.Available)
 	}
 	return fmt.Sprintf("⚠️  %s upgrade available (RouterOS: %s → %s, RouterBoard: %s)", host, osStatus.Installed, osStatus.Available, boardUpgrade)
-}
-
-// formatAndDisplayResult formats and displays the update result
-func formatAndDisplayResult(host string, osStatus UpdateStatus, boardStatus *UpdateStatus) {
-	fmt.Println(formatUpdateResult(host, osStatus, boardStatus))
 }
 
 // Generic update status fetcher for RouterOS and RouterBoard

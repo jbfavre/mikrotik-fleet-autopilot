@@ -975,7 +975,7 @@ func TestFormatAndDisplayResult(t *testing.T) {
 			// Call formatAndDisplayResult to ensure it doesn't panic
 			// Note: We can't easily capture stdout in a unit test without redirecting it,
 			// but calling it ensures the function executes and code coverage is counted
-			formatAndDisplayResult(tt.host, tt.osStatus, tt.boardStatus)
+			formatUpdateResult(tt.host, tt.osStatus, tt.boardStatus)
 		})
 	}
 }

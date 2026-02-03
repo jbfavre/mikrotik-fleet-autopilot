@@ -197,7 +197,7 @@ func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus,
 		false,
 	)
 	if err != nil {
-		return &UpdateStatus{}, nil, err
+		return nil, nil, err
 	}
 	slog.Debug("RouterOS status", "value", osStatus)
 	if osStatus.Installed == osStatus.Available {
@@ -216,7 +216,7 @@ func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus,
 		true,
 	)
 	if err != nil {
-		return &UpdateStatus{}, nil, err
+		return nil, nil, err
 	}
 
 	if boardStatus == nil {

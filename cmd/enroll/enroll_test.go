@@ -17,15 +17,6 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/common/sshmocks_test"
 )
 
-// copyFile copies a file from src to dst
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0600)
-}
-
 func TestApplyConfigFile(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -343,6 +334,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 	tests := []struct {
 		name            string
 		host            string
+		hostname        string
 		setupHostKey    bool
 		setupConfigFile bool
 		wantErr         bool
@@ -351,6 +343,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		{
 			name:            "delete both host key and config file",
 			host:            "192.168.1.1",
+			hostname:        "router1",
 			setupHostKey:    true,
 			setupConfigFile: true,
 			wantErr:         false,
@@ -358,6 +351,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		{
 			name:            "delete only host key",
 			host:            "192.168.1.2",
+			hostname:        "router2",
 			setupHostKey:    true,
 			setupConfigFile: false,
 			wantErr:         false,
@@ -365,6 +359,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		{
 			name:            "delete only config file",
 			host:            "192.168.1.3",
+			hostname:        "router3",
 			setupHostKey:    false,
 			setupConfigFile: true,
 			wantErr:         false,
@@ -372,6 +367,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		{
 			name:            "nothing to delete",
 			host:            "192.168.1.4",
+			hostname:        "router4",
 			setupHostKey:    false,
 			setupConfigFile: false,
 			wantErr:         false,
@@ -379,6 +375,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		{
 			name:            "host with port - delete both",
 			host:            "192.168.1.5:2222",
+			hostname:        "router5",
 			setupHostKey:    true,
 			setupConfigFile: true,
 			wantErr:         false,
@@ -415,7 +412,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			}
 
 			// Execute
-			err := deleteExistingEnrollment(tt.host)
+			err := deleteExistingEnrollment(tt.host, tt.hostname)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
@@ -448,160 +445,10 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 	}
 }
 
-func TestUpdateHostKeyBatchMode(t *testing.T) {
-	tests := []struct {
-		name             string
-		hosts            []string
-		setupHostKeys    map[string]bool
-		connectionErrors map[string]bool
-		wantErr          bool
-		expectedSuccess  int
-		expectedFail     int
-	}{
-		{
-			name:  "batch update all hosts successfully",
-			hosts: []string{"router1", "router2", "router3"},
-			setupHostKeys: map[string]bool{
-				"router1": true,
-				"router2": true,
-				"router3": true,
-			},
-			connectionErrors: map[string]bool{},
-			wantErr:          false,
-			expectedSuccess:  3,
-			expectedFail:     0,
-		},
-		{
-			name:  "batch update with one failure",
-			hosts: []string{"router1", "router2", "router3"},
-			setupHostKeys: map[string]bool{
-				"router1": true,
-				"router2": true,
-				"router3": true,
-			},
-			connectionErrors: map[string]bool{
-				"router2": true,
-			},
-			wantErr:         true,
-			expectedSuccess: 2,
-			expectedFail:    1,
-		},
-		{
-			name:  "batch update all hosts fail",
-			hosts: []string{"router1", "router2"},
-			setupHostKeys: map[string]bool{
-				"router1": false,
-				"router2": false,
-			},
-			connectionErrors: map[string]bool{
-				"router1": true,
-				"router2": true,
-			},
-			wantErr:         true,
-			expectedSuccess: 0,
-			expectedFail:    2,
-		},
-		{
-			name:             "batch update with new host keys",
-			hosts:            []string{"newrouter1", "newrouter2"},
-			setupHostKeys:    map[string]bool{},
-			connectionErrors: map[string]bool{},
-			wantErr:          false,
-			expectedSuccess:  2,
-			expectedFail:     0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Setup temporary directory for host keys
-			tmpDir := t.TempDir()
-			originalWd, _ := os.Getwd()
-			defer func() {
-				_ = os.Chdir(originalWd)
-			}()
-			_ = os.Chdir(tmpDir)
-
-			// Set enrollment mode in context
-			ctx := context.WithValue(context.Background(), core.EnrollmentKey, true)
-
-			// Setup existing host keys
-			for host, setup := range tt.setupHostKeys {
-				if setup {
-					srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
-					dstFile := ssh.HostKeyFilePath(host)
-					if err := copyFile(srcFile, dstFile); err != nil {
-						t.Fatalf("Failed to setup test host key for %s: %v", host, err)
-					}
-				}
-			}
-
-			// Create mock SSH connection factory
-			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
-				if tt.connectionErrors[host] {
-					return nil, fmt.Errorf("connection failed for %s", host)
-				}
-
-				// Simulate host key capture
-				srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
-				dstFile := ssh.HostKeyFilePath(host)
-				_ = copyFile(srcFile, dstFile)
-
-				return &sshmocks_test.MockRunner{
-					CloseFunc: func() error { return nil },
-					RunFunc:   func(cmd string) (string, error) { return "", nil },
-				}, nil
-			}
-
-			// Execute batch update
-			successCount := 0
-			failCount := 0
-			var lastErr error
-
-			deps := EnrollDependencies{
-				SSHConnectionFactory: mockSSHFactory,
-				ApplyUpdatesFunc:     updates.Updates,
-				ExportConfigFunc:     export.Export,
-			}
-			for _, host := range tt.hosts {
-				if _, err := updateHostKey(ctx, host, deps); err != nil {
-					failCount++
-					lastErr = err
-				} else {
-					successCount++
-				}
-			}
-
-			// Verify counts
-			if successCount != tt.expectedSuccess {
-				t.Errorf("Expected %d successful updates, got %d", tt.expectedSuccess, successCount)
-			}
-			if failCount != tt.expectedFail {
-				t.Errorf("Expected %d failed updates, got %d", tt.expectedFail, failCount)
-			}
-
-			// Verify error expectation
-			hasError := failCount > 0
-			if hasError != tt.wantErr {
-				t.Errorf("Expected error: %v, got error: %v (lastErr: %v)", tt.wantErr, hasError, lastErr)
-			}
-
-			// Verify host keys were updated for successful hosts
-			for _, host := range tt.hosts {
-				if !tt.connectionErrors[host] {
-					if !ssh.HostKeyExists(host) {
-						t.Errorf("Expected host key for %s to exist after successful update", host)
-					}
-				}
-			}
-		})
-	}
-}
-
 func TestHandleUpdateHostKeyOnly(t *testing.T) {
 	tests := []struct {
 		name             string
-		hosts            []string
+		host             string
 		setupHostKeys    map[string]bool
 		connectionErrors map[string]bool
 		wantErr          bool
@@ -610,53 +457,8 @@ func TestHandleUpdateHostKeyOnly(t *testing.T) {
 		expectedFail     int
 	}{
 		{
-			name:  "batch mode - all hosts succeed",
-			hosts: []string{"router1", "router2", "router3"},
-			setupHostKeys: map[string]bool{
-				"router1": true,
-				"router2": true,
-				"router3": true,
-			},
-			connectionErrors: map[string]bool{},
-			wantErr:          false,
-			expectedSuccess:  3,
-			expectedFail:     0,
-		},
-		{
-			name:  "batch mode - some hosts fail",
-			hosts: []string{"router1", "router2", "router3"},
-			setupHostKeys: map[string]bool{
-				"router1": true,
-				"router2": true,
-				"router3": true,
-			},
-			connectionErrors: map[string]bool{
-				"router2": true,
-			},
-			wantErr:         true,
-			errContains:     "some host key updates failed",
-			expectedSuccess: 2,
-			expectedFail:    1,
-		},
-		{
-			name:  "batch mode - all hosts fail",
-			hosts: []string{"router1", "router2"},
-			setupHostKeys: map[string]bool{
-				"router1": false,
-				"router2": false,
-			},
-			connectionErrors: map[string]bool{
-				"router1": true,
-				"router2": true,
-			},
-			wantErr:         true,
-			errContains:     "all host key updates failed",
-			expectedSuccess: 0,
-			expectedFail:    2,
-		},
-		{
 			name:             "single host mode - success",
-			hosts:            []string{"router1"},
+			host:             "router1",
 			setupHostKeys:    map[string]bool{},
 			connectionErrors: map[string]bool{},
 			wantErr:          false,
@@ -664,8 +466,8 @@ func TestHandleUpdateHostKeyOnly(t *testing.T) {
 			expectedFail:     0,
 		},
 		{
-			name:  "single host mode - failure",
-			hosts: []string{"router1"},
+			name: "single host mode - failure",
+			host: "router1",
 			connectionErrors: map[string]bool{
 				"router1": true,
 			},
@@ -673,12 +475,6 @@ func TestHandleUpdateHostKeyOnly(t *testing.T) {
 			errContains:     "failed to connect to device",
 			expectedSuccess: 0,
 			expectedFail:    1,
-		},
-		{
-			name:        "no hosts specified",
-			hosts:       []string{},
-			wantErr:     true,
-			errContains: "no hosts specified or discovered",
 		},
 	}
 
@@ -730,27 +526,25 @@ func TestHandleUpdateHostKeyOnly(t *testing.T) {
 			}
 
 			// Execute
-			err := processMultiHostKeyUpdate(ctx, tt.hosts, deps)
+			_, err := updateHostKey(ctx, tt.host, deps)
 
 			// Verify error expectation
 			if (err != nil) != tt.wantErr {
-				t.Errorf("processMultiHostKeyUpdate() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("updateHostKey() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			if tt.wantErr && tt.errContains != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("processMultiHostKeyUpdate() error = %v, should contain %q", err, tt.errContains)
+					t.Errorf("updateHostKey() error = %v, should contain %q", err, tt.errContains)
 				}
 			}
 
 			// Verify host keys were created for successful hosts
 			if !tt.wantErr {
-				for _, host := range tt.hosts {
-					if !tt.connectionErrors[host] {
-						if !ssh.HostKeyExists(host) {
-							t.Errorf("Expected host key for %s to exist after successful update", host)
-						}
+				if !tt.connectionErrors[tt.host] {
+					if !ssh.HostKeyExists(tt.host) {
+						t.Errorf("Expected host key for %s to exist after successful update", tt.host)
 					}
 				}
 			}
@@ -944,6 +738,7 @@ func TestConnectToRouter(t *testing.T) {
 	tests := []struct {
 		name            string
 		host            string
+		hostname        string
 		connectionError bool
 		wantErr         bool
 		errContains     string
@@ -951,12 +746,14 @@ func TestConnectToRouter(t *testing.T) {
 		{
 			name:            "successful connection",
 			host:            "router1",
+			hostname:        "router1",
 			connectionError: false,
 			wantErr:         false,
 		},
 		{
 			name:            "connection failure",
 			host:            "router1",
+			hostname:        "router1",
 			connectionError: true,
 			wantErr:         true,
 			errContains:     "failed to connect to router",
@@ -983,7 +780,7 @@ func TestConnectToRouter(t *testing.T) {
 			}
 
 			// Execute
-			conn, err := connectToRouter(ctx, tt.host, deps)
+			conn, err := connectToRouter(ctx, tt.host, tt.hostname, deps)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
@@ -1234,6 +1031,7 @@ func TestApplyUpdates(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			host := "router1"
+			hostname := "router1"
 
 			// Create mock update function
 			mockUpdateFunc := func(ctx context.Context, host string) error {
@@ -1248,7 +1046,7 @@ func TestApplyUpdates(t *testing.T) {
 			}
 
 			// Execute
-			err := applyUpdates(ctx, host, deps)
+			err := applyUpdates(ctx, host, hostname, deps)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
@@ -1298,6 +1096,9 @@ func TestExportConfiguration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			host := "router1"
+			hostname := "router1"
+
+			// Setup temporary output directory
 			outputDir := t.TempDir()
 
 			enrollCfg := EnrollConfig{
@@ -1343,7 +1144,7 @@ func TestExportConfiguration(t *testing.T) {
 			}
 
 			// Execute
-			newConn, err := exportConfiguration(ctx, host, enrollCfg, deps, mockConn)
+			newConn, err := exportConfiguration(ctx, host, hostname, enrollCfg, deps, mockConn)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
@@ -1382,7 +1183,7 @@ func TestExportConfiguration(t *testing.T) {
 func TestEnrollMainWorkflow(t *testing.T) {
 	tests := []struct {
 		name                 string
-		hosts                []string
+		host                 string
 		hostname             string
 		preEnrollScript      string
 		postEnrollScript     string
@@ -1405,7 +1206,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 	}{
 		{
 			name:             "successful full enrollment",
-			hosts:            []string{"router1"},
+			host:             "router1",
 			hostname:         "test-router",
 			setupScripts:     true,
 			preEnrollScript:  "pre-enroll.rsc",
@@ -1416,7 +1217,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:             "successful enrollment with skip updates",
-			hosts:            []string{"router1"},
+			host:             "router1",
 			hostname:         "test-router",
 			setupScripts:     true,
 			preEnrollScript:  "pre-enroll.rsc",
@@ -1427,7 +1228,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:             "successful enrollment with skip export",
-			hosts:            []string{"router1"},
+			host:             "router1",
 			hostname:         "test-router",
 			setupScripts:     true,
 			preEnrollScript:  "pre-enroll.rsc",
@@ -1438,7 +1239,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:                 "successful enrollment with force re-enrollment",
-			hosts:                []string{"router1"},
+			host:                 "router1",
 			hostname:             "test-router",
 			setupScripts:         true,
 			preEnrollScript:      "pre-enroll.rsc",
@@ -1450,26 +1251,13 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:              "update host key only mode - single host",
-			hosts:             []string{"router1"},
+			host:              "router1",
 			updateHostKeyOnly: true,
 			wantErr:           false,
-		},
-		{
-			name:              "update host key only mode - batch",
-			hosts:             []string{"router1", "router2", "router3"},
-			updateHostKeyOnly: true,
-			wantErr:           false,
-		},
-		{
-			name:        "fail on multiple hosts without update-hostkey-only",
-			hosts:       []string{"router1", "router2"},
-			hostname:    "test-router",
-			wantErr:     true,
-			errContains: "requires exactly one host",
 		},
 		{
 			name:              "fail on force with update-hostkey-only",
-			hosts:             []string{"router1"},
+			host:              "router1",
 			force:             true,
 			updateHostKeyOnly: true,
 			wantErr:           true,
@@ -1477,7 +1265,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:            "fail on host key capture error",
-			hosts:           []string{"router1"},
+			host:            "router1",
 			hostname:        "test-router",
 			connectionError: true,
 			wantErr:         true,
@@ -1485,7 +1273,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:            "fail on connection error",
-			hosts:           []string{"router1"},
+			host:            "router1",
 			hostname:        "test-router",
 			connectionError: true,
 			wantErr:         true,
@@ -1493,7 +1281,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:             "fail on pre-script error",
-			hosts:            []string{"router1"},
+			host:             "router1",
 			hostname:         "test-router",
 			setupScripts:     true,
 			preEnrollScript:  "pre-enroll.rsc",
@@ -1504,7 +1292,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:             "fail on identity set error",
-			hosts:            []string{"router1"},
+			host:             "router1",
 			hostname:         "test-router",
 			setupScripts:     true,
 			preEnrollScript:  "pre-enroll.rsc",
@@ -1515,7 +1303,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:             "fail on export error",
-			hosts:            []string{"router1"},
+			host:             "router1",
 			hostname:         "test-router",
 			setupScripts:     true,
 			preEnrollScript:  "pre-enroll.rsc",
@@ -1527,7 +1315,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:             "fail on post-script error",
-			hosts:            []string{"router1"},
+			host:             "router1",
 			hostname:         "test-router",
 			setupScripts:     true,
 			preEnrollScript:  "pre-enroll.rsc",
@@ -1538,7 +1326,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:             "fail on context cancelled",
-			hosts:            []string{"router1"},
+			host:             "router1",
 			hostname:         "test-router",
 			contextCancelled: true,
 			wantErr:          true,
@@ -1546,7 +1334,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 		},
 		{
 			name:             "updates failure is non-fatal",
-			hosts:            []string{"router1"},
+			host:             "router1",
 			hostname:         "test-router",
 			setupScripts:     true,
 			preEnrollScript:  "pre-enroll.rsc",
@@ -1571,7 +1359,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 
 			// Create mock config
 			cfg := &core.Config{
-				Hosts: tt.hosts,
+				Hosts: []string{tt.host},
 			}
 			ctx = context.WithValue(ctx, core.ConfigKey, cfg)
 
@@ -1584,19 +1372,15 @@ func TestEnrollMainWorkflow(t *testing.T) {
 
 			// Setup existing host key if needed
 			if tt.setupExistingHostKey {
-				for _, host := range tt.hosts {
-					srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
-					dstFile := ssh.HostKeyFilePath(host)
-					_ = copyFile(srcFile, dstFile)
-				}
+				srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
+				dstFile := ssh.HostKeyFilePath(tt.host)
+				_ = copyFile(srcFile, dstFile)
 			}
 
 			// Setup existing config file if needed
 			if tt.setupExistingConfig {
-				for _, host := range tt.hosts {
-					configFile := fmt.Sprintf("%s.rsc", host)
-					_ = os.WriteFile(configFile, []byte("# existing config"), 0600)
-				}
+				configFile := fmt.Sprintf("%s.rsc", tt.host)
+				_ = os.WriteFile(configFile, []byte("# existing config"), 0600)
 			}
 
 			// Setup scripts if needed
@@ -1701,7 +1485,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 				err = fmt.Errorf("cannot use --force and --update-hostkey-only together")
 			} else if enrollCfg.UpdateHostKeyOnly {
 				// Route to processMultiHostKeyUpdate
-				err = processMultiHostKeyUpdate(ctx, cfg.Hosts, deps)
+				_, err = updateHostKey(ctx, tt.host, deps)
 			} else {
 				// Normal enrollment validation
 				if len(cfg.Hosts) != 1 {
@@ -1717,7 +1501,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 
 					// Handle force re-enrollment
 					if err == nil && enrollCfg.Force {
-						err = deleteExistingEnrollment(host)
+						err = deleteExistingEnrollment(host, host)
 						if err != nil {
 							err = fmt.Errorf("failed to remove existing enrollment: %w", err)
 						}
@@ -1733,7 +1517,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 					// Step 2: Establish connection
 					var conn ssh.RunnerInterface
 					if err == nil {
-						conn, err = connectToRouter(ctx, host, deps)
+						conn, err = connectToRouter(ctx, host, host, deps)
 					}
 
 					if conn != nil {
@@ -1761,7 +1545,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 					// Step 5: Apply updates (optional)
 					if err == nil && conn != nil {
 						if !enrollCfg.SkipUpdates {
-							updateErr := applyUpdates(ctx, host, deps)
+							updateErr := applyUpdates(ctx, host, host, deps)
 							// Updates are non-fatal, don't fail enrollment
 							_ = updateErr
 						}
@@ -1769,7 +1553,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 
 					// Step 6: Export configuration (optional)
 					if err == nil && conn != nil && !enrollCfg.SkipExport {
-						newConn, exportErr := exportConfiguration(ctx, host, enrollCfg, deps, conn)
+						newConn, exportErr := exportConfiguration(ctx, host, host, enrollCfg, deps, conn)
 						if exportErr != nil {
 							err = fmt.Errorf("failed to export configuration: %w", exportErr)
 						} else if newConn != nil {
@@ -1801,20 +1585,16 @@ func TestEnrollMainWorkflow(t *testing.T) {
 
 			// Verify host keys were created for successful scenarios
 			if !tt.wantErr && !tt.connectionError {
-				for _, host := range tt.hosts {
-					if !ssh.HostKeyExists(host) {
-						t.Errorf("Expected host key for %s to exist after enrollment", host)
-					}
+				if !ssh.HostKeyExists(tt.host) {
+					t.Errorf("Expected host key for %s to exist after enrollment", tt.host)
 				}
 			}
 
 			// Verify force cleanup happened
 			if !tt.wantErr && tt.force && !tt.updateHostKeyOnly {
-				for _, host := range tt.hosts {
-					configFile := fmt.Sprintf("%s.rsc", host)
-					if _, statErr := os.Stat(configFile); !os.IsNotExist(statErr) {
-						t.Errorf("Expected config file %s to be deleted by force cleanup", configFile)
-					}
+				configFile := fmt.Sprintf("%s.rsc", tt.host)
+				if _, statErr := os.Stat(configFile); !os.IsNotExist(statErr) {
+					t.Errorf("Expected config file %s to be deleted by force cleanup", configFile)
 				}
 			}
 		})
@@ -1841,6 +1621,7 @@ func TestEnrollWorkflow(t *testing.T) {
 
 	tests := []struct {
 		name              string
+		host              string
 		hostname          string
 		preEnrollScript   string
 		postEnrollScript  string
@@ -1856,6 +1637,7 @@ func TestEnrollWorkflow(t *testing.T) {
 	}{
 		{
 			name:     "successful full enrollment",
+			host:     "test-router1",
 			hostname: "test-router1",
 			setupMocks: func(t *testing.T) EnrollDependencies {
 				mockRunner := &sshmocks_test.MockRunner{
@@ -1893,6 +1675,7 @@ func TestEnrollWorkflow(t *testing.T) {
 		},
 		{
 			name:        "enrollment with skip-updates flag",
+			host:        "test-router2",
 			hostname:    "test-router2",
 			skipUpdates: true,
 			setupMocks: func(t *testing.T) EnrollDependencies {
@@ -1926,6 +1709,7 @@ func TestEnrollWorkflow(t *testing.T) {
 		},
 		{
 			name:       "enrollment with skip-export flag",
+			host:       "test-router3",
 			hostname:   "test-router3",
 			skipExport: true,
 			setupMocks: func(t *testing.T) EnrollDependencies {
@@ -1959,6 +1743,7 @@ func TestEnrollWorkflow(t *testing.T) {
 		},
 		{
 			name:        "enrollment with both skip flags",
+			host:        "test-router4",
 			hostname:    "test-router4",
 			skipUpdates: true,
 			skipExport:  true,
@@ -1994,6 +1779,7 @@ func TestEnrollWorkflow(t *testing.T) {
 		},
 		{
 			name:     "enrollment with pre-enroll script",
+			host:     "test-router5",
 			hostname: "test-router5",
 			setupMocks: func(t *testing.T) EnrollDependencies {
 				preScriptExecuted := false
@@ -2034,6 +1820,7 @@ func TestEnrollWorkflow(t *testing.T) {
 		},
 		{
 			name:     "enrollment with post-enroll script",
+			host:     "test-router6",
 			hostname: "test-router6",
 			setupMocks: func(t *testing.T) EnrollDependencies {
 				postScriptExecuted := false
@@ -2077,6 +1864,7 @@ func TestEnrollWorkflow(t *testing.T) {
 		},
 		{
 			name:     "enrollment with force flag removes existing artifacts",
+			host:     "test-router7",
 			hostname: "test-router7",
 			force:    true,
 			setupMocks: func(t *testing.T) EnrollDependencies {
@@ -2122,6 +1910,7 @@ func TestEnrollWorkflow(t *testing.T) {
 		},
 		{
 			name:              "update-host-key-only mode single host",
+			host:              "test-router8",
 			hostname:          "test-router8",
 			updateHostKeyOnly: true,
 			setupMocks: func(t *testing.T) EnrollDependencies {
@@ -2157,47 +1946,8 @@ func TestEnrollWorkflow(t *testing.T) {
 			},
 		},
 		{
-			name:              "update-host-key-only with multiple hosts",
-			hostname:          "test-router9,test-router10,test-router11",
-			updateHostKeyOnly: true,
-			setupMocks: func(t *testing.T) EnrollDependencies {
-				hostsUpdated := make(map[string]bool)
-				mockRunner := &sshmocks_test.MockRunner{
-					RunFunc: func(cmd string) (string, error) {
-						return "", nil
-					},
-				}
-				return EnrollDependencies{
-					SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
-						hostsUpdated[host] = true
-						if err := writeHostKeyFile(host); err != nil {
-							return nil, fmt.Errorf("failed to write host key: %w", err)
-						}
-						return mockRunner, nil
-					},
-					ApplyUpdatesFunc: func(ctx context.Context, host string) error {
-						t.Error("ApplyUpdatesFunc should not be called in batch update-host-key-only mode")
-						return nil
-					},
-					ExportConfigFunc: func(ctx context.Context, host, outputDir string, verbose bool, identityOverride string) error {
-						t.Error("ExportConfigFunc should not be called in batch update-host-key-only mode")
-						return nil
-					},
-				}
-			},
-			setupFiles: func(t *testing.T, hostname string) {},
-			wantErr:    false,
-			validateResults: func(t *testing.T, hostname string) {
-				// All three hosts should have host key files
-				for _, h := range []string{"test-router9", "test-router10", "test-router11"} {
-					if _, err := os.Stat(fmt.Sprintf("%s.hostkey", h)); os.IsNotExist(err) {
-						t.Errorf("Host key file should exist for %s", h)
-					}
-				}
-			},
-		},
-		{
 			name:              "error: force and update-host-key-only conflict",
+			host:              "test-router12",
 			hostname:          "test-router12",
 			force:             true,
 			updateHostKeyOnly: true,
@@ -2209,17 +1959,8 @@ func TestEnrollWorkflow(t *testing.T) {
 			errContains: "cannot use --force and --update-hostkey-only together",
 		},
 		{
-			name:     "error: multiple hosts without update-host-key-only",
-			hostname: "test-router13,test-router14",
-			setupMocks: func(t *testing.T) EnrollDependencies {
-				return EnrollDependencies{}
-			},
-			setupFiles:  func(t *testing.T, hostname string) {},
-			wantErr:     true,
-			errContains: "exactly one host",
-		},
-		{
 			name:     "error: SSH connection failure",
+			host:     "test-router15",
 			hostname: "test-router15",
 			setupMocks: func(t *testing.T) EnrollDependencies {
 				return EnrollDependencies{
@@ -2240,6 +1981,7 @@ func TestEnrollWorkflow(t *testing.T) {
 		},
 		{
 			name:     "non-fatal: updates failure doesn't stop enrollment",
+			host:     "test-router16",
 			hostname: "test-router16",
 			setupMocks: func(t *testing.T) EnrollDependencies {
 				mockRunner := &sshmocks_test.MockRunner{
@@ -2312,7 +2054,7 @@ func TestEnrollWorkflow(t *testing.T) {
 			ctx = context.WithValue(ctx, core.ConfigKey, coreConfig)
 
 			// Execute enroll
-			err := enroll(ctx, cfg, deps)
+			err := enroll(ctx, tt.host, cfg, deps)
 
 			// Verify results
 			if tt.wantErr {
@@ -2334,7 +2076,17 @@ func TestEnrollWorkflow(t *testing.T) {
 	}
 }
 
+// fileExists checks if a file exists at the given path
 func fileExists(filename string) bool {
 	_, err := os.Stat(filename)
 	return !os.IsNotExist(err)
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0600)
 }

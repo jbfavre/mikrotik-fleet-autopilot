@@ -95,6 +95,7 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
+		fmt.Printf("❓ %s is unreachable\n", host)
 		return fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	defer func() {

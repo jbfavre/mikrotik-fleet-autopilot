@@ -54,9 +54,13 @@ var Command = []*cli.Command{
 			// Iterate over all hosts
 			var lastErr error
 			for _, host := range coreCfg.Hosts {
-				if err := updates(ctx, host, updatesCfg, deps); err != nil {
+				osStatus, boardStatus, err := updates(ctx, host, updatesCfg, deps)
+				if err != nil {
+					fmt.Printf("❌ %s: Updates failed\n", host)
 					lastErr = err
 					// Continue with other hosts even if one fails
+				} else {
+					fmt.Println(formatUpdateResult(host, osStatus, boardStatus))
 				}
 			}
 			return lastErr
@@ -79,13 +83,14 @@ func Updates(ctx context.Context, host string) error {
 		SSHConnectionFactory: ssh.CreateConnection,
 		ReconnectDelay:       10 * time.Second,
 	}
-	return updates(ctx, host, cfg, deps)
+	_, _, err := updates(ctx, host, cfg, deps) // statuses intentionally discarded; caller (enroll) manages output
+	return err
 }
 
-func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDependencies) error {
+func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDependencies) (*UpdateStatus, *UpdateStatus, error) {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("context cancelled: %w", err)
+		return nil, nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
 	slog.Debug("subcommand apply-updates flag", "value", cfg.UpdatesApply)
@@ -95,8 +100,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
 		slog.Debug("failed to create SSH connection", "host", host, "error", err)
-		fmt.Printf("❓ %s is unreachable\n", host)
-		return fmt.Errorf("failed to create SSH connection: %w", err)
+		return nil, nil, fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	defer func() {
 		_ = conn.Close()
@@ -107,20 +111,19 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	slog.Info("Checking current update status")
 	osStatus, boardStatus, err := checkCurrentStatus(conn)
 	if err != nil {
-		fmt.Printf("❓ %s updates check failed\n", host)
-		return err
+		return nil, nil, err
 	}
 
-	// Step 2: Display current status
-	slog.Info("Displaying current update status")
-	fmt.Println(formatUpdateResult(host, osStatus, boardStatus))
-
-	// Step 3: Apply updates if requested and needed
+	// Step 2: Apply updates if requested and needed
 	if !cfg.UpdatesApply {
 		// Only checking updates, not applying
 		slog.Info("Updates apply not requested, skipping update application")
-		return nil
+		return osStatus, boardStatus, nil
 	}
+
+	// Track the final statuses to return to the caller
+	finalOsStatus := osStatus
+	finalBoardStatus := boardStatus
 
 	osUpToDate := osStatus.Installed == osStatus.Available
 	boardUpToDate := boardStatus == nil || boardStatus.Installed == boardStatus.Available
@@ -128,9 +131,15 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	// Apply RouterOS update if needed
 	if !osUpToDate {
 		slog.Info("Applying RouterOS updates")
-		if err := applyComponentUpdate(conn, ctx, host, "RouterOS", "/system/package/update/install", false, deps); err != nil {
-			fmt.Printf("❓ %s updates apply failed\n", host)
-			return err
+		newOsStatus, newBoardStatus, err := applyComponentUpdate(conn, ctx, host, "RouterOS", "/system/package/update/install", false, deps)
+		if err != nil {
+			return nil, nil, err
+		}
+		if newOsStatus != nil {
+			finalOsStatus = newOsStatus
+		}
+		if newBoardStatus != nil {
+			finalBoardStatus = newBoardStatus
 		}
 		// After RouterOS update, reconnect and re-check RouterBoard status only
 		// (RouterOS update may have staged new RouterBoard firmware)
@@ -145,7 +154,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 			conn, err = deps.SSHConnectionFactory(ctx, host)
 			if err != nil {
 				slog.Error("failed to reconnect after RouterOS update", "host", host, "error", err)
-				return fmt.Errorf("failed to reconnect after RouterOS update: %w", err)
+				return nil, nil, fmt.Errorf("failed to reconnect after RouterOS update: %w", err)
 			}
 			defer func() {
 				_ = conn.Close()
@@ -176,13 +185,19 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	// Apply RouterBoard update if needed (only for physical routers)
 	if !boardUpToDate && boardStatus != nil {
 		slog.Info("Applying RouterBoard updates")
-		if err := applyComponentUpdate(conn, ctx, host, "RouterBoard", "/system/reboot", true, deps); err != nil {
-			fmt.Printf("❓ %s reboot after RouterBoard updates failed\n", host)
-			return err
+		newOsStatus, newBoardStatus, err := applyComponentUpdate(conn, ctx, host, "RouterBoard", "/system/reboot", true, deps)
+		if err != nil {
+			return nil, nil, err
+		}
+		if newOsStatus != nil {
+			finalOsStatus = newOsStatus
+		}
+		if newBoardStatus != nil {
+			finalBoardStatus = newBoardStatus
 		}
 	}
 
-	return nil
+	return finalOsStatus, finalBoardStatus, nil
 }
 
 // checkCurrentStatus retrieves the current RouterOS and RouterBoard status
@@ -233,8 +248,8 @@ func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus,
 	return osStatus, boardStatus, nil
 }
 
-// applyComponentUpdate applies an update to RouterOS or RouterBoard and displays the result
-func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, component, updateCmd string, checkBoth bool, deps UpdatesDependencies) error {
+// applyComponentUpdate applies an update to RouterOS or RouterBoard and returns the resulting statuses
+func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, component, updateCmd string, checkBoth bool, deps UpdatesDependencies) (*UpdateStatus, *UpdateStatus, error) {
 	slog.Info("component update needed, applying updates", "component", component)
 	slog.Debug("applying component updates", "component", component, "host", host)
 
@@ -244,7 +259,7 @@ func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, c
 	}
 	newConn, err := applyUpdate(conn, ctx, host, updateCmd, msgPrefix+" "+host, deps)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	defer func() {
 		_ = newConn.Close()
@@ -262,13 +277,13 @@ func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, c
 
 	if !checkBoth {
 		// RouterOS only update
-		if osStatusErr == nil {
-			fmt.Println(formatUpdateResult(host, osStatus, nil))
-		} else {
+		if osStatusErr != nil {
 			slog.Warn("failed to check RouterOS status after update", "error", osStatusErr)
+			// Post-update check errors are non-fatal - the update itself succeeded
+			return nil, nil, nil
 		}
 		// Post-update check errors are non-fatal - the update itself succeeded
-		return nil
+		return osStatus, nil, nil
 	}
 
 	// RouterBoard update - check both OS and Board
@@ -282,18 +297,17 @@ func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, c
 	)
 
 	if osStatusErr == nil && boardStatusErr == nil {
-		fmt.Println(formatUpdateResult(host, osStatus, boardStatus))
-	} else {
-		if osStatusErr != nil {
-			slog.Warn("failed to check RouterOS status after update", "error", osStatusErr)
-		}
-		if boardStatusErr != nil {
-			slog.Warn("failed to check RouterBoard status after update", "error", boardStatusErr)
-		}
+		return osStatus, boardStatus, nil
+	}
+	if osStatusErr != nil {
+		slog.Warn("failed to check RouterOS status after update", "error", osStatusErr)
+	}
+	if boardStatusErr != nil {
+		slog.Warn("failed to check RouterBoard status after update", "error", boardStatusErr)
 	}
 
 	// Post-update check errors are non-fatal - the update itself succeeded
-	return nil
+	return nil, nil, nil
 }
 
 // formatUpdateResult formats the update result into a string

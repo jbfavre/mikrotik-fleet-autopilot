@@ -162,7 +162,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 
 			// Only re-check RouterBoard status (not RouterOS which requires working DNS)
 			slog.Info("Re-checking RouterBoard status after RouterOS update")
-			boardStatus, err = getUpdateStatus(
+			recheckBoardStatus, recheckErr := getUpdateStatus(
 				conn,
 				"/system/routerboard/print",
 				"RouterBoard",
@@ -170,9 +170,12 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 				regexp.MustCompile(`.*upgrade-firmware: (\S+)`),
 				true,
 			)
-			if err != nil {
-				slog.Warn("failed to re-check RouterBoard status after RouterOS update", "error", err)
-			} else if boardStatus != nil {
+			if recheckErr != nil {
+				slog.Warn("failed to re-check RouterBoard status after RouterOS update", "error", recheckErr)
+				// Keep the pre-update boardStatus so the RouterBoard-update condition still runs
+			} else if recheckBoardStatus != nil {
+				boardStatus = recheckBoardStatus
+				finalBoardStatus = recheckBoardStatus
 				boardUpToDate = boardStatus.Installed == boardStatus.Available
 				slog.Info("RouterBoard status after RouterOS update",
 					"current", boardStatus.Installed,

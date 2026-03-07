@@ -221,7 +221,7 @@ func TestUpdates(t *testing.T) {
   current-firmware: 7.11.3
   upgrade-firmware: 7.12.1`,
 			expectOsUpdate:    true,
-			expectBoardUpdate: false, // Board update happens after OS, not in same call
+			expectBoardUpdate: true, // Board update runs after OS update re-check confirms it is still needed
 			wantErr:           false,
 		},
 		{

@@ -372,8 +372,8 @@ func TestUpdates(t *testing.T) {
 						t.Errorf("updates() boardStatus = %+v, want %+v", *boardStatus, *tt.expectedBoardStatus)
 					}
 				} else if !tt.hasBoard && boardStatus != nil {
-					// For check-only / no-RouterBoard cases, ensure no board status is returned
-					t.Errorf("updates() boardStatus = %+v, want nil when no RouterBoard status is expected", boardStatus)
+					// When no RouterBoard is present (tt.hasBoard == false), ensure no board status is returned
+					t.Errorf("updates() boardStatus = %+v, want nil when no RouterBoard is present", boardStatus)
 				}
 			}
 

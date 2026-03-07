@@ -60,9 +60,13 @@ var Command = []*cli.Command{
 			// Iterate over all hosts
 			var lastErr error
 			for _, host := range coreCfg.Hosts {
-				if err := export(ctx, host, "", exportCfg, deps); err != nil { // Empty preferred filename = derive automatically
+				filename, err := export(ctx, host, "", exportCfg, deps) // Empty preferred filename = derive automatically
+				if err != nil {
+					fmt.Printf("❌ %s: Export failed\n", host)
 					lastErr = err
 					// Continue with other hosts even if one fails
+				} else {
+					fmt.Printf("✅ %s: Configuration exported to %s\n", host, filename)
 				}
 			}
 			return lastErr
@@ -80,13 +84,14 @@ func Export(ctx context.Context, host string, exportOutputDir string, exportShow
 	deps := ExportDependencies{
 		SSHConnectionFactory: ssh.CreateConnection,
 	}
-	return export(ctx, host, preferredFilename, cfg, deps)
+	_, err := export(ctx, host, preferredFilename, cfg, deps) // filename intentionally discarded; caller (enroll) manages output
+	return err
 }
 
-func export(ctx context.Context, host string, preferredFilename string, cfg ExportConfig, deps ExportDependencies) error {
+func export(ctx context.Context, host string, preferredFilename string, cfg ExportConfig, deps ExportDependencies) (string, error) {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("context cancelled: %w", err)
+		return "", fmt.Errorf("context cancelled: %w", err)
 	}
 
 	slog.Info("exporting configuration", "host", host)
@@ -95,8 +100,7 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
-		fmt.Printf("❓ %s is unreachable\n", host)
-		return fmt.Errorf("failed to create SSH connection: %w", err)
+		return "", fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	defer func() {
 		_ = conn.Close()
@@ -111,8 +115,7 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 	result, err := conn.Run(sshCmd)
 	if err != nil {
 		slog.Error("failed to export configuration", "host", host, "error", err)
-		fmt.Printf("❌ %s: Export failed\n", host)
-		return fmt.Errorf("failed to export configuration: %w", err)
+		return "", fmt.Errorf("failed to export configuration: %w", err)
 	}
 
 	// Clean up Windows line endings (CRLF -> LF)
@@ -133,11 +136,9 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 	slog.Debug("writing configuration", "file", filepath, "size", len(result))
 	if err := os.WriteFile(filepath, []byte(result), 0644); err != nil {
 		slog.Error("failed to write configuration file", "host", host, "file", filepath, "error", err)
-		fmt.Printf("❌ %s: Export failed\n", host)
-		return fmt.Errorf("failed to write configuration file: %w", err)
+		return "", fmt.Errorf("failed to write configuration file: %w", err)
 	}
 
 	slog.Info("configuration exported successfully", "host", host, "file", filename)
-	fmt.Printf("✅ %s: Configuration exported to %s\n", host, filename)
-	return nil
+	return filename, nil
 }

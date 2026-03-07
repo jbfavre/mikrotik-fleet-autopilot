@@ -127,16 +127,17 @@ func TestExportParameterMapping(t *testing.T) {
 
 func TestExportConfig(t *testing.T) {
 	tests := []struct {
-		name           string
-		host           string
-		showSensitive  bool
-		sshOutput      string
-		sshError       error
-		expectedFile   string
-		expectedCmd    string
-		wantErr        bool
-		errContains    string
-		checkFilePerms bool
+		name             string
+		host             string
+		showSensitive    bool
+		sshOutput        string
+		sshError         error
+		expectedFile     string
+		expectedFilename string
+		expectedCmd      string
+		wantErr          bool
+		errContains      string
+		checkFilePerms   bool
 	}{
 		{
 			name:          "Successful export without sensitive data",
@@ -146,10 +147,11 @@ func TestExportConfig(t *testing.T) {
 add name=bridge1
 /ip address
 add address=192.168.1.1/24 interface=bridge1`,
-			sshError:     nil,
-			expectedCmd:  "/export terse",
-			expectedFile: "router1.rsc",
-			wantErr:      false,
+			sshError:         nil,
+			expectedCmd:      "/export terse",
+			expectedFile:     "router1.rsc",
+			expectedFilename: "router1.rsc",
+			wantErr:          false,
 		},
 		{
 			name:          "Successful export with sensitive data",
@@ -159,41 +161,45 @@ add address=192.168.1.1/24 interface=bridge1`,
 add name=admin password=secret123
 /interface bridge
 add name=bridge1`,
-			sshError:       nil,
-			expectedCmd:    "/export terse show-sensitive",
-			expectedFile:   "router2.rsc",
-			wantErr:        false,
-			checkFilePerms: true,
+			sshError:         nil,
+			expectedCmd:      "/export terse show-sensitive",
+			expectedFile:     "router2.rsc",
+			expectedFilename: "router2.rsc",
+			wantErr:          false,
+			checkFilePerms:   true,
 		},
 		{
-			name:          "Export with Windows line endings",
-			host:          "router3",
-			showSensitive: false,
-			sshOutput:     "/interface bridge\r\nadd name=bridge1\r\n/ip address\r\nadd address=192.168.1.1/24",
-			sshError:      nil,
-			expectedCmd:   "/export terse",
-			expectedFile:  "router3.rsc",
-			wantErr:       false,
+			name:             "Export with Windows line endings",
+			host:             "router3",
+			showSensitive:    false,
+			sshOutput:        "/interface bridge\r\nadd name=bridge1\r\n/ip address\r\nadd address=192.168.1.1/24",
+			sshError:         nil,
+			expectedCmd:      "/export terse",
+			expectedFile:     "router3.rsc",
+			expectedFilename: "router3.rsc",
+			wantErr:          false,
 		},
 		{
-			name:          "SSH connection fails",
-			host:          "router4.example.com",
-			showSensitive: false,
-			sshOutput:     "",
-			sshError:      fmt.Errorf("connection timeout"),
-			expectedCmd:   "/export terse",
-			wantErr:       true,
-			errContains:   "failed to export configuration",
+			name:             "SSH connection fails",
+			host:             "router4.example.com",
+			showSensitive:    false,
+			sshOutput:        "",
+			sshError:         fmt.Errorf("connection timeout"),
+			expectedCmd:      "/export terse",
+			expectedFilename: "",
+			wantErr:          true,
+			errContains:      "failed to export configuration",
 		},
 		{
-			name:          "Hostname without domain",
-			host:          "simple-router",
-			showSensitive: false,
-			sshOutput:     "/interface bridge\nadd name=bridge1",
-			sshError:      nil,
-			expectedCmd:   "/export terse",
-			expectedFile:  "simple-router.rsc",
-			wantErr:       false,
+			name:             "Hostname without domain",
+			host:             "simple-router",
+			showSensitive:    false,
+			sshOutput:        "/interface bridge\nadd name=bridge1",
+			sshError:         nil,
+			expectedCmd:      "/export terse",
+			expectedFile:     "simple-router.rsc",
+			expectedFilename: "simple-router.rsc",
+			wantErr:          false,
 		},
 	}
 
@@ -243,7 +249,7 @@ add name=bridge1`,
 			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			// Call the function
-			err = export(ctx, tt.host, "", cfg, deps)
+			filename, err := export(ctx, tt.host, "", cfg, deps)
 
 			// Verify error expectations
 			if (err != nil) != tt.wantErr {
@@ -254,7 +260,15 @@ add name=bridge1`,
 				if tt.errContains != "" && (err == nil || !strings.Contains(err.Error(), tt.errContains)) {
 					t.Errorf("exportConfig() error = %v, want error containing %q", err, tt.errContains)
 				}
+				if filename != "" {
+					t.Errorf("export() filename = %q on error, want empty string", filename)
+				}
 				return
+			}
+
+			// Verify returned filename matches expected
+			if filename != tt.expectedFilename {
+				t.Errorf("export() filename = %q, want %q", filename, tt.expectedFilename)
 			}
 
 			// Verify correct command was executed
@@ -394,7 +408,7 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			// Call export
-			err = export(ctx, tt.host, tt.preferredFilename, cfg, deps)
+			_, err = export(ctx, tt.host, tt.preferredFilename, cfg, deps)
 			if err != nil {
 				t.Fatalf("export() failed: %v", err)
 			}
@@ -439,7 +453,7 @@ func TestExport_SSHConnectionFactoryError(t *testing.T) {
 	ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 	// Call export - should fail
-	err := export(ctx, "test-host", "", cfg, deps)
+	_, err := export(ctx, "test-host", "", cfg, deps)
 	if err == nil {
 		t.Error("export() should fail when SSH connection cannot be established")
 	}
@@ -491,7 +505,7 @@ func TestExport_CloseError(t *testing.T) {
 	ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 	// Export should succeed even if close fails (error is silently ignored)
-	err = export(ctx, "test-host", "", cfg, deps)
+	_, err = export(ctx, "test-host", "", cfg, deps)
 	if err != nil {
 		t.Errorf("export() should succeed even with close error, got: %v", err)
 	}

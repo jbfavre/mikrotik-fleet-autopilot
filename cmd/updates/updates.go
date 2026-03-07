@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"regexp"
 	"time"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/display"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
@@ -51,18 +53,28 @@ var Command = []*cli.Command{
 				ReconnectDelay:       10 * time.Second,
 			}
 
+			// Set up live display
+			disp := display.New(os.Stdout, coreCfg.Hosts, coreCfg.Debug)
+			disp.Start()
+			defer disp.Stop()
+
 			// Iterate over all hosts
 			var lastErr error
-			for _, host := range coreCfg.Hosts {
+			for i, host := range coreCfg.Hosts {
+				line := disp.Line(i)
+				line.UpdateStep("⏳", "connecting…")
 				osStatus, boardStatus, err := updates(ctx, host, updatesCfg, deps)
 				if err != nil {
-					fmt.Printf("❌ %s: Updates failed\n", host)
+					line.CompleteStep("⏳")
+					line.FinishError("updates failed: " + err.Error())
 					lastErr = err
 					// Continue with other hosts even if one fails
 				} else if osStatus == nil {
-					fmt.Printf("❓ %s: Update applied, status could not be verified\n", host)
+					line.CompleteStep("⏳")
+					line.Finish("❓ update applied, status unverified")
 				} else {
-					fmt.Println(formatUpdateResult(host, osStatus, boardStatus))
+					line.CompleteStep("✅")
+					line.Finish(formatUpdateResult(host, osStatus, boardStatus))
 				}
 			}
 			return lastErr
@@ -395,7 +407,7 @@ func applyUpdate(conn ssh.RunnerInterface, ctx context.Context, host string, upd
 		return nil, fmt.Errorf("failed to run SSH command: %w", err)
 	}
 	_ = conn.Close()
-	fmt.Printf("⏳ %s\n", waitMsg)
+	slog.Info(waitMsg)
 
 	var newConn ssh.RunnerInterface
 	for {
@@ -404,7 +416,7 @@ func applyUpdate(conn ssh.RunnerInterface, ctx context.Context, host string, upd
 			return nil, fmt.Errorf("context cancelled during reconnection: %w", err)
 		}
 
-		fmt.Printf("⏳ Waiting for router %v to come back up...\n", host)
+		slog.Info("Waiting for router to come back up", "host", host)
 		time.Sleep(deps.ReconnectDelay)
 
 		newConn, err = deps.SSHConnectionFactory(ctx, host)

@@ -392,7 +392,7 @@ func TestBuild_HostKeyRejection(t *testing.T) {
 
 	ctx := context.Background()
 	// Reject all host keys
-	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
+	hostKeyCallback := func(hostname string, remote any, key ssh.PublicKey) error {
 		return fmt.Errorf("host key rejected")
 	}
 

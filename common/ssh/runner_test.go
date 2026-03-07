@@ -107,7 +107,7 @@ func TestConnection_Run_WithMockServer(t *testing.T) {
 	defer server.stop()
 
 	ctx := context.Background()
-	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
+	hostKeyCallback := func(hostname string, remote any, key ssh.PublicKey) error {
 		return nil // Accept any key for testing
 	}
 
@@ -140,7 +140,7 @@ func TestConnection_Close_WithMockServer(t *testing.T) {
 	defer server.stop()
 
 	ctx := context.Background()
-	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
+	hostKeyCallback := func(hostname string, remote any, key ssh.PublicKey) error {
 		return nil
 	}
 

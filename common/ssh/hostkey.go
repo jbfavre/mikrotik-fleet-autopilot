@@ -194,7 +194,7 @@ func LoadHostKeyInfo(host string) (*HostKeyInfo, error) {
 
 // BuildHostKeyCallback creates a host key callback function that integrates with the host key manager
 func BuildHostKeyCallback(ctx context.Context, host string, manager HostKeyManager) HostKeyCallback {
-	return func(hostname string, remote interface{}, key ssh.PublicKey) error {
+	return func(hostname string, remote any, key ssh.PublicKey) error {
 		// Extract config from context to check SkipHostKeyCheck
 		type configGetter interface {
 			GetSkipHostKeyCheck() bool

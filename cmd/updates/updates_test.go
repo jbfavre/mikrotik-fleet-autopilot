@@ -933,17 +933,17 @@ func TestApplyUpdate(t *testing.T) {
 
 func TestApplyComponentUpdate(t *testing.T) {
 	tests := []struct {
-		name                       string
-		component                  string
-		updateCmd                  string
-		checkBoth                  bool
-		updateError                error
-		osOutput                   string
-		osOutputAfterUpdate        string
-		boardOutput                string
-		wantErr                    bool
-		expectedOsStatusNotNil     bool
-		expectedBoardStatusNotNil  bool
+		name                      string
+		component                 string
+		updateCmd                 string
+		checkBoth                 bool
+		updateError               error
+		osOutput                  string
+		osOutputAfterUpdate       string
+		boardOutput               string
+		wantErr                   bool
+		expectedOsStatusNotNil    bool
+		expectedBoardStatusNotNil bool
 	}{
 		{
 			name:        "RouterOS update successful",

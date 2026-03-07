@@ -114,8 +114,11 @@ var Command = []*cli.Command{
 			}
 			for _, host := range coreCfg.Hosts {
 				if err := enroll(ctx, host, enrollCfg, deps); err != nil {
+					fmt.Printf("❌ %s: Enrollment failed\n", host)
 					lastErr = err
 					// Continue with other hosts even if one fails
+				} else {
+					fmt.Printf("✅ %s: Enrollment completed successfully\n", host)
 				}
 			}
 			return lastErr
@@ -156,10 +159,7 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	fingerprint, err := updateHostKey(ctx, host, deps)
 	if err != nil {
 		slog.Error("failed to capture host key", "host", host, "error", err)
-		fmt.Printf("❌ %s: Host key update failed\n", host)
 		return fmt.Errorf("failed to capture host key: %w", err)
-	} else {
-		fmt.Printf("✅ %s: Host key updated successfully\n", host)
 	}
 	slog.Debug("host key captured", "host", host, "hostname", hostname, "fingerprint", fingerprint)
 
@@ -199,7 +199,6 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	} else {
 		if err := applyUpdates(ctx, host, hostname, deps); err != nil {
 			slog.Error("failed to apply updates", "host", host, "hostname", hostname, "error", err)
-			fmt.Printf("⚠️  Updates failed (non-fatal)\n")
 			// Non-fatal because router might not have internet access yet
 		}
 	}
@@ -231,7 +230,6 @@ func connectToRouter(ctx context.Context, host string, hostname string, deps Enr
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
 		slog.Error("failed to connect to router", "host", host, "hostname", hostname, "error", err)
-		fmt.Printf("❌ Failed to connect\n")
 		return nil, fmt.Errorf("failed to connect to router: %w", err)
 	}
 	slog.Debug("successfully connected", "host", host, "hostname", hostname)

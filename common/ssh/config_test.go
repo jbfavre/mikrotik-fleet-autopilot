@@ -405,7 +405,7 @@ Host testhost
 	}()
 
 	ctx := context.Background()
-	hostKeyCallback := func(hostname string, remote interface{}, key ssh.PublicKey) error {
+	hostKeyCallback := func(hostname string, remote any, key ssh.PublicKey) error {
 		return nil
 	}
 

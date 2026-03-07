@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -313,26 +314,14 @@ func TestUpdates(t *testing.T) {
 
 			// Verify update commands were executed when expected
 			if tt.expectOsUpdate {
-				found := false
-				for _, cmd := range executedCommands {
-					if cmd == "/system/package/update/install" {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(executedCommands, "/system/package/update/install")
 				if !found {
 					t.Errorf("updates() expected RouterOS update command to be executed, but it wasn't. Commands: %v", executedCommands)
 				}
 			}
 
 			if tt.expectBoardUpdate {
-				found := false
-				for _, cmd := range executedCommands {
-					if cmd == "/system/reboot" {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(executedCommands, "/system/reboot")
 				if !found {
 					t.Errorf("updates() expected RouterBoard update (reboot) command to be executed, but it wasn't. Commands: %v", executedCommands)
 				}
@@ -340,13 +329,7 @@ func TestUpdates(t *testing.T) {
 
 			// Verify check commands were always executed (unless SSH failed)
 			if tt.sshError == nil {
-				checkFound := false
-				for _, cmd := range executedCommands {
-					if cmd == "/system/package/update/check-for-updates" {
-						checkFound = true
-						break
-					}
-				}
+				checkFound := slices.Contains(executedCommands, "/system/package/update/check-for-updates")
 				if !checkFound {
 					t.Errorf("updates() expected check-for-updates command to be executed, but it wasn't")
 				}
@@ -1178,13 +1161,7 @@ func TestUpdatesRouterOSStagingRouterBoardFirmware(t *testing.T) {
 			}
 
 			// Verify RouterOS update was applied
-			osUpdateFound := false
-			for _, cmd := range executedCommands {
-				if cmd == "/system/package/update/install" {
-					osUpdateFound = true
-					break
-				}
-			}
+			osUpdateFound := slices.Contains(executedCommands, "/system/package/update/install")
 			if !osUpdateFound {
 				t.Error("RouterOS update command was not executed")
 			}
@@ -1215,13 +1192,7 @@ func TestUpdatesRouterOSStagingRouterBoardFirmware(t *testing.T) {
 			}
 
 			// Verify RouterBoard reboot was executed if firmware was staged
-			boardRebootFound := false
-			for _, cmd := range executedCommands {
-				if cmd == "/system/reboot" {
-					boardRebootFound = true
-					break
-				}
-			}
+			boardRebootFound := slices.Contains(executedCommands, "/system/reboot")
 			if tt.expectBoardReboot && !boardRebootFound {
 				t.Error("Expected RouterBoard reboot command but it was not executed")
 			}

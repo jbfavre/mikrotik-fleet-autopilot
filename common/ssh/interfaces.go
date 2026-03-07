@@ -27,4 +27,4 @@ type HostInfo struct {
 }
 
 // HostKeyCallback provides host key validation
-type HostKeyCallback func(hostname string, remote interface{}, key ssh.PublicKey) error
+type HostKeyCallback func(hostname string, remote any, key ssh.PublicKey) error

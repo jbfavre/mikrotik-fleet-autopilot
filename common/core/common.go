@@ -33,7 +33,7 @@ func GetConfig(ctx context.Context) (*Config, error) {
 
 // GetSshManager extracts SshManager from context and returns it as interface{}
 // Caller must type assert to the appropriate ssh.SshManager type
-func GetSshManager(ctx context.Context) (interface{}, error) {
+func GetSshManager(ctx context.Context) (any, error) {
 	manager := ctx.Value(SshManagerKey)
 	if manager == nil {
 		return nil, fmt.Errorf("ssh manager not found in context")

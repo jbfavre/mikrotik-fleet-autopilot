@@ -108,21 +108,23 @@ func TestUpdatesParameterMapping(t *testing.T) {
 
 func TestUpdates(t *testing.T) {
 	tests := []struct {
-		name               string
-		host               string
-		applyUpdates       bool
-		osInstalled        string
-		osAvailable        string
-		boardInstalled     string
-		boardAvailable     string
-		hasBoard           bool
-		checkForUpdatesOut string
-		routerboardOut     string
-		sshError           error
-		wantErr            bool
-		errContains        string
-		expectOsUpdate     bool
-		expectBoardUpdate  bool
+		name                string
+		host                string
+		applyUpdates        bool
+		osInstalled         string
+		osAvailable         string
+		boardInstalled      string
+		boardAvailable      string
+		hasBoard            bool
+		checkForUpdatesOut  string
+		routerboardOut      string
+		sshError            error
+		wantErr             bool
+		errContains         string
+		expectOsUpdate      bool
+		expectBoardUpdate   bool
+		expectedOsStatus    *UpdateStatus
+		expectedBoardStatus *UpdateStatus
 	}{
 		{
 			name:         "RouterOS up to date, no board, check only",
@@ -134,8 +136,9 @@ func TestUpdates(t *testing.T) {
 			checkForUpdatesOut: `  status: Updated
   installed-version: 7.12.1
   latest-version: 7.12.1`,
-			routerboardOut: `  routerboard: no`,
-			wantErr:        false,
+			routerboardOut:   `  routerboard: no`,
+			wantErr:          false,
+			expectedOsStatus: &UpdateStatus{Installed: "7.12.1", Available: "7.12.1"},
 		},
 		{
 			name:         "RouterOS update available, no board, check only",
@@ -147,8 +150,9 @@ func TestUpdates(t *testing.T) {
 			checkForUpdatesOut: `  status: New version available
   installed-version: 7.11.3
   latest-version: 7.12.1`,
-			routerboardOut: `  routerboard: no`,
-			wantErr:        false,
+			routerboardOut:   `  routerboard: no`,
+			wantErr:          false,
+			expectedOsStatus: &UpdateStatus{Installed: "7.11.3", Available: "7.12.1"},
 		},
 		{
 			name:           "RouterOS and RouterBoard up to date, check only",
@@ -165,7 +169,9 @@ func TestUpdates(t *testing.T) {
 			routerboardOut: `  routerboard: yes
   current-firmware: 7.12.1
   upgrade-firmware: 7.12.1`,
-			wantErr: false,
+			wantErr:             false,
+			expectedOsStatus:    &UpdateStatus{Installed: "7.12.1", Available: "7.12.1"},
+			expectedBoardStatus: &UpdateStatus{Installed: "7.12.1", Available: "7.12.1"},
 		},
 		{
 			name:         "RouterOS update available, apply enabled, should update",
@@ -297,7 +303,7 @@ func TestUpdates(t *testing.T) {
 			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			// Execute the function
-			err := updates(ctx, tt.host, cfg, deps)
+			osStatus, boardStatus, err := updates(ctx, tt.host, cfg, deps)
 
 			// Verify error expectations
 			if (err != nil) != tt.wantErr {
@@ -309,7 +315,30 @@ func TestUpdates(t *testing.T) {
 				if tt.errContains != "" && (err == nil || !strings.Contains(err.Error(), tt.errContains)) {
 					t.Errorf("updates() error = %v, want error containing %q", err, tt.errContains)
 				}
+				// On error paths, statuses must be nil
+				if osStatus != nil {
+					t.Errorf("updates() osStatus = %v, want nil on error", osStatus)
+				}
+				if boardStatus != nil {
+					t.Errorf("updates() boardStatus = %v, want nil on error", boardStatus)
+				}
 				return
+			}
+
+			// Assert expected statuses on success paths
+			if tt.expectedOsStatus != nil {
+				if osStatus == nil {
+					t.Errorf("updates() osStatus = nil, want %+v", tt.expectedOsStatus)
+				} else if *osStatus != *tt.expectedOsStatus {
+					t.Errorf("updates() osStatus = %+v, want %+v", *osStatus, *tt.expectedOsStatus)
+				}
+			}
+			if tt.expectedBoardStatus != nil {
+				if boardStatus == nil {
+					t.Errorf("updates() boardStatus = nil, want %+v", tt.expectedBoardStatus)
+				} else if *boardStatus != *tt.expectedBoardStatus {
+					t.Errorf("updates() boardStatus = %+v, want %+v", *boardStatus, *tt.expectedBoardStatus)
+				}
 			}
 
 			// Verify update commands were executed when expected
@@ -901,15 +930,17 @@ func TestApplyUpdate(t *testing.T) {
 
 func TestApplyComponentUpdate(t *testing.T) {
 	tests := []struct {
-		name                string
-		component           string
-		updateCmd           string
-		checkBoth           bool
-		updateError         error
-		osOutput            string
-		osOutputAfterUpdate string
-		boardOutput         string
-		wantErr             bool
+		name                      string
+		component                 string
+		updateCmd                 string
+		checkBoth                 bool
+		updateError               error
+		osOutput                  string
+		osOutputAfterUpdate       string
+		boardOutput               string
+		wantErr                   bool
+		expectedOsStatusNotNil    bool
+		expectedBoardStatusNotNil bool
 	}{
 		{
 			name:        "RouterOS update successful",
@@ -921,7 +952,9 @@ func TestApplyComponentUpdate(t *testing.T) {
   installed-version: 7.14.1
    latest-version: 7.14.1
         status: System is already up to date`,
-			wantErr: false,
+			wantErr:                   false,
+			expectedOsStatusNotNil:    true,
+			expectedBoardStatusNotNil: false,
 		},
 		{
 			name:        "RouterOS update fails",
@@ -945,7 +978,9 @@ func TestApplyComponentUpdate(t *testing.T) {
              model: RB750Gr3
      current-firmware: 7.14.1
      upgrade-firmware: 7.14.1`,
-			wantErr: false,
+			wantErr:                   false,
+			expectedOsStatusNotNil:    true,
+			expectedBoardStatusNotNil: true,
 		},
 		{
 			name:        "RouterBoard update - OS check fails after update",
@@ -956,7 +991,9 @@ func TestApplyComponentUpdate(t *testing.T) {
 			osOutputAfterUpdate: `       channel: stable
   installed-version: 7.14.1
         status: ERROR: connection failed`,
-			wantErr: false, // Errors in post-update check are non-fatal
+			wantErr:                   false, // Errors in post-update check are non-fatal
+			expectedOsStatusNotNil:    false,
+			expectedBoardStatusNotNil: false,
 		},
 	}
 
@@ -1001,7 +1038,7 @@ func TestApplyComponentUpdate(t *testing.T) {
 
 			ctx := context.WithValue(context.Background(), core.SshManagerKey, &sshmocks_test.MockManager{})
 
-			err := applyComponentUpdate(initialMock, ctx, "test-router", tt.component, tt.updateCmd, tt.checkBoth, deps)
+			osStatus, boardStatus, err := applyComponentUpdate(initialMock, ctx, "test-router", tt.component, tt.updateCmd, tt.checkBoth, deps)
 
 			if tt.wantErr {
 				if err == nil {
@@ -1021,6 +1058,20 @@ func TestApplyComponentUpdate(t *testing.T) {
 
 			if !closeCalled {
 				t.Errorf("Connection was not closed")
+			}
+
+			// Assert returned statuses
+			if tt.expectedOsStatusNotNil && osStatus == nil {
+				t.Errorf("applyComponentUpdate() osStatus = nil, want non-nil")
+			}
+			if !tt.expectedOsStatusNotNil && osStatus != nil {
+				t.Errorf("applyComponentUpdate() osStatus = %+v, want nil", osStatus)
+			}
+			if tt.expectedBoardStatusNotNil && boardStatus == nil {
+				t.Errorf("applyComponentUpdate() boardStatus = nil, want non-nil")
+			}
+			if !tt.expectedBoardStatusNotNil && boardStatus != nil {
+				t.Errorf("applyComponentUpdate() boardStatus = %+v, want nil", boardStatus)
 			}
 		})
 	}
@@ -1153,7 +1204,7 @@ func TestUpdatesRouterOSStagingRouterBoardFirmware(t *testing.T) {
 			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			// Execute the function
-			err := updates(ctx, "router.example.com", cfg, deps)
+			_, _, err := updates(ctx, "router.example.com", cfg, deps)
 
 			// Should not error
 			if err != nil {

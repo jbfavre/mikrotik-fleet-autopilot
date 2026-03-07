@@ -59,7 +59,9 @@ var Command = []*cli.Command{
 					fmt.Printf("❌ %s: Updates failed\n", host)
 					lastErr = err
 					// Continue with other hosts even if one fails
-				} else {
+				} else if osStatus == nil {
+				fmt.Printf("❓ %s: Update applied, status could not be verified\n", host)
+			} else {
 					fmt.Println(formatUpdateResult(host, osStatus, boardStatus))
 				}
 			}
@@ -135,9 +137,8 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		if err != nil {
 			return nil, nil, err
 		}
-		if newOsStatus != nil {
-			finalOsStatus = newOsStatus
-		}
+		// nil means the update succeeded but the post-update status check failed (e.g. DNS not yet available)
+		finalOsStatus = newOsStatus
 		if newBoardStatus != nil {
 			finalBoardStatus = newBoardStatus
 		}
@@ -192,12 +193,17 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		if err != nil {
 			return nil, nil, err
 		}
-		if newOsStatus != nil {
-			finalOsStatus = newOsStatus
-		}
+		// nil means the update succeeded but the post-update status check failed (e.g. DNS not yet available)
+		finalOsStatus = newOsStatus
 		if newBoardStatus != nil {
 			finalBoardStatus = newBoardStatus
 		}
+	}
+
+	if finalOsStatus == nil {
+		// At least one update was applied but the post-update status check failed (e.g. DNS not yet available)
+		slog.Warn("post-update status check failed, update outcome unverified", "host", host)
+		return nil, nil, nil
 	}
 
 	return finalOsStatus, finalBoardStatus, nil

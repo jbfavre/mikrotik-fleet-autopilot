@@ -108,23 +108,25 @@ func TestUpdatesParameterMapping(t *testing.T) {
 
 func TestUpdates(t *testing.T) {
 	tests := []struct {
-		name                string
-		host                string
-		applyUpdates        bool
-		osInstalled         string
-		osAvailable         string
-		boardInstalled      string
-		boardAvailable      string
-		hasBoard            bool
-		checkForUpdatesOut  string
-		routerboardOut      string
-		sshError            error
-		wantErr             bool
-		errContains         string
-		expectOsUpdate      bool
-		expectBoardUpdate   bool
-		expectedOsStatus    *UpdateStatus
-		expectedBoardStatus *UpdateStatus
+		name                      string
+		host                      string
+		applyUpdates              bool
+		osInstalled               string
+		osAvailable               string
+		boardInstalled            string
+		boardAvailable            string
+		hasBoard                  bool
+		checkForUpdatesOut        string
+		checkForUpdatesPostUpdate string // if set, returned by factory connections instead of checkForUpdatesOut
+		routerboardOut            string
+		sshError                  error
+		wantErr                   bool
+		errContains               string
+		expectOsUpdate            bool
+		expectBoardUpdate         bool
+		expectedOsStatus          *UpdateStatus
+		expectedBoardStatus       *UpdateStatus
+		expectNilStatuses         bool // true when update succeeded but post-check verification failed
 	}{
 		{
 			name:         "RouterOS up to date, no board, check only",
@@ -242,6 +244,23 @@ func TestUpdates(t *testing.T) {
 			wantErr:        true,
 			errContains:    "ERROR",
 		},
+		{
+			name:         "RouterOS update applied, post-check DNS failure (unverified outcome)",
+			host:         "router9.example.com",
+			applyUpdates: true,
+			osInstalled:  "7.11.3",
+			osAvailable:  "7.12.1",
+			hasBoard:     false,
+			checkForUpdatesOut: `  status: New version available
+  installed-version: 7.11.3
+  latest-version: 7.12.1`,
+			// After the update and reboot, DNS is not yet available
+			checkForUpdatesPostUpdate: `  status: ERROR: could not resolve dns name (timeout)`,
+			routerboardOut:            `  routerboard: no`,
+			expectOsUpdate:            true,
+			wantErr:                   false,
+			expectNilStatuses:         true, // Update succeeded but status could not be verified
+		},
 	}
 
 	for _, tt := range tests {
@@ -253,6 +272,7 @@ func TestUpdates(t *testing.T) {
 			// Mock SSH connection factory
 			mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
 				connectionCount++
+				isPostUpdate := connectionCount > 1
 
 				if tt.sshError != nil {
 					return nil, tt.sshError
@@ -264,6 +284,9 @@ func TestUpdates(t *testing.T) {
 
 						// Route commands to appropriate responses
 						if cmd == "/system/package/update/check-for-updates" {
+							if isPostUpdate && tt.checkForUpdatesPostUpdate != "" {
+								return tt.checkForUpdatesPostUpdate, nil
+							}
 							return tt.checkForUpdatesOut, nil
 						}
 						if cmd == "/system/routerboard/print" {
@@ -326,22 +349,32 @@ func TestUpdates(t *testing.T) {
 			}
 
 			// Assert expected statuses on success paths
-			if tt.expectedOsStatus != nil {
+			if tt.expectNilStatuses {
+				// Update succeeded but post-update status check failed (e.g. DNS not yet available)
+				if osStatus != nil {
+					t.Errorf("updates() osStatus = %+v, want nil (unverified outcome)", osStatus)
+				}
+				if boardStatus != nil {
+					t.Errorf("updates() boardStatus = %+v, want nil (unverified outcome)", boardStatus)
+				}
+			} else if tt.expectedOsStatus != nil {
 				if osStatus == nil {
 					t.Errorf("updates() osStatus = nil, want %+v", tt.expectedOsStatus)
 				} else if *osStatus != *tt.expectedOsStatus {
 					t.Errorf("updates() osStatus = %+v, want %+v", *osStatus, *tt.expectedOsStatus)
 				}
 			}
-			if tt.expectedBoardStatus != nil {
-				if boardStatus == nil {
-					t.Errorf("updates() boardStatus = nil, want %+v", tt.expectedBoardStatus)
-				} else if *boardStatus != *tt.expectedBoardStatus {
-					t.Errorf("updates() boardStatus = %+v, want %+v", *boardStatus, *tt.expectedBoardStatus)
+			if !tt.expectNilStatuses {
+				if tt.expectedBoardStatus != nil {
+					if boardStatus == nil {
+						t.Errorf("updates() boardStatus = nil, want %+v", tt.expectedBoardStatus)
+					} else if *boardStatus != *tt.expectedBoardStatus {
+						t.Errorf("updates() boardStatus = %+v, want %+v", *boardStatus, *tt.expectedBoardStatus)
+					}
+				} else if !tt.hasBoard && boardStatus != nil {
+					// For check-only / no-RouterBoard cases, ensure no board status is returned
+					t.Errorf("updates() boardStatus = %+v, want nil when no RouterBoard status is expected", boardStatus)
 				}
-			} else if !tt.hasBoard && boardStatus != nil {
-				// For check-only / no-RouterBoard cases, ensure no board status is returned
-				t.Errorf("updates() boardStatus = %+v, want nil when no RouterBoard status is expected", boardStatus)
 			}
 
 			// Verify update commands were executed when expected

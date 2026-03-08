@@ -234,7 +234,8 @@ func TestUpdates(t *testing.T) {
 			applyUpdates: false,
 			sshError:     fmt.Errorf("connection timeout"),
 			wantErr:      true,
-			errContains:  "failed to create SSH connection",
+			wantOffline:  true,
+			errContains:  "failed to connect",
 		},
 		{
 			name:         "Check for updates command fails",

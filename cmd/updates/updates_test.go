@@ -626,34 +626,33 @@ func TestGetUpdateStatus(t *testing.T) {
 func TestFormatUpdateResult(t *testing.T) {
 	tests := []struct {
 		name        string
-		host        string
 		osStatus    *UpdateStatus
 		boardStatus *UpdateStatus
-		want        string
+		wantEmoji   string
+		wantMsg     string
 	}{
 		{
 			name: "Virtualized router - up to date",
-			host: "router1.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.14.1",
 				Available: "7.14.1",
 			},
 			boardStatus: nil,
-			want:        "✅ router1.example.com is up-to-date (RouterOS: 7.14.1)",
+			wantEmoji:   "✅",
+			wantMsg:     "is up-to-date (RouterOS: 7.14.1)",
 		},
 		{
 			name: "Virtualized router - update available",
-			host: "router1.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.14.0",
 				Available: "7.14.1",
 			},
 			boardStatus: nil,
-			want:        "⚠️  router1.example.com upgrade available (RouterOS: 7.14.0 → 7.14.1)",
+			wantEmoji:   "⚠️",
+			wantMsg:     "upgrade available (RouterOS: 7.14.0 → 7.14.1)",
 		},
 		{
 			name: "Physical router - both up to date",
-			host: "router2.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.14.1",
 				Available: "7.14.1",
@@ -662,11 +661,11 @@ func TestFormatUpdateResult(t *testing.T) {
 				Installed: "7.14.1",
 				Available: "7.14.1",
 			},
-			want: "✅ router2.example.com is up-to-date (RouterOS: 7.14.1, RouterBoard: 7.14.1)",
+			wantEmoji: "✅",
+			wantMsg:   "is up-to-date (RouterOS: 7.14.1, RouterBoard: 7.14.1)",
 		},
 		{
 			name: "Physical router - OS update available",
-			host: "router2.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.14.0",
 				Available: "7.14.1",
@@ -675,11 +674,11 @@ func TestFormatUpdateResult(t *testing.T) {
 				Installed: "7.14.1",
 				Available: "7.14.1",
 			},
-			want: "⚠️  router2.example.com upgrade available (RouterOS: 7.14.0 → 7.14.1, RouterBoard: 7.14.1 → pending)",
+			wantEmoji: "⚠️",
+			wantMsg:   "upgrade available (RouterOS: 7.14.0 → 7.14.1, RouterBoard: 7.14.1 → pending)",
 		},
 		{
 			name: "Physical router - Board update available",
-			host: "router2.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.14.1",
 				Available: "7.14.1",
@@ -688,11 +687,11 @@ func TestFormatUpdateResult(t *testing.T) {
 				Installed: "7.14.0",
 				Available: "7.14.1",
 			},
-			want: "⚠️  router2.example.com upgrade available (RouterOS: 7.14.1 → 7.14.1, RouterBoard: 7.14.0 → 7.14.1)",
+			wantEmoji: "⚠️",
+			wantMsg:   "upgrade available (RouterOS: 7.14.1 → 7.14.1, RouterBoard: 7.14.0 → 7.14.1)",
 		},
 		{
 			name: "Physical router - both updates available",
-			host: "router2.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.13.5",
 				Available: "7.14.1",
@@ -701,15 +700,19 @@ func TestFormatUpdateResult(t *testing.T) {
 				Installed: "7.13.5",
 				Available: "7.14.1",
 			},
-			want: "⚠️  router2.example.com upgrade available (RouterOS: 7.13.5 → 7.14.1, RouterBoard: 7.13.5 → 7.14.1)",
+			wantEmoji: "⚠️",
+			wantMsg:   "upgrade available (RouterOS: 7.13.5 → 7.14.1, RouterBoard: 7.13.5 → 7.14.1)",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatUpdateResult(tt.host, tt.osStatus, tt.boardStatus)
-			if got != tt.want {
-				t.Errorf("formatUpdateResult() = %q, want %q", got, tt.want)
+			gotEmoji, gotMsg := formatUpdateResult(tt.osStatus, tt.boardStatus)
+			if gotEmoji != tt.wantEmoji {
+				t.Errorf("formatUpdateResult() emoji = %q, want %q", gotEmoji, tt.wantEmoji)
+			}
+			if gotMsg != tt.wantMsg {
+				t.Errorf("formatUpdateResult() msg = %q, want %q", gotMsg, tt.wantMsg)
 			}
 		})
 	}

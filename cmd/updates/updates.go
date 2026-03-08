@@ -65,16 +65,17 @@ var Command = []*cli.Command{
 				line.UpdateStep("⏳", "connecting…")
 				osStatus, boardStatus, err := updates(ctx, host, updatesCfg, deps)
 				if err != nil {
-					line.CompleteStep("⏳")
+					line.CompleteStep("❌")
 					line.FinishError("updates failed: " + err.Error())
 					lastErr = err
 					// Continue with other hosts even if one fails
 				} else if osStatus == nil {
-					line.CompleteStep("⏳")
-					line.Finish("❓ update applied, status unverified")
+					line.CompleteStep("❓")
+					line.Finish("❓", "update applied, status unverified")
 				} else {
-					line.CompleteStep("✅")
-					line.Finish(formatUpdateResult(host, osStatus, boardStatus))
+					emoji, msg := formatUpdateResult(osStatus, boardStatus)
+					line.CompleteStep(emoji)
+					line.Finish(emoji, msg)
 				}
 			}
 			return lastErr
@@ -329,21 +330,22 @@ func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, c
 	return nil, nil, nil
 }
 
-// formatUpdateResult formats the update result into a string
-func formatUpdateResult(host string, osStatus *UpdateStatus, boardStatus *UpdateStatus) string {
+// formatUpdateResult returns the overall status emoji and a human-readable message
+// describing the update result. The hostname is not included; the caller (via display) handles it.
+func formatUpdateResult(osStatus *UpdateStatus, boardStatus *UpdateStatus) (string, string) {
 	osUpToDate := osStatus.Installed == osStatus.Available
 	if boardStatus == nil {
 		// Virtualized router or RouterOS-only update
 		if osUpToDate {
-			return fmt.Sprintf("✅ %s is up-to-date (RouterOS: %s)", host, osStatus.Installed)
+			return "✅", fmt.Sprintf("is up-to-date (RouterOS: %s)", osStatus.Installed)
 		}
-		return fmt.Sprintf("⚠️  %s upgrade available (RouterOS: %s → %s)", host, osStatus.Installed, osStatus.Available)
+		return "⚠️", fmt.Sprintf("upgrade available (RouterOS: %s → %s)", osStatus.Installed, osStatus.Available)
 	}
 
 	// Physical router with RouterBoard
 	boardUpToDate := boardStatus.Installed == boardStatus.Available
 	if osUpToDate && boardUpToDate {
-		return fmt.Sprintf("✅ %s is up-to-date (RouterOS: %s, RouterBoard: %s)", host, osStatus.Installed, boardStatus.Installed)
+		return "✅", fmt.Sprintf("is up-to-date (RouterOS: %s, RouterBoard: %s)", osStatus.Installed, boardStatus.Installed)
 	}
 
 	var boardUpgrade string
@@ -356,7 +358,7 @@ func formatUpdateResult(host string, osStatus *UpdateStatus, boardStatus *Update
 	} else {
 		boardUpgrade = fmt.Sprintf("%s → %s", boardStatus.Installed, boardStatus.Available)
 	}
-	return fmt.Sprintf("⚠️  %s upgrade available (RouterOS: %s → %s, RouterBoard: %s)", host, osStatus.Installed, osStatus.Available, boardUpgrade)
+	return "⚠️", fmt.Sprintf("upgrade available (RouterOS: %s → %s, RouterBoard: %s)", osStatus.Installed, osStatus.Available, boardUpgrade)
 }
 
 // Generic update status fetcher for RouterOS and RouterBoard

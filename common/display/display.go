@@ -23,16 +23,17 @@ type completedStep struct {
 type HostLine struct {
 	mu           sync.Mutex
 	hostname     string
+	overallEmoji string // ⏳ while in-progress; set to the final status emoji by Finish
 	history      []completedStep
 	currentEmoji string
 	currentLabel string
 	done         bool
-	finalStatus  string
+	finalMessage string // set by Finish; does not include the hostname or overall emoji
 	liveMode     bool
 	out          io.Writer
 }
 
-// UpdateStep sets the current in-flight step label (no-op in fallback mode).
+// UpdateStep sets the current in-flight step label.
 func (h *HostLine) UpdateStep(emoji, label string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -49,55 +50,67 @@ func (h *HostLine) CompleteStep(emoji string) {
 	h.currentLabel = ""
 }
 
-// Finish replaces the line with the provided final status string.
-func (h *HostLine) Finish(finalStatus string) {
+// Finish marks the line as done with an overall status emoji and a final message.
+// overallEmoji should be one of ✅, ❌, ❓, ⚠️.
+// message is the human-readable result description (no hostname, no leading emoji).
+func (h *HostLine) Finish(overallEmoji, message string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.done = true
-	h.finalStatus = finalStatus
+	h.overallEmoji = overallEmoji
+	h.finalMessage = message
 	if !h.liveMode {
-		fmt.Fprintf(h.out, "%s\n", finalStatus)
+		fmt.Fprintf(h.out, "%s\n", h.renderUnlocked())
 	}
 }
 
-// FinishError replaces the line with an error final status.
+// FinishError marks the line as done with ❌ and the given error message.
 func (h *HostLine) FinishError(msg string) {
-	h.Finish(fmt.Sprintf("❌ %s: %s", h.hostname, msg))
+	h.Finish("❌", msg)
 }
 
-// render returns the current display line for this host (called from liveterm goroutine, lock held outside).
-func (h *HostLine) render() string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.done {
-		return h.finalStatus
-	}
-
+// renderUnlocked renders the line. The caller must hold h.mu.
+func (h *HostLine) renderUnlocked() string {
 	hostname := fmt.Sprintf("%-*s", hostnameWidth, h.hostname)
 
-	// Build summary from completed step emojis
+	// Build summary from completed step emojis.
 	var sb strings.Builder
 	for _, s := range h.history {
 		sb.WriteString(s.emoji)
 	}
 	summary := sb.String()
 
+	if h.done {
+		// Format: [overallEmoji] [hostname] [step emojis] [finalMessage]
+		if summary == "" {
+			return fmt.Sprintf("%s %s  %s", h.overallEmoji, hostname, h.finalMessage)
+		}
+		return fmt.Sprintf("%s %s  %s %s", h.overallEmoji, hostname, summary, h.finalMessage)
+	}
+
+	// In-progress: [overallEmoji] [hostname] [step emojis] [currentEmoji currentLabel]
 	var current string
 	if h.currentEmoji != "" || h.currentLabel != "" {
 		current = fmt.Sprintf("%s %s", h.currentEmoji, h.currentLabel)
 	}
 
 	if summary == "" && current == "" {
-		return hostname
+		return fmt.Sprintf("%s %s", h.overallEmoji, hostname)
 	}
 	if summary == "" {
-		return fmt.Sprintf("%s  %s", hostname, current)
+		return fmt.Sprintf("%s %s  %s", h.overallEmoji, hostname, current)
 	}
 	if current == "" {
-		return fmt.Sprintf("%s  %s", hostname, summary)
+		return fmt.Sprintf("%s %s  %s", h.overallEmoji, hostname, summary)
 	}
-	return fmt.Sprintf("%s  %s %s", hostname, summary, current)
+	return fmt.Sprintf("%s %s  %s %s", h.overallEmoji, hostname, summary, current)
+}
+
+// render returns the current display line for this host.
+func (h *HostLine) render() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.renderUnlocked()
 }
 
 // LiveDisplay manages per-host live output lines.
@@ -119,9 +132,10 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 	lines := make([]*HostLine, len(hosts))
 	for i, host := range hosts {
 		lines[i] = &HostLine{
-			hostname: host,
-			liveMode: liveMode,
-			out:      out,
+			hostname:     host,
+			overallEmoji: "⏳",
+			liveMode:     liveMode,
+			out:          out,
 		}
 	}
 

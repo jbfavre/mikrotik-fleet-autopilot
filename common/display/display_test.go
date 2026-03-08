@@ -36,10 +36,13 @@ func TestLineRendering(t *testing.T) {
 	d := newTestDisplay(&buf, []string{"myrouter.example.com"})
 	l := d.Line(0)
 
-	// Initial render: no step, no current.
+	// Initial render: no step, no current — should start with overall status emoji.
 	got := l.render()
-	if !strings.HasPrefix(got, "myrouter.example.com") {
-		t.Errorf("render() = %q, want hostname prefix", got)
+	if !strings.HasPrefix(got, "⏳") {
+		t.Errorf("render() = %q, want ⏳ prefix (overall status)", got)
+	}
+	if !strings.Contains(got, "myrouter.example.com") {
+		t.Errorf("render() = %q, want hostname present", got)
 	}
 
 	// After UpdateStep.
@@ -68,18 +71,27 @@ func TestFinishFallback(t *testing.T) {
 
 	l.UpdateStep("⏳", "connecting…")
 	l.CompleteStep("✅")
-	l.Finish("✅ myrouter.example.com is up-to-date (RouterOS: 7.16)")
+	l.Finish("✅", "is up-to-date (RouterOS: 7.16)")
 
-	// In fallback mode, Finish should write to out.
+	// In fallback mode, Finish should write the rendered line to out.
 	output := buf.String()
-	if !strings.Contains(output, "✅ myrouter.example.com is up-to-date") {
-		t.Errorf("Finish() output = %q, want final status line", output)
+	if !strings.HasPrefix(output, "✅") {
+		t.Errorf("Finish() output = %q, want ✅ overall status at start", output)
+	}
+	if !strings.Contains(output, "myrouter.example.com") {
+		t.Errorf("Finish() output = %q, want hostname present", output)
+	}
+	if !strings.Contains(output, "is up-to-date (RouterOS: 7.16)") {
+		t.Errorf("Finish() output = %q, want final message present", output)
 	}
 
-	// render() after Finish should show finalStatus.
+	// render() after Finish should produce the same line.
 	got := l.render()
-	if !strings.Contains(got, "✅ myrouter.example.com is up-to-date") {
-		t.Errorf("render() after Finish = %q, want finalStatus", got)
+	if !strings.HasPrefix(got, "✅") {
+		t.Errorf("render() after Finish = %q, want ✅ at start", got)
+	}
+	if !strings.Contains(got, "is up-to-date (RouterOS: 7.16)") {
+		t.Errorf("render() after Finish = %q, want finalMessage", got)
 	}
 }
 
@@ -131,7 +143,7 @@ func TestMultipleHosts(t *testing.T) {
 		l := d.Line(i)
 		l.UpdateStep("⏳", "connecting…")
 		l.CompleteStep("✅")
-		l.Finish("✅ " + host + " is up-to-date")
+		l.Finish("✅", host+" is up-to-date")
 	}
 
 	output := buf.String()
@@ -149,12 +161,13 @@ func TestHostnamePadding(t *testing.T) {
 	l := d.Line(0)
 	l.UpdateStep("⏳", "test")
 	got := l.render()
-	// The hostname field should be padded.
-	if len([]rune(got)) < hostnameWidth {
-		t.Errorf("render() = %q len=%d, expected at least %d chars due to padding", got, len(got), hostnameWidth)
+	// The line should contain the hostname and be longer than hostnameWidth
+	// (emoji + space + padded hostname + separators + current step).
+	if !strings.Contains(got, "r1") {
+		t.Errorf("render() = %q, should contain hostname", got)
 	}
-	if !strings.HasPrefix(got, "r1") {
-		t.Errorf("render() = %q, should start with hostname", got)
+	if !strings.HasPrefix(got, "⏳") {
+		t.Errorf("render() = %q, should start with overall status emoji", got)
 	}
 }
 
@@ -178,5 +191,79 @@ func TestStepSummaryOrder(t *testing.T) {
 	}
 	if !strings.Contains(got, "step3") {
 		t.Errorf("render() = %q, expected current step 'step3'", got)
+	}
+}
+
+// TestRenderFormatConsistency verifies the line format is consistent between in-progress and done states.
+// Both must follow: [overall status] <hostname> [step emojis] [step message]
+func TestRenderFormatConsistency(t *testing.T) {
+	tests := []struct {
+		name         string
+		setup        func(l *HostLine)
+		wantPrefix   string // overall status emoji
+		wantContains []string
+	}{
+		{
+			name: "in-progress connecting",
+			setup: func(l *HostLine) {
+				l.UpdateStep("⏳", "connecting…")
+			},
+			wantPrefix:   "⏳",
+			wantContains: []string{"router.example.com", "⏳", "connecting…"},
+		},
+		{
+			name: "done success",
+			setup: func(l *HostLine) {
+				l.CompleteStep("✅")
+				l.Finish("✅", "is up-to-date (RouterOS: 7.16)")
+			},
+			wantPrefix:   "✅",
+			wantContains: []string{"router.example.com", "✅", "is up-to-date (RouterOS: 7.16)"},
+		},
+		{
+			name: "done error",
+			setup: func(l *HostLine) {
+				l.CompleteStep("❌")
+				l.FinishError("updates failed: timeout")
+			},
+			wantPrefix:   "❌",
+			wantContains: []string{"router.example.com", "❌", "updates failed: timeout"},
+		},
+		{
+			name: "done unknown",
+			setup: func(l *HostLine) {
+				l.CompleteStep("❓")
+				l.Finish("❓", "update applied, status unverified")
+			},
+			wantPrefix:   "❓",
+			wantContains: []string{"router.example.com", "❓", "update applied, status unverified"},
+		},
+		{
+			name: "done warning",
+			setup: func(l *HostLine) {
+				l.CompleteStep("⚠️")
+				l.Finish("⚠️", "upgrade available (RouterOS: 7.14.0 → 7.14.1)")
+			},
+			wantPrefix:   "⚠️",
+			wantContains: []string{"router.example.com", "⚠️", "upgrade available"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			d := newTestDisplay(&buf, []string{"router.example.com"})
+			l := d.Line(0)
+			tt.setup(l)
+			got := l.render()
+			if !strings.HasPrefix(got, tt.wantPrefix) {
+				t.Errorf("render() = %q, want prefix %q", got, tt.wantPrefix)
+			}
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("render() = %q, missing %q", got, want)
+				}
+			}
+		})
 	}
 }

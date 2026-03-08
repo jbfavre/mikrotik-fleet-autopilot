@@ -68,7 +68,7 @@ var Command = []*cli.Command{
 			var lastErr error
 			for i, host := range coreCfg.Hosts {
 				line := disp.Line(i)
-				line.UpdateStep("⏳", "connecting…")
+				line.UpdateStep("⏳", "checking updates…")
 				osStatus, boardStatus, err := updates(ctx, host, updatesCfg, deps)
 				if errors.Is(err, ErrCannotCheckUpdates) {
 					line.CompleteStep("❓")

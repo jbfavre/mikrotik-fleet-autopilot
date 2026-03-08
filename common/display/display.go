@@ -173,7 +173,7 @@ func (d *LiveDisplay) Stop() {
 	if !d.liveMode {
 		return
 	}
-	liveterm.Stop(false)
+	liveterm.Stop(true)
 }
 
 // renderLines returns all host lines for liveterm to display.

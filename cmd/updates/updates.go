@@ -2,6 +2,7 @@ package updates
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,6 +19,11 @@ import (
 type UpdatesConfig struct {
 	UpdatesApply bool
 }
+
+// ErrCannotCheckUpdates is returned when the router is reachable via SSH but
+// cannot contact the update server (e.g., it has no internet access).
+// Callers should treat this as an unknown outcome, not a hard failure.
+var ErrCannotCheckUpdates = errors.New("cannot check for updates")
 
 // UpdatesDependencies holds injectable dependencies for testing
 type UpdatesDependencies struct {
@@ -64,7 +70,11 @@ var Command = []*cli.Command{
 				line := disp.Line(i)
 				line.UpdateStep("⏳", "connecting…")
 				osStatus, boardStatus, err := updates(ctx, host, updatesCfg, deps)
-				if err != nil {
+				if errors.Is(err, ErrCannotCheckUpdates) {
+					line.CompleteStep("❓")
+					line.Finish("❓", err.Error())
+					// Offline is unknown, not a fatal failure; don't set lastErr.
+				} else if err != nil {
 					line.CompleteStep("❌")
 					line.FinishError("updates failed: " + err.Error())
 					lastErr = err
@@ -220,7 +230,9 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	return finalOsStatus, finalBoardStatus, nil
 }
 
-// checkCurrentStatus retrieves the current RouterOS and RouterBoard status
+// checkCurrentStatus retrieves the current RouterOS and RouterBoard status.
+// If the router is reachable via SSH but cannot contact the update server,
+// the returned error wraps ErrCannotCheckUpdates.
 func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus, error) {
 	slog.Info("Checking RouterOS update status")
 	osStatus, err := getUpdateStatus(
@@ -232,7 +244,7 @@ func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus,
 		false,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %v", ErrCannotCheckUpdates, err)
 	}
 	slog.Debug("RouterOS status", "value", osStatus)
 	if osStatus.Installed == osStatus.Available {
@@ -251,7 +263,7 @@ func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus,
 		true,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %v", ErrCannotCheckUpdates, err)
 	}
 
 	if boardStatus == nil {

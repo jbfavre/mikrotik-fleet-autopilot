@@ -2,6 +2,7 @@ package updates
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -121,6 +122,7 @@ func TestUpdates(t *testing.T) {
 		routerboardOut            string
 		sshError                  error
 		wantErr                   bool
+		wantOffline               bool // true when err should wrap ErrCannotCheckUpdates (router has no internet)
 		errContains               string
 		expectOsUpdate            bool
 		expectBoardUpdate         bool
@@ -242,7 +244,32 @@ func TestUpdates(t *testing.T) {
   message: Could not download package list`,
 			routerboardOut: `  routerboard: no`,
 			wantErr:        true,
+			wantOffline:    true,
 			errContains:    "ERROR",
+		},
+		{
+			name:         "Router offline - DNS resolution failure",
+			host:         "router-offline.example.com",
+			applyUpdates: false,
+			checkForUpdatesOut: `  channel: stable
+  installed-version: 7.14.1
+  status: ERROR: could not resolve dns name (timeout)`,
+			routerboardOut: `  routerboard: no`,
+			wantErr:        true,
+			wantOffline:    true,
+			errContains:    "could not resolve dns name",
+		},
+		{
+			name:         "Router offline - no route to host",
+			host:         "router-no-route.example.com",
+			applyUpdates: false,
+			checkForUpdatesOut: `  channel: stable
+  installed-version: 7.14.1
+  status: ERROR: no-route-to-host`,
+			routerboardOut: `  routerboard: no`,
+			wantErr:        true,
+			wantOffline:    true,
+			errContains:    "no-route-to-host",
 		},
 		{
 			name:         "RouterOS update applied, post-check DNS failure (unverified outcome)",
@@ -337,6 +364,12 @@ func TestUpdates(t *testing.T) {
 			if tt.wantErr {
 				if tt.errContains != "" && (err == nil || !strings.Contains(err.Error(), tt.errContains)) {
 					t.Errorf("updates() error = %v, want error containing %q", err, tt.errContains)
+				}
+				if tt.wantOffline && !errors.Is(err, ErrCannotCheckUpdates) {
+					t.Errorf("updates() error = %v, want errors.Is(err, ErrCannotCheckUpdates) == true", err)
+				}
+				if !tt.wantOffline && errors.Is(err, ErrCannotCheckUpdates) {
+					t.Errorf("updates() error = %v, got ErrCannotCheckUpdates but wantOffline == false", err)
 				}
 				// On error paths, statuses must be nil
 				if osStatus != nil {
@@ -746,6 +779,7 @@ func TestCheckCurrentStatus(t *testing.T) {
 		wantBoardAvailable string
 		wantBoardNil       bool
 		wantErr            bool
+		wantOffline        bool // true when error should wrap ErrCannotCheckUpdates
 	}{
 		{
 			name: "Physical router - both up to date",
@@ -800,7 +834,7 @@ func TestCheckCurrentStatus(t *testing.T) {
 			wantErr:         false,
 		},
 		{
-			name: "RouterOS check fails",
+			name: "RouterOS check fails - router offline (DNS)",
 			osOutput: `       channel: stable
   installed-version: 7.14.1
         status: ERROR: could not resolve dns name`,
@@ -808,6 +842,18 @@ func TestCheckCurrentStatus(t *testing.T) {
 			boardOutput: "",
 			boardError:  nil,
 			wantErr:     true,
+			wantOffline: true,
+		},
+		{
+			name: "RouterOS check fails - router offline (no route)",
+			osOutput: `       channel: stable
+  installed-version: 7.14.1
+        status: ERROR: no-route-to-host`,
+			osError:     nil,
+			boardOutput: "",
+			boardError:  nil,
+			wantErr:     true,
+			wantOffline: true,
 		},
 	}
 
@@ -830,6 +876,13 @@ func TestCheckCurrentStatus(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("checkCurrentStatus() error = nil, wantErr = true")
+					return
+				}
+				if tt.wantOffline && !errors.Is(err, ErrCannotCheckUpdates) {
+					t.Errorf("checkCurrentStatus() error = %v, want errors.Is(err, ErrCannotCheckUpdates) == true", err)
+				}
+				if !tt.wantOffline && errors.Is(err, ErrCannotCheckUpdates) {
+					t.Errorf("checkCurrentStatus() error = %v, got ErrCannotCheckUpdates but wantOffline == false", err)
 				}
 				return
 			}

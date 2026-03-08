@@ -113,6 +113,12 @@ func (h *HostLine) render() string {
 	return h.renderUnlocked()
 }
 
+// singleton guard: only one LiveDisplay may drive liveterm at a time.
+var (
+	singletonMu    sync.Mutex
+	activeLiveDisp *LiveDisplay
+)
+
 // LiveDisplay manages per-host live output lines.
 type LiveDisplay struct {
 	lines    []*HostLine
@@ -152,19 +158,55 @@ func (d *LiveDisplay) Line(i int) *HostLine {
 }
 
 // Start begins live output. In fallback mode this is a no-op.
+// Only one LiveDisplay may be in live mode at a time: if another display is
+// already active, Start falls back to plain-text mode so that the existing
+// liveterm instance is not disturbed.
 func (d *LiveDisplay) Start() {
 	if !d.liveMode {
 		return
 	}
+
+	// Try to claim the singleton slot. The lock is released before calling
+	// liveterm.Start so the refresh goroutine can acquire it if needed.
+	if !d.tryClaim() {
+		// Another display is already running; fall back to plain text.
+		d.liveMode = false
+		for _, l := range d.lines {
+			l.liveMode = false
+		}
+		return
+	}
+
 	liveterm.RefreshInterval = 100 * time.Millisecond
 	liveterm.Output = d.out
 	liveterm.SetMultiLinesUpdateFx(d.renderLines)
 	if err := liveterm.Start(); err != nil {
 		// If liveterm fails to start (e.g. no real TTY despite fd check), fall back.
+		d.release()
 		d.liveMode = false
 		for _, l := range d.lines {
 			l.liveMode = false
 		}
+	}
+}
+
+// tryClaim atomically claims the singleton slot. Returns true if successful.
+func (d *LiveDisplay) tryClaim() bool {
+	singletonMu.Lock()
+	defer singletonMu.Unlock()
+	if activeLiveDisp != nil {
+		return false
+	}
+	activeLiveDisp = d
+	return true
+}
+
+// release clears the singleton slot if this display holds it.
+func (d *LiveDisplay) release() {
+	singletonMu.Lock()
+	defer singletonMu.Unlock()
+	if activeLiveDisp == d {
+		activeLiveDisp = nil
 	}
 }
 
@@ -173,6 +215,7 @@ func (d *LiveDisplay) Stop() {
 	if !d.liveMode {
 		return
 	}
+	defer d.release()
 	liveterm.Stop(false)
 }
 

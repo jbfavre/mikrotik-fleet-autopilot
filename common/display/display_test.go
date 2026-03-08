@@ -12,6 +12,17 @@ func newTestDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
 	return New(out, hosts, true)
 }
 
+// newLiveModeDisplay creates a LiveDisplay that believes it is in live mode,
+// without actually starting liveterm (for singleton guard testing).
+func newLiveModeDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
+	d := New(out, hosts, true) // starts in fallback
+	d.liveMode = true          // pretend it is live-capable
+	for _, l := range d.lines {
+		l.liveMode = true
+	}
+	return d
+}
+
 func TestNewFallbackMode(t *testing.T) {
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, []string{"router1", "router2"})
@@ -266,4 +277,79 @@ func TestRenderFormatConsistency(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSingletonFallback verifies that a second LiveDisplay falls back to
+// plain-text mode when another display already holds the singleton lock.
+func TestSingletonFallback(t *testing.T) {
+	resetSingleton(t)
+
+	var buf1, buf2 bytes.Buffer
+
+	// First display claims the singleton by setting activeLiveDisp directly
+	// (we cannot actually start liveterm in a test environment with no TTY,
+	// but the guard is checked before liveterm.Start, so we simulate an
+	// already-active display by inserting it into the singleton slot).
+	first := newLiveModeDisplay(&buf1, []string{"router1"})
+	singletonMu.Lock()
+	activeLiveDisp = first
+	singletonMu.Unlock()
+
+	// A second display in live mode should fall back to plain text.
+	second := newLiveModeDisplay(&buf2, []string{"router2"})
+	second.Start() // should detect activeLiveDisp != nil and fall back
+
+	if second.liveMode {
+		t.Error("second Start() should have fallen back to plain text when a display is already active")
+	}
+	for _, l := range second.lines {
+		if l.liveMode {
+			t.Error("HostLine.liveMode should be false after singleton fallback")
+		}
+	}
+
+	// In plain-text fallback, Finish writes directly to the writer.
+	second.Line(0).Finish("✅", "up-to-date")
+	if !strings.Contains(buf2.String(), "router2") {
+		t.Errorf("expected plain-text output for second display after fallback, got %q", buf2.String())
+	}
+}
+
+// TestSingletonReleasedAfterStop verifies that after Stop the singleton slot
+// is cleared, allowing a subsequent display to use live mode.
+func TestSingletonReleasedAfterStop(t *testing.T) {
+	resetSingleton(t)
+
+	var buf bytes.Buffer
+	first := newLiveModeDisplay(&buf, []string{"router1"})
+
+	// Manually occupy + release the singleton (simulating a real Start+Stop
+	// without needing a real TTY).
+	singletonMu.Lock()
+	activeLiveDisp = first
+	singletonMu.Unlock()
+
+	// Simulate Stop: releases singleton without calling liveterm.Stop (no TTY).
+	first.release()
+
+	// After release, singleton slot should be empty.
+	singletonMu.Lock()
+	current := activeLiveDisp
+	singletonMu.Unlock()
+	if current != nil {
+		t.Error("singleton slot should be nil after Stop")
+	}
+}
+
+// resetSingleton clears the singleton slot before and after a test.
+func resetSingleton(t *testing.T) {
+	t.Helper()
+	singletonMu.Lock()
+	activeLiveDisp = nil
+	singletonMu.Unlock()
+	t.Cleanup(func() {
+		singletonMu.Lock()
+		activeLiveDisp = nil
+		singletonMu.Unlock()
+	})
 }

@@ -20,9 +20,10 @@ type UpdatesConfig struct {
 	UpdatesApply bool
 }
 
-// ErrCannotCheckUpdates is returned when the router is reachable via SSH but
-// cannot contact the update server (e.g., it has no internet access).
-// Callers should treat this as an unknown outcome, not a hard failure.
+// ErrCannotCheckUpdates is returned when the update status cannot be determined,
+// either because the SSH connection failed or because the router cannot contact
+// the update server (e.g., it has no internet access). Callers should treat this
+// as an unknown outcome, not a hard failure.
 var ErrCannotCheckUpdates = errors.New("cannot check for updates")
 
 // UpdatesDependencies holds injectable dependencies for testing

@@ -125,7 +125,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	slog.Info("Initializing SSH connection")
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
-		slog.Debug("failed to create SSH connection", "host", host, "error", err)
+		slog.Debug("failed to connect", "host", host, "error", err)
 		return nil, nil, fmt.Errorf("%w: failed to connect: %w", ErrCannotCheckUpdates, err)
 	}
 	defer func() {

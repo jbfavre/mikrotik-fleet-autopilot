@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hekmon/liveterm"
+	"github.com/hekmon/liveterm/v2"
 	"golang.org/x/term"
 )
 

@@ -121,6 +121,7 @@ func TestUpdates(t *testing.T) {
 		checkForUpdatesPostUpdate string // if set, returned by factory connections instead of checkForUpdatesOut
 		routerboardOut            string
 		sshError                  error
+		installError              error // if set, returned by /system/package/update/install
 		wantErr                   bool
 		wantOffline               bool // true when err should wrap ErrCannotCheckUpdates (router has no internet)
 		errContains               string
@@ -289,6 +290,22 @@ func TestUpdates(t *testing.T) {
 			wantErr:                   false,
 			expectNilStatuses:         true, // Update succeeded but status could not be verified
 		},
+		{
+			name:         "Apply update command fails — hard failure, not ErrCannotCheckUpdates",
+			host:         "router10.example.com",
+			applyUpdates: true,
+			osInstalled:  "7.11.3",
+			osAvailable:  "7.12.1",
+			hasBoard:     false,
+			checkForUpdatesOut: `  status: New version available
+  installed-version: 7.11.3
+  latest-version: 7.12.1`,
+			routerboardOut: `  routerboard: no`,
+			installError:   fmt.Errorf("install command rejected: permission denied"),
+			wantErr:        true,
+			wantOffline:    false, // hard failure must NOT wrap ErrCannotCheckUpdates
+			errContains:    "failed to run SSH command",
+		},
 	}
 
 	for _, tt := range tests {
@@ -321,6 +338,9 @@ func TestUpdates(t *testing.T) {
 							return tt.routerboardOut, nil
 						}
 						if cmd == "/system/package/update/install" {
+							if tt.installError != nil {
+								return "", tt.installError
+							}
 							return "System will reboot", nil
 						}
 						if cmd == "/system/reboot" {

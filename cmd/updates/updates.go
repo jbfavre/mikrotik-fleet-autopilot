@@ -245,7 +245,7 @@ func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus,
 		false,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", ErrCannotCheckUpdates, err)
+		return nil, nil, fmt.Errorf("%w: %w", ErrCannotCheckUpdates, err)
 	}
 	slog.Debug("RouterOS status", "value", osStatus)
 	if osStatus.Installed == osStatus.Available {

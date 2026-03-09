@@ -2,11 +2,11 @@ module jb.favre/mikrotik-fleet-autopilot
 
 go 1.26.0
 
-require github.com/urfave/cli/v3 v3.7.0
-
 require (
+	github.com/urfave/cli/v3 v3.7.0
 	github.com/hekmon/liveterm/v2 v2.6.1
 	github.com/kevinburke/ssh_config v1.6.0
+	golang.org/x/crypto v0.48.0
 	golang.org/x/term v0.40.0
 )
 
@@ -19,9 +19,5 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-)
-
-require (
-	golang.org/x/crypto v0.48.0
 	golang.org/x/sys v0.41.0 // indirect
 )

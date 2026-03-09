@@ -2,13 +2,16 @@ package updates
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"regexp"
 	"time"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/display"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
@@ -16,6 +19,12 @@ import (
 type UpdatesConfig struct {
 	UpdatesApply bool
 }
+
+// ErrCannotCheckUpdates is returned when the update status cannot be determined,
+// either because the SSH connection failed or because the router cannot contact
+// the update server (e.g., it has no internet access). Callers should treat this
+// as an unknown outcome, not a hard failure.
+var ErrCannotCheckUpdates = errors.New("cannot check for updates")
 
 // UpdatesDependencies holds injectable dependencies for testing
 type UpdatesDependencies struct {
@@ -51,18 +60,33 @@ var Command = []*cli.Command{
 				ReconnectDelay:       10 * time.Second,
 			}
 
+			// Set up live display
+			disp := display.New(os.Stdout, coreCfg.Hosts, coreCfg.Debug)
+			disp.Start()
+			defer disp.Stop()
+
 			// Iterate over all hosts
 			var lastErr error
-			for _, host := range coreCfg.Hosts {
+			for i, host := range coreCfg.Hosts {
+				line := disp.Line(i)
+				line.UpdateStep("⏳", "checking updates…")
 				osStatus, boardStatus, err := updates(ctx, host, updatesCfg, deps)
-				if err != nil {
-					fmt.Printf("❌ %s: Updates failed\n", host)
+				if errors.Is(err, ErrCannotCheckUpdates) {
+					line.CompleteStep("❓")
+					line.Finish("❓", err.Error())
+					// Offline is unknown, not a fatal failure; don't set lastErr.
+				} else if err != nil {
+					line.CompleteStep("❌")
+					line.FinishError("updates failed: " + err.Error())
 					lastErr = err
 					// Continue with other hosts even if one fails
 				} else if osStatus == nil {
-					fmt.Printf("❓ %s: Update applied, status could not be verified\n", host)
+					line.CompleteStep("❓")
+					line.Finish("❓", "update applied, status unverified")
 				} else {
-					fmt.Println(formatUpdateResult(host, osStatus, boardStatus))
+					emoji, msg := formatUpdateResult(osStatus, boardStatus)
+					line.CompleteStep(emoji)
+					line.Finish(emoji, msg)
 				}
 			}
 			return lastErr
@@ -101,8 +125,8 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	slog.Info("Initializing SSH connection")
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
-		slog.Debug("failed to create SSH connection", "host", host, "error", err)
-		return nil, nil, fmt.Errorf("failed to create SSH connection: %w", err)
+		slog.Debug("failed to connect", "host", host, "error", err)
+		return nil, nil, fmt.Errorf("%w: failed to connect: %w", ErrCannotCheckUpdates, err)
 	}
 	defer func() {
 		_ = conn.Close()
@@ -207,7 +231,9 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	return finalOsStatus, finalBoardStatus, nil
 }
 
-// checkCurrentStatus retrieves the current RouterOS and RouterBoard status
+// checkCurrentStatus retrieves the current RouterOS and RouterBoard status.
+// If the router is reachable via SSH but cannot contact the update server,
+// the returned error wraps ErrCannotCheckUpdates.
 func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus, error) {
 	slog.Info("Checking RouterOS update status")
 	osStatus, err := getUpdateStatus(
@@ -219,7 +245,7 @@ func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus,
 		false,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %w", ErrCannotCheckUpdates, err)
 	}
 	slog.Debug("RouterOS status", "value", osStatus)
 	if osStatus.Installed == osStatus.Available {
@@ -238,7 +264,7 @@ func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus,
 		true,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %w", ErrCannotCheckUpdates, err)
 	}
 
 	if boardStatus == nil {
@@ -317,21 +343,22 @@ func applyComponentUpdate(conn ssh.RunnerInterface, ctx context.Context, host, c
 	return nil, nil, nil
 }
 
-// formatUpdateResult formats the update result into a string
-func formatUpdateResult(host string, osStatus *UpdateStatus, boardStatus *UpdateStatus) string {
+// formatUpdateResult returns the overall status emoji and a human-readable message
+// describing the update result. The hostname is not included; the caller (via display) handles it.
+func formatUpdateResult(osStatus *UpdateStatus, boardStatus *UpdateStatus) (string, string) {
 	osUpToDate := osStatus.Installed == osStatus.Available
 	if boardStatus == nil {
 		// Virtualized router or RouterOS-only update
 		if osUpToDate {
-			return fmt.Sprintf("✅ %s is up-to-date (RouterOS: %s)", host, osStatus.Installed)
+			return "✅", fmt.Sprintf("is up-to-date (RouterOS: %s)", osStatus.Installed)
 		}
-		return fmt.Sprintf("⚠️  %s upgrade available (RouterOS: %s → %s)", host, osStatus.Installed, osStatus.Available)
+		return "⚠️", fmt.Sprintf("upgrade available (RouterOS: %s → %s)", osStatus.Installed, osStatus.Available)
 	}
 
 	// Physical router with RouterBoard
 	boardUpToDate := boardStatus.Installed == boardStatus.Available
 	if osUpToDate && boardUpToDate {
-		return fmt.Sprintf("✅ %s is up-to-date (RouterOS: %s, RouterBoard: %s)", host, osStatus.Installed, boardStatus.Installed)
+		return "✅", fmt.Sprintf("is up-to-date (RouterOS: %s, RouterBoard: %s)", osStatus.Installed, boardStatus.Installed)
 	}
 
 	var boardUpgrade string
@@ -344,7 +371,7 @@ func formatUpdateResult(host string, osStatus *UpdateStatus, boardStatus *Update
 	} else {
 		boardUpgrade = fmt.Sprintf("%s → %s", boardStatus.Installed, boardStatus.Available)
 	}
-	return fmt.Sprintf("⚠️  %s upgrade available (RouterOS: %s → %s, RouterBoard: %s)", host, osStatus.Installed, osStatus.Available, boardUpgrade)
+	return "⚠️", fmt.Sprintf("upgrade available (RouterOS: %s → %s, RouterBoard: %s)", osStatus.Installed, osStatus.Available, boardUpgrade)
 }
 
 // Generic update status fetcher for RouterOS and RouterBoard
@@ -395,7 +422,7 @@ func applyUpdate(conn ssh.RunnerInterface, ctx context.Context, host string, upd
 		return nil, fmt.Errorf("failed to run SSH command: %w", err)
 	}
 	_ = conn.Close()
-	fmt.Printf("⏳ %s\n", waitMsg)
+	slog.Info(waitMsg)
 
 	var newConn ssh.RunnerInterface
 	for {
@@ -404,7 +431,7 @@ func applyUpdate(conn ssh.RunnerInterface, ctx context.Context, host string, upd
 			return nil, fmt.Errorf("context cancelled during reconnection: %w", err)
 		}
 
-		fmt.Printf("⏳ Waiting for router %v to come back up...\n", host)
+		slog.Info("Waiting for router to come back up", "host", host)
 		time.Sleep(deps.ReconnectDelay)
 
 		newConn, err = deps.SSHConnectionFactory(ctx, host)

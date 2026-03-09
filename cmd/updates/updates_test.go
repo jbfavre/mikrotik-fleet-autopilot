@@ -2,6 +2,7 @@ package updates
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -120,7 +121,9 @@ func TestUpdates(t *testing.T) {
 		checkForUpdatesPostUpdate string // if set, returned by factory connections instead of checkForUpdatesOut
 		routerboardOut            string
 		sshError                  error
+		installError              error // if set, returned by /system/package/update/install
 		wantErr                   bool
+		wantOffline               bool // true when err should wrap ErrCannotCheckUpdates (router has no internet)
 		errContains               string
 		expectOsUpdate            bool
 		expectBoardUpdate         bool
@@ -232,7 +235,8 @@ func TestUpdates(t *testing.T) {
 			applyUpdates: false,
 			sshError:     fmt.Errorf("connection timeout"),
 			wantErr:      true,
-			errContains:  "failed to create SSH connection",
+			wantOffline:  true,
+			errContains:  "failed to connect",
 		},
 		{
 			name:         "Check for updates command fails",
@@ -242,7 +246,32 @@ func TestUpdates(t *testing.T) {
   message: Could not download package list`,
 			routerboardOut: `  routerboard: no`,
 			wantErr:        true,
+			wantOffline:    true,
 			errContains:    "ERROR",
+		},
+		{
+			name:         "Router offline - DNS resolution failure",
+			host:         "router-offline.example.com",
+			applyUpdates: false,
+			checkForUpdatesOut: `  channel: stable
+  installed-version: 7.14.1
+  status: ERROR: could not resolve dns name (timeout)`,
+			routerboardOut: `  routerboard: no`,
+			wantErr:        true,
+			wantOffline:    true,
+			errContains:    "could not resolve dns name",
+		},
+		{
+			name:         "Router offline - no route to host",
+			host:         "router-no-route.example.com",
+			applyUpdates: false,
+			checkForUpdatesOut: `  channel: stable
+  installed-version: 7.14.1
+  status: ERROR: no-route-to-host`,
+			routerboardOut: `  routerboard: no`,
+			wantErr:        true,
+			wantOffline:    true,
+			errContains:    "no-route-to-host",
 		},
 		{
 			name:         "RouterOS update applied, post-check DNS failure (unverified outcome)",
@@ -260,6 +289,22 @@ func TestUpdates(t *testing.T) {
 			expectOsUpdate:            true,
 			wantErr:                   false,
 			expectNilStatuses:         true, // Update succeeded but status could not be verified
+		},
+		{
+			name:         "Apply update command fails — hard failure, not ErrCannotCheckUpdates",
+			host:         "router10.example.com",
+			applyUpdates: true,
+			osInstalled:  "7.11.3",
+			osAvailable:  "7.12.1",
+			hasBoard:     false,
+			checkForUpdatesOut: `  status: New version available
+  installed-version: 7.11.3
+  latest-version: 7.12.1`,
+			routerboardOut: `  routerboard: no`,
+			installError:   fmt.Errorf("install command rejected: permission denied"),
+			wantErr:        true,
+			wantOffline:    false, // hard failure must NOT wrap ErrCannotCheckUpdates
+			errContains:    "failed to run SSH command",
 		},
 	}
 
@@ -293,6 +338,9 @@ func TestUpdates(t *testing.T) {
 							return tt.routerboardOut, nil
 						}
 						if cmd == "/system/package/update/install" {
+							if tt.installError != nil {
+								return "", tt.installError
+							}
 							return "System will reboot", nil
 						}
 						if cmd == "/system/reboot" {
@@ -337,6 +385,12 @@ func TestUpdates(t *testing.T) {
 			if tt.wantErr {
 				if tt.errContains != "" && (err == nil || !strings.Contains(err.Error(), tt.errContains)) {
 					t.Errorf("updates() error = %v, want error containing %q", err, tt.errContains)
+				}
+				if tt.wantOffline && !errors.Is(err, ErrCannotCheckUpdates) {
+					t.Errorf("updates() error = %v, want errors.Is(err, ErrCannotCheckUpdates) == true", err)
+				}
+				if !tt.wantOffline && errors.Is(err, ErrCannotCheckUpdates) {
+					t.Errorf("updates() error = %v, got ErrCannotCheckUpdates but wantOffline == false", err)
 				}
 				// On error paths, statuses must be nil
 				if osStatus != nil {
@@ -626,34 +680,33 @@ func TestGetUpdateStatus(t *testing.T) {
 func TestFormatUpdateResult(t *testing.T) {
 	tests := []struct {
 		name        string
-		host        string
 		osStatus    *UpdateStatus
 		boardStatus *UpdateStatus
-		want        string
+		wantEmoji   string
+		wantMsg     string
 	}{
 		{
 			name: "Virtualized router - up to date",
-			host: "router1.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.14.1",
 				Available: "7.14.1",
 			},
 			boardStatus: nil,
-			want:        "✅ router1.example.com is up-to-date (RouterOS: 7.14.1)",
+			wantEmoji:   "✅",
+			wantMsg:     "is up-to-date (RouterOS: 7.14.1)",
 		},
 		{
 			name: "Virtualized router - update available",
-			host: "router1.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.14.0",
 				Available: "7.14.1",
 			},
 			boardStatus: nil,
-			want:        "⚠️  router1.example.com upgrade available (RouterOS: 7.14.0 → 7.14.1)",
+			wantEmoji:   "⚠️",
+			wantMsg:     "upgrade available (RouterOS: 7.14.0 → 7.14.1)",
 		},
 		{
 			name: "Physical router - both up to date",
-			host: "router2.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.14.1",
 				Available: "7.14.1",
@@ -662,11 +715,11 @@ func TestFormatUpdateResult(t *testing.T) {
 				Installed: "7.14.1",
 				Available: "7.14.1",
 			},
-			want: "✅ router2.example.com is up-to-date (RouterOS: 7.14.1, RouterBoard: 7.14.1)",
+			wantEmoji: "✅",
+			wantMsg:   "is up-to-date (RouterOS: 7.14.1, RouterBoard: 7.14.1)",
 		},
 		{
 			name: "Physical router - OS update available",
-			host: "router2.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.14.0",
 				Available: "7.14.1",
@@ -675,11 +728,11 @@ func TestFormatUpdateResult(t *testing.T) {
 				Installed: "7.14.1",
 				Available: "7.14.1",
 			},
-			want: "⚠️  router2.example.com upgrade available (RouterOS: 7.14.0 → 7.14.1, RouterBoard: 7.14.1 → pending)",
+			wantEmoji: "⚠️",
+			wantMsg:   "upgrade available (RouterOS: 7.14.0 → 7.14.1, RouterBoard: 7.14.1 → pending)",
 		},
 		{
 			name: "Physical router - Board update available",
-			host: "router2.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.14.1",
 				Available: "7.14.1",
@@ -688,11 +741,11 @@ func TestFormatUpdateResult(t *testing.T) {
 				Installed: "7.14.0",
 				Available: "7.14.1",
 			},
-			want: "⚠️  router2.example.com upgrade available (RouterOS: 7.14.1 → 7.14.1, RouterBoard: 7.14.0 → 7.14.1)",
+			wantEmoji: "⚠️",
+			wantMsg:   "upgrade available (RouterOS: 7.14.1 → 7.14.1, RouterBoard: 7.14.0 → 7.14.1)",
 		},
 		{
 			name: "Physical router - both updates available",
-			host: "router2.example.com",
 			osStatus: &UpdateStatus{
 				Installed: "7.13.5",
 				Available: "7.14.1",
@@ -701,15 +754,19 @@ func TestFormatUpdateResult(t *testing.T) {
 				Installed: "7.13.5",
 				Available: "7.14.1",
 			},
-			want: "⚠️  router2.example.com upgrade available (RouterOS: 7.13.5 → 7.14.1, RouterBoard: 7.13.5 → 7.14.1)",
+			wantEmoji: "⚠️",
+			wantMsg:   "upgrade available (RouterOS: 7.13.5 → 7.14.1, RouterBoard: 7.13.5 → 7.14.1)",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatUpdateResult(tt.host, tt.osStatus, tt.boardStatus)
-			if got != tt.want {
-				t.Errorf("formatUpdateResult() = %q, want %q", got, tt.want)
+			gotEmoji, gotMsg := formatUpdateResult(tt.osStatus, tt.boardStatus)
+			if gotEmoji != tt.wantEmoji {
+				t.Errorf("formatUpdateResult() emoji = %q, want %q", gotEmoji, tt.wantEmoji)
+			}
+			if gotMsg != tt.wantMsg {
+				t.Errorf("formatUpdateResult() msg = %q, want %q", gotMsg, tt.wantMsg)
 			}
 		})
 	}
@@ -743,6 +800,7 @@ func TestCheckCurrentStatus(t *testing.T) {
 		wantBoardAvailable string
 		wantBoardNil       bool
 		wantErr            bool
+		wantOffline        bool // true when error should wrap ErrCannotCheckUpdates
 	}{
 		{
 			name: "Physical router - both up to date",
@@ -797,7 +855,7 @@ func TestCheckCurrentStatus(t *testing.T) {
 			wantErr:         false,
 		},
 		{
-			name: "RouterOS check fails",
+			name: "RouterOS check fails - router offline (DNS)",
 			osOutput: `       channel: stable
   installed-version: 7.14.1
         status: ERROR: could not resolve dns name`,
@@ -805,6 +863,18 @@ func TestCheckCurrentStatus(t *testing.T) {
 			boardOutput: "",
 			boardError:  nil,
 			wantErr:     true,
+			wantOffline: true,
+		},
+		{
+			name: "RouterOS check fails - router offline (no route)",
+			osOutput: `       channel: stable
+  installed-version: 7.14.1
+        status: ERROR: no-route-to-host`,
+			osError:     nil,
+			boardOutput: "",
+			boardError:  nil,
+			wantErr:     true,
+			wantOffline: true,
 		},
 	}
 
@@ -827,6 +897,13 @@ func TestCheckCurrentStatus(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("checkCurrentStatus() error = nil, wantErr = true")
+					return
+				}
+				if tt.wantOffline && !errors.Is(err, ErrCannotCheckUpdates) {
+					t.Errorf("checkCurrentStatus() error = %v, want errors.Is(err, ErrCannotCheckUpdates) == true", err)
+				}
+				if !tt.wantOffline && errors.Is(err, ErrCannotCheckUpdates) {
+					t.Errorf("checkCurrentStatus() error = %v, got ErrCannotCheckUpdates but wantOffline == false", err)
 				}
 				return
 			}

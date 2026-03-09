@@ -1,6 +1,6 @@
 module jb.favre/mikrotik-fleet-autopilot
 
-go 1.26.0
+go 1.26.1
 
 require (
 	github.com/hekmon/liveterm/v2 v2.6.1

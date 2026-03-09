@@ -5,7 +5,7 @@ go 1.26.0
 require github.com/urfave/cli/v3 v3.7.0
 
 require (
-	github.com/hekmon/liveterm v1.0.1
+	github.com/hekmon/liveterm/v2 v2.6.1
 	github.com/kevinburke/ssh_config v1.6.0
 	golang.org/x/term v0.40.0
 )
@@ -13,7 +13,6 @@ require (
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
-	github.com/hekmon/liveterm/v2 v2.6.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect

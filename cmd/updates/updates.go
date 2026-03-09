@@ -264,7 +264,7 @@ func checkCurrentStatus(conn ssh.RunnerInterface) (*UpdateStatus, *UpdateStatus,
 		true,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", ErrCannotCheckUpdates, err)
+		return nil, nil, fmt.Errorf("%w: %w", ErrCannotCheckUpdates, err)
 	}
 
 	if boardStatus == nil {

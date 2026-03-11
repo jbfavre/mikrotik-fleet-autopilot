@@ -33,6 +33,20 @@ type HostLine struct {
 	out          io.Writer
 }
 
+// StepCallback is used to update step display for a host.
+type StepCallback func(emoji string, message string)
+
+func NewStepCallback(line *HostLine) StepCallback {
+	return func(emoji, msg string) {
+		// If emoji is a completed step, mark as complete
+		if emoji == "✅" {
+			line.CompleteStep(emoji)
+		} else {
+			line.UpdateStep(emoji, msg)
+		}
+	}
+}
+
 // UpdateStep sets the current in-flight step label.
 func (h *HostLine) UpdateStep(emoji, label string) {
 	h.mu.Lock()

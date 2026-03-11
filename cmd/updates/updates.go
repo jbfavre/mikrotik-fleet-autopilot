@@ -181,18 +181,30 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 			stepCb("⏳", "Waiting for router to come back up…")
 		}
 		slog.Debug("reconnecting after RouterOS update to re-check RouterBoard status", "host", host)
+		// Wait for router to come back up
 		_ = conn.Close()
-
-		if boardStatus != nil {
+		// Reconnection loop
+		var reconnected bool
+		for {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, fmt.Errorf("context cancelled during reconnection: %w", err)
+			}
 			conn, err = deps.SSHConnectionFactory(ctx, host)
 			if err != nil {
-				slog.Error("failed to reconnect after RouterOS update", "host", host, "error", err)
-				return nil, nil, fmt.Errorf("failed to reconnect after RouterOS update: %w", err)
+				// Log error but do not overwrite display
+				slog.Error("failed to dial", "address", host, "error", err)
+				time.Sleep(deps.ReconnectDelay)
+				continue
 			}
-			defer func() {
-				_ = conn.Close()
-			}()
+			reconnected = true
+			break
+		}
+		if reconnected && stepCb != nil {
+			stepCb("⏳", "Router is back up, continuing…")
+		}
+		defer func() { _ = conn.Close() }()
 
+		if boardStatus != nil {
 			if stepCb != nil {
 				stepCb("⏳", "Re-checking RouterBoard status after RouterOS update…")
 			}

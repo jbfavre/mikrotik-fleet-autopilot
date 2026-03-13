@@ -200,7 +200,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 				}
 				continue
 			}
-			re reconnected = true
+			reconnected = true
 			break
 		}
 		if !reconnected {

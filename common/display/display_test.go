@@ -205,6 +205,52 @@ func TestStepSummaryOrder(t *testing.T) {
 	}
 }
 
+func TestNewStepCallbackCompletesTerminalStatuses(t *testing.T) {
+	tests := []struct {
+		name  string
+		emoji string
+	}{
+		{name: "success", emoji: "✅"},
+		{name: "failed", emoji: "❌"},
+		{name: "unknown", emoji: "❓"},
+		{name: "warning", emoji: "⚠️"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			d := newTestDisplay(&buf, []string{"router.example.com"})
+			l := d.Line(0)
+			cb := NewStepCallback(l)
+
+			cb("⏳", "connecting…")
+			cb(tt.emoji, "ignored")
+
+			got := l.render()
+			if !strings.Contains(got, tt.emoji) {
+				t.Errorf("render() = %q, expected completed emoji %q", got, tt.emoji)
+			}
+			if strings.Contains(got, "connecting…") {
+				t.Errorf("render() = %q, expected current step to be cleared", got)
+			}
+		})
+	}
+}
+
+func TestNewStepCallbackKeepsInProgressStatus(t *testing.T) {
+	var buf bytes.Buffer
+	d := newTestDisplay(&buf, []string{"router.example.com"})
+	l := d.Line(0)
+	cb := NewStepCallback(l)
+
+	cb("⏳", "connecting…")
+
+	got := l.render()
+	if !strings.Contains(got, "⏳") || !strings.Contains(got, "connecting…") {
+		t.Errorf("render() = %q, expected in-progress status and label", got)
+	}
+}
+
 // TestRenderFormatConsistency verifies the line format is consistent between in-progress and done states.
 // Both must follow: [overall status] <hostname> [step emojis] [step message]
 func TestRenderFormatConsistency(t *testing.T) {

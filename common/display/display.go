@@ -38,10 +38,10 @@ type StepCallback func(emoji string, message string)
 
 func NewStepCallback(line *HostLine) StepCallback {
 	return func(emoji, msg string) {
-		// If emoji is a completed step, mark as complete
-		if emoji == "✅" {
+		switch emoji {
+		case "✅", "❌", "❓", "⚠️":
 			line.CompleteStep(emoji)
-		} else {
+		default:
 			line.UpdateStep(emoji, msg)
 		}
 	}

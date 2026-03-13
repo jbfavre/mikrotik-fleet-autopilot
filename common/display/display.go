@@ -40,6 +40,9 @@ type HostLine struct {
 // StepCallback is used to update step display for a host.
 type StepCallback func(emoji string, message string)
 
+// NewStepCallback returns a StepCallback that sends terminal status emojis
+// (✅, ❌, ❓, ⚠️) to CompleteStep and treats all other emojis as in-progress
+// updates via UpdateStep.
 func NewStepCallback(line *HostLine) StepCallback {
 	return func(emoji, msg string) {
 		switch emoji {

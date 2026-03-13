@@ -119,8 +119,8 @@ func TestFinishErrorFallback(t *testing.T) {
 	if !strings.Contains(output, "❌") {
 		t.Errorf("FinishError() output = %q, want ❌", output)
 	}
-	if !strings.Contains(output, "badrouter.example.com") {
-		t.Errorf("FinishError() output = %q, want hostname", output)
+	if !strings.Contains(output, "badrouter.example.c…") {
+		t.Errorf("FinishError() output = %q, want truncated hostname", output)
 	}
 }
 
@@ -165,18 +165,55 @@ func TestMultipleHosts(t *testing.T) {
 
 func TestHostnamePadding(t *testing.T) {
 	var buf bytes.Buffer
-	// Short hostname should be padded to hostnameWidth.
+	// Short hostname should be padded to the configured minimum width.
 	d := newTestDisplay(&buf, []string{"r1"})
 	l := d.Line(0)
 	l.UpdateStep("⏳", "test")
 	got := l.render()
-	// The line should contain the hostname and be longer than hostnameWidth
+	// The line should contain the hostname and be longer than the hostname itself
 	// (emoji + space + padded hostname + separators + current step).
 	if !strings.Contains(got, "r1") {
 		t.Errorf("render() = %q, should contain hostname", got)
 	}
 	if !strings.HasPrefix(got, "⏳") {
 		t.Errorf("render() = %q, should start with overall status emoji", got)
+	}
+}
+
+func TestComputeHostnameWidthBounded(t *testing.T) {
+	if got := computeHostnameWidth([]string{"r1", "r2"}); got != 10 {
+		t.Errorf("computeHostnameWidth(short hosts) = %d, want 10", got)
+	}
+
+	if got := computeHostnameWidth([]string{"router-lab-01", "core-edge"}); got != 13 {
+		t.Errorf("computeHostnameWidth(normal hosts) = %d, want 13", got)
+	}
+
+	if got := computeHostnameWidth([]string{"router-very-very-very-long-site-name-prod-001"}); got != 20 {
+		t.Errorf("computeHostnameWidth(long hosts) = %d, want 20", got)
+	}
+}
+
+func TestFormatHostnameTruncatesWithEllipsis(t *testing.T) {
+	got := formatHostname("router-very-very-long-hostname", 20)
+	if got != "router-very-very-lo…" {
+		t.Errorf("formatHostname() = %q, want %q", got, "router-very-very-lo…")
+	}
+}
+
+func TestRenderUsesTruncatedHostname(t *testing.T) {
+	var buf bytes.Buffer
+	host := "router-very-very-long-hostname"
+	d := newTestDisplay(&buf, []string{host})
+	l := d.Line(0)
+	l.UpdateStep("⏳", "connecting…")
+
+	got := l.render()
+	if !strings.Contains(got, "router-very-very-lo…") {
+		t.Errorf("render() = %q, expected truncated hostname", got)
+	}
+	if strings.Contains(got, host) {
+		t.Errorf("render() = %q, should not contain full hostname when it exceeds max width", got)
 	}
 }
 

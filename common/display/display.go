@@ -12,7 +12,10 @@ import (
 	"golang.org/x/term"
 )
 
-const hostnameWidth = 30
+const (
+	minHostnameWidth = 10
+	maxHostnameWidth = 20
+)
 
 // completedStep records an already-finished step with its emoticon.
 type completedStep struct {
@@ -21,16 +24,17 @@ type completedStep struct {
 
 // HostLine tracks the display state for a single host.
 type HostLine struct {
-	mu           sync.Mutex
-	hostname     string
-	overallEmoji string // ⏳ while in-progress; set to the final status emoji by Finish
-	history      []completedStep
-	currentEmoji string
-	currentLabel string
-	done         bool
-	finalMessage string // set by Finish; does not include the hostname or overall emoji
-	liveMode     bool
-	out          io.Writer
+	mu            sync.Mutex
+	hostname      string
+	hostnameWidth int
+	overallEmoji  string // ⏳ while in-progress; set to the final status emoji by Finish
+	history       []completedStep
+	currentEmoji  string
+	currentLabel  string
+	done          bool
+	finalMessage  string // set by Finish; does not include the hostname or overall emoji
+	liveMode      bool
+	out           io.Writer
 }
 
 // StepCallback is used to update step display for a host.
@@ -85,7 +89,7 @@ func (h *HostLine) FinishError(msg string) {
 
 // renderUnlocked renders the line. The caller must hold h.mu.
 func (h *HostLine) renderUnlocked() string {
-	hostname := fmt.Sprintf("%-*s", hostnameWidth, h.hostname)
+	hostname := formatHostname(h.hostname, h.hostnameWidth)
 
 	// Build summary from completed step emojis.
 	var sb strings.Builder
@@ -148,14 +152,16 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 			liveMode = term.IsTerminal(int(f.Fd()))
 		}
 	}
+	hostnameWidth := computeHostnameWidth(hosts)
 
 	lines := make([]*HostLine, len(hosts))
 	for i, host := range hosts {
 		lines[i] = &HostLine{
-			hostname:     host,
-			overallEmoji: "⏳",
-			liveMode:     liveMode,
-			out:          out,
+			hostname:      host,
+			hostnameWidth: hostnameWidth,
+			overallEmoji:  "⏳",
+			liveMode:      liveMode,
+			out:           out,
 		}
 	}
 
@@ -240,4 +246,35 @@ func (d *LiveDisplay) renderLines() []string {
 		out[i] = l.render()
 	}
 	return out
+}
+
+func computeHostnameWidth(hosts []string) int {
+	maxLen := 0
+	for _, host := range hosts {
+		hostLen := len([]rune(host))
+		if hostLen > maxLen {
+			maxLen = hostLen
+		}
+	}
+	if maxLen < minHostnameWidth {
+		return minHostnameWidth
+	}
+	if maxLen > maxHostnameWidth {
+		return maxHostnameWidth
+	}
+	return maxLen
+}
+
+func formatHostname(hostname string, width int) string {
+	if width <= 0 {
+		return hostname
+	}
+	runes := []rune(hostname)
+	if len(runes) > width {
+		if width == 1 {
+			return "…"
+		}
+		hostname = string(runes[:width-1]) + "…"
+	}
+	return fmt.Sprintf("%-*s", width, hostname)
 }

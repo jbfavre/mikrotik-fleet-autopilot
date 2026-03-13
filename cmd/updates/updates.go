@@ -207,7 +207,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 			return nil, nil, fmt.Errorf("failed to reconnect to %s after %d attempts", host, maxReconnectAttempts)
 		}
 		if reconnected && displayStepCallback != nil {
-			displayStepCallback("✅", "RouterOS update successfully applied")
+			displayStepCallback("✅", "Reconnected to router after RouterOS update, verifying status…")
 		}
 
 		if boardStatus != nil {

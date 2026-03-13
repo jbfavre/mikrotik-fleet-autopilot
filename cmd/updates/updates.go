@@ -85,7 +85,6 @@ var Command = []*cli.Command{
 					line.Finish("❓", "update applied, status unverified")
 				} else {
 					emoji, msg := formatUpdateResult(osStatus, boardStatus)
-					line.CompleteStep(emoji)
 					line.Finish(emoji, msg)
 				}
 			}
@@ -143,7 +142,8 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		return nil, nil, err
 	}
 	if displayStepCallback != nil {
-		displayStepCallback("✅", "Checked update status")
+		emoji, msg := formatUpdateResult(osStatus, boardStatus)
+		displayStepCallback(emoji, msg)
 	}
 
 	// Step 2: Apply updates if requested and needed

@@ -132,18 +132,20 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	slog.Debug("SSH connection created", "host", host)
 
 	// Step 1: Check current status
-	if displayStepCallback != nil {
-		displayStepCallback("⏳", "Checking current update status…")
+	reportStep := func(icon, msg string) {
+		if stepCb != nil {
+			stepCb(icon, msg)
+		}
 	}
+
+	// Step 1: Check current status
+	reportStep("⏳", "Checking current update status…")
 	slog.Info("Checking current update status")
 	osStatus, boardStatus, err := checkCurrentStatus(conn)
 	if err != nil {
 		return nil, nil, err
 	}
-	if displayStepCallback != nil {
-		emoji, msg := formatUpdateResult(osStatus, boardStatus)
-		displayStepCallback(emoji, msg)
-	}
+	reportStep("✅", "Checked update status")
 
 	// Step 2: Apply updates if requested and needed
 	if !cfg.UpdatesApply {

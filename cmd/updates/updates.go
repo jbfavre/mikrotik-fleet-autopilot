@@ -201,7 +201,6 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		if reconnected && displayStepCallback != nil {
 			displayStepCallback("✅", "RouterOS update successfullyapplied")
 		}
-		defer func() { _ = conn.Close() }()
 
 		if boardStatus != nil {
 

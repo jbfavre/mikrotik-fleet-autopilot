@@ -69,8 +69,8 @@ var Command = []*cli.Command{
 			var lastErr error
 			for i, host := range coreCfg.Hosts {
 				line := disp.Line(i)
-				line.UpdateStep("⏳", "checking updates…")
-				osStatus, boardStatus, err := updates(ctx, host, updatesCfg, deps)
+				displayStepCallback := display.NewStepCallback(line)
+				osStatus, boardStatus, err := updates(ctx, host, updatesCfg, deps, displayStepCallback)
 				if errors.Is(err, ErrCannotCheckUpdates) {
 					line.CompleteStep("❓")
 					line.Finish("❓", err.Error())
@@ -81,11 +81,9 @@ var Command = []*cli.Command{
 					lastErr = err
 					// Continue with other hosts even if one fails
 				} else if osStatus == nil {
-					line.CompleteStep("❓")
 					line.Finish("❓", "update applied, status unverified")
 				} else {
 					emoji, msg := formatUpdateResult(osStatus, boardStatus)
-					line.CompleteStep(emoji)
 					line.Finish(emoji, msg)
 				}
 			}
@@ -109,11 +107,11 @@ func Updates(ctx context.Context, host string) error {
 		SSHConnectionFactory: ssh.CreateConnection,
 		ReconnectDelay:       10 * time.Second,
 	}
-	_, _, err := updates(ctx, host, cfg, deps) // statuses intentionally discarded; caller (enroll) manages output
+	_, _, err := updates(ctx, host, cfg, deps, nil) // statuses intentionally discarded; caller (enroll) manages output
 	return err
 }
 
-func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDependencies) (*UpdateStatus, *UpdateStatus, error) {
+func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDependencies, displayStepCallback display.StepCallback) (*UpdateStatus, *UpdateStatus, error) {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return nil, nil, fmt.Errorf("context cancelled: %w", err)
@@ -134,11 +132,20 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	slog.Debug("SSH connection created", "host", host)
 
 	// Step 1: Check current status
+	reportStep := func(icon, msg string) {
+		if displayStepCallback != nil {
+			displayStepCallback(icon, msg)
+		}
+	}
+
+	// Step 1: Check current status
+	reportStep("⏳", "Checking current update status…")
 	slog.Info("Checking current update status")
 	osStatus, boardStatus, err := checkCurrentStatus(conn)
 	if err != nil {
 		return nil, nil, err
 	}
+	reportStep("✅", "Checked update status")
 
 	// Step 2: Apply updates if requested and needed
 	if !cfg.UpdatesApply {
@@ -156,36 +163,59 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 
 	// Apply RouterOS update if needed
 	if !osUpToDate {
+		reportStep("⏳", "Applying RouterOS update…")
 		slog.Info("Applying RouterOS updates")
 		newOsStatus, newBoardStatus, err := applyComponentUpdate(conn, ctx, host, "RouterOS", "/system/package/update/install", false, deps)
 		if err != nil {
 			return nil, nil, err
 		}
-		// nil means the update succeeded but the post-update status check failed (e.g. DNS not yet available)
+
 		finalOsStatus = newOsStatus
 		if newBoardStatus != nil {
 			finalBoardStatus = newBoardStatus
 		}
-		// After RouterOS update, reconnect and re-check RouterBoard status only
-		// (RouterOS update may have staged new RouterBoard firmware)
-		// We don't need to re-check RouterOS status since we just updated it,
-		// and checking RouterOS requires DNS which may not be available yet,
-		// specifically for core routers due to internet not being connected yet.
+		reportStep("⏳", "Waiting for router to come back up…")
 		slog.Debug("reconnecting after RouterOS update to re-check RouterBoard status", "host", host)
-		// Force connection close before reconnecting to avoid resource leaks
-		_ = conn.Close()
+		// Wait for router to come back up
+		// Before attempting to reconnect, close the existing SSH connection (if any)
+		if conn != nil {
+			if cerr := conn.Close(); cerr != nil {
+				slog.Debug("failed to close previous SSH connection before reconnection", "host", host, "error", cerr)
+			}
+			conn = nil
+		}
+		// Reconnection loop
+		const maxReconnectAttempts = 30
+		var reconnected bool
+		for attempt := 1; attempt <= maxReconnectAttempts; attempt++ {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, fmt.Errorf("context cancelled during reconnection: %w", err)
+			}
+			newConn, err := deps.SSHConnectionFactory(ctx, host)
+			if err != nil {
+				// Log error but do not overwrite display
+				slog.Error("failed to dial", "address", host, "error", err, "attempt", attempt, "maxAttempts", maxReconnectAttempts)
+				// Wait before next attempt, but allow context cancellation to interrupt the wait.
+				select {
+				case <-ctx.Done():
+					return nil, nil, fmt.Errorf("context cancelled during reconnection wait: %w", ctx.Err())
+				case <-time.After(deps.ReconnectDelay):
+				}
+				continue
+			}
+			conn = newConn
+			reconnected = true
+			break
+		}
+		if !reconnected {
+			return nil, nil, fmt.Errorf("failed to reconnect to %s after %d attempts", host, maxReconnectAttempts)
+		}
+		if reconnected && displayStepCallback != nil {
+			displayStepCallback("⏳", "Reconnected to router after RouterOS update, verifying status…")
+		}
 
 		if boardStatus != nil {
-			conn, err = deps.SSHConnectionFactory(ctx, host)
-			if err != nil {
-				slog.Error("failed to reconnect after RouterOS update", "host", host, "error", err)
-				return nil, nil, fmt.Errorf("failed to reconnect after RouterOS update: %w", err)
-			}
-			defer func() {
-				_ = conn.Close()
-			}()
 
-			// Only re-check RouterBoard status (not RouterOS which requires working DNS)
 			slog.Info("Re-checking RouterBoard status after RouterOS update")
 			recheckBoardStatus, recheckErr := getUpdateStatus(
 				conn,
@@ -197,7 +227,6 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 			)
 			if recheckErr != nil {
 				slog.Warn("failed to re-check RouterBoard status after RouterOS update", "error", recheckErr)
-				// Keep the pre-update boardStatus so the RouterBoard-update condition still runs
 			} else if recheckBoardStatus != nil {
 				boardStatus = recheckBoardStatus
 				finalBoardStatus = recheckBoardStatus
@@ -212,20 +241,34 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 
 	// Apply RouterBoard update if needed (only for physical routers)
 	if !boardUpToDate && boardStatus != nil {
+		if displayStepCallback != nil {
+			displayStepCallback("⏳", "Applying RouterBoard update…")
+		}
 		slog.Info("Applying RouterBoard updates")
 		newOsStatus, newBoardStatus, err := applyComponentUpdate(conn, ctx, host, "RouterBoard", "/system/reboot", true, deps)
 		if err != nil {
 			return nil, nil, err
 		}
-		// nil means the update succeeded but the post-update status check failed (e.g. DNS not yet available)
+		if displayStepCallback != nil {
+			displayStepCallback("⏳", "Waiting for router to come back up…")
+		}
 		finalOsStatus = newOsStatus
 		finalBoardStatus = newBoardStatus
 	}
 
+	if displayStepCallback != nil {
+		displayStepCallback("⏳", "Checking final update status…")
+	}
 	if finalOsStatus == nil {
-		// At least one update was applied but the post-update status check failed (e.g. DNS not yet available)
 		slog.Warn("post-update status check failed, update outcome unverified", "host", host)
+		if displayStepCallback != nil {
+			displayStepCallback("❓", "Update applied, status unverified")
+		}
 		return nil, nil, nil
+	}
+	if displayStepCallback != nil {
+		emoji, message := formatUpdateResult(finalOsStatus, finalBoardStatus)
+		displayStepCallback(emoji, message)
 	}
 
 	return finalOsStatus, finalBoardStatus, nil

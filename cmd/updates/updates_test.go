@@ -374,7 +374,7 @@ func TestUpdates(t *testing.T) {
 			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			// Execute the function
-			osStatus, boardStatus, err := updates(ctx, tt.host, cfg, deps)
+			osStatus, boardStatus, err := updates(ctx, tt.host, cfg, deps, nil)
 
 			// Verify error expectations
 			if (err != nil) != tt.wantErr {
@@ -1317,7 +1317,7 @@ func TestUpdatesRouterOSStagingRouterBoardFirmware(t *testing.T) {
 			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			// Execute the function
-			_, _, err := updates(ctx, "router.example.com", cfg, deps)
+			_, _, err := updates(ctx, "router.example.com", cfg, deps, nil)
 
 			// Should not error
 			if err != nil {

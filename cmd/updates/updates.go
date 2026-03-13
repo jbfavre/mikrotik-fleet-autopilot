@@ -255,7 +255,8 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		return nil, nil, nil
 	}
 	if displayStepCallback != nil {
-		displayStepCallback("✅", "Router is up-to-date")
+		emoji, message := formatUpdateResult(finalOsStatus, finalBoardStatus)
+		displayStepCallback(emoji, message)
 	}
 
 	return finalOsStatus, finalBoardStatus, nil

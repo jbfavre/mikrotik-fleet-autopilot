@@ -170,9 +170,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		if err != nil {
 			return nil, nil, err
 		}
-		// if displayStepCallback != nil {
-		// 	displayStepCallback("✅", "RouterOS update applied")
-		// }
+
 		finalOsStatus = newOsStatus
 		if newBoardStatus != nil {
 			finalBoardStatus = newBoardStatus
@@ -205,9 +203,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		defer func() { _ = conn.Close() }()
 
 		if boardStatus != nil {
-			// if displayStepCallback != nil {
-			// 	displayStepCallback("⏳", "Re-checking RouterBoard status after RouterOS update…")
-			// }
+
 			slog.Info("Re-checking RouterBoard status after RouterOS update")
 			recheckBoardStatus, recheckErr := getUpdateStatus(
 				conn,
@@ -227,9 +223,6 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 					"current", boardStatus.Installed,
 					"upgrade", boardStatus.Available,
 					"upToDate", boardUpToDate)
-				// if displayStepCallback != nil {
-				// 	displayStepCallback("✅", "RouterBoard status re-checked")
-				// }
 			}
 		}
 	}

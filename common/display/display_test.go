@@ -132,14 +132,12 @@ func TestHostLineThreadSafety(t *testing.T) {
 	var wg sync.WaitGroup
 	const goroutines = 50
 
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range goroutines {
+		wg.Go(func() {
 			l.UpdateStep("⏳", "working…")
 			l.CompleteStep("✅")
 			_ = l.render()
-		}()
+		})
 	}
 	wg.Wait()
 	// If we reach here without a race, thread safety is confirmed.

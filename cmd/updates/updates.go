@@ -181,7 +181,6 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		}
 		slog.Debug("reconnecting after RouterOS update to re-check RouterBoard status", "host", host)
 		// Wait for router to come back up
-		_ = conn.Close()
 		// Reconnection loop
 		const maxReconnectAttempts = 30
 		var reconnected bool

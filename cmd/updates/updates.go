@@ -81,7 +81,6 @@ var Command = []*cli.Command{
 					lastErr = err
 					// Continue with other hosts even if one fails
 				} else if osStatus == nil {
-					line.CompleteStep("❓")
 					line.Finish("❓", "update applied, status unverified")
 				} else {
 					emoji, msg := formatUpdateResult(osStatus, boardStatus)

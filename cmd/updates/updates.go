@@ -195,11 +195,11 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 				time.Sleep(deps.ReconnectDelay)
 				continue
 			}
-			reconnected = true
+			re reconnected = true
 			break
 		}
 		if reconnected && displayStepCallback != nil {
-			displayStepCallback("✅", "RouterOS update successfullyapplied")
+			displayStepCallback("✅", "RouterOS update successfully applied")
 		}
 
 		if boardStatus != nil {

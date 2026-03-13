@@ -133,8 +133,8 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 
 	// Step 1: Check current status
 	reportStep := func(icon, msg string) {
-		if stepCb != nil {
-			stepCb(icon, msg)
+		if displayStepCallback != nil {
+			displayStepCallback(icon, msg)
 		}
 	}
 

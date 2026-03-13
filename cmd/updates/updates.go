@@ -181,6 +181,13 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		}
 		slog.Debug("reconnecting after RouterOS update to re-check RouterBoard status", "host", host)
 		// Wait for router to come back up
+		// Before attempting to reconnect, close the existing SSH connection (if any)
+		if conn != nil {
+			if cerr := conn.Close(); cerr != nil {
+				slog.Debug("failed to close previous SSH connection before reconnection", "host", host, "error", cerr)
+			}
+			conn = nil
+		}
 		// Reconnection loop
 		const maxReconnectAttempts = 30
 		var reconnected bool
@@ -199,11 +206,6 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 				case <-time.After(deps.ReconnectDelay):
 				}
 				continue
-			}
-			if conn != nil {
-				if cerr := conn.Close(); cerr != nil {
-					slog.Debug("failed to close previous SSH connection during reconnection", "host", host, "error", cerr)
-				}
 			}
 			conn = newConn
 			reconnected = true

@@ -163,9 +163,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 
 	// Apply RouterOS update if needed
 	if !osUpToDate {
-		if displayStepCallback != nil {
-			displayStepCallback("⏳", "Applying RouterOS update…")
-		}
+		reportStep("⏳", "Applying RouterOS update…")
 		slog.Info("Applying RouterOS updates")
 		newOsStatus, newBoardStatus, err := applyComponentUpdate(conn, ctx, host, "RouterOS", "/system/package/update/install", false, deps)
 		if err != nil {
@@ -176,9 +174,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		if newBoardStatus != nil {
 			finalBoardStatus = newBoardStatus
 		}
-		if displayStepCallback != nil {
-			displayStepCallback("⏳", "Waiting for router to come back up…")
-		}
+		reportStep("⏳", "Waiting for router to come back up…")
 		slog.Debug("reconnecting after RouterOS update to re-check RouterBoard status", "host", host)
 		// Wait for router to come back up
 		// Before attempting to reconnect, close the existing SSH connection (if any)

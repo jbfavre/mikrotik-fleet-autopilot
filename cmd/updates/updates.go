@@ -183,20 +183,29 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		// Wait for router to come back up
 		_ = conn.Close()
 		// Reconnection loop
+		const maxReconnectAttempts = 30
 		var reconnected bool
-		for {
+		for attempt := 1; attempt <= maxReconnectAttempts; attempt++ {
 			if err := ctx.Err(); err != nil {
 				return nil, nil, fmt.Errorf("context cancelled during reconnection: %w", err)
 			}
 			conn, err = deps.SSHConnectionFactory(ctx, host)
 			if err != nil {
 				// Log error but do not overwrite display
-				slog.Error("failed to dial", "address", host, "error", err)
-				time.Sleep(deps.ReconnectDelay)
+				slog.Error("failed to dial", "address", host, "error", err, "attempt", attempt, "maxAttempts", maxReconnectAttempts)
+				// Wait before next attempt, but allow context cancellation to interrupt the wait.
+				select {
+				case <-ctx.Done():
+					return nil, nil, fmt.Errorf("context cancelled during reconnection wait: %w", ctx.Err())
+				case <-time.After(deps.ReconnectDelay):
+				}
 				continue
 			}
 			re reconnected = true
 			break
+		}
+		if !reconnected {
+			return nil, nil, fmt.Errorf("failed to reconnect to %s after %d attempts", host, maxReconnectAttempts)
 		}
 		if reconnected && displayStepCallback != nil {
 			displayStepCallback("✅", "RouterOS update successfully applied")

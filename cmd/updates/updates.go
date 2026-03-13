@@ -188,7 +188,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 			if err := ctx.Err(); err != nil {
 				return nil, nil, fmt.Errorf("context cancelled during reconnection: %w", err)
 			}
-			conn, err = deps.SSHConnectionFactory(ctx, host)
+			newConn, err := deps.SSHConnectionFactory(ctx, host)
 			if err != nil {
 				// Log error but do not overwrite display
 				slog.Error("failed to dial", "address", host, "error", err, "attempt", attempt, "maxAttempts", maxReconnectAttempts)
@@ -200,6 +200,12 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 				}
 				continue
 			}
+			if conn != nil {
+				if cerr := conn.Close(); cerr != nil {
+					slog.Debug("failed to close previous SSH connection during reconnection", "host", host, "error", cerr)
+				}
+			}
+			conn = newConn
 			reconnected = true
 			break
 		}

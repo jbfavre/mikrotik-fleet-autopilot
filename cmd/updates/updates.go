@@ -112,6 +112,13 @@ func Updates(ctx context.Context, host string) error {
 }
 
 func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDependencies, displayStepCallback display.StepCallback) (*UpdateStatus, *UpdateStatus, error) {
+	// Internal helper function to manage display updates if a callback is provided, or do nothing if not.
+	reportStep := func(icon, msg string) {
+		if displayStepCallback != nil {
+			displayStepCallback(icon, msg)
+		}
+	}
+
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return nil, nil, fmt.Errorf("context cancelled: %w", err)
@@ -130,13 +137,6 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		_ = conn.Close()
 	}()
 	slog.Debug("SSH connection created", "host", host)
-
-	// Step 1: Check current status
-	reportStep := func(icon, msg string) {
-		if displayStepCallback != nil {
-			displayStepCallback(icon, msg)
-		}
-	}
 
 	// Step 1: Check current status
 	reportStep("⏳", "Checking current update status…")
@@ -205,18 +205,17 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 			}
 			conn = newConn
 			reconnected = true
+			reportStep("✅", "Applied RouterOS update and reconnected")
 			break
 		}
 		if !reconnected {
 			return nil, nil, fmt.Errorf("failed to reconnect to %s after %d attempts", host, maxReconnectAttempts)
 		}
-		if reconnected && displayStepCallback != nil {
-			displayStepCallback("⏳", "Reconnected to router after RouterOS update, verifying status…")
-		}
 
 		if boardStatus != nil {
 
 			slog.Info("Re-checking RouterBoard status after RouterOS update")
+			reportStep("⏳", "Checking RouterBoard status…")
 			recheckBoardStatus, recheckErr := getUpdateStatus(
 				conn,
 				"/system/routerboard/print",
@@ -241,34 +240,22 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 
 	// Apply RouterBoard update if needed (only for physical routers)
 	if !boardUpToDate && boardStatus != nil {
-		if displayStepCallback != nil {
-			displayStepCallback("⏳", "Applying RouterBoard update…")
-		}
+		reportStep("⏳", "Applying RouterBoard update…")
 		slog.Info("Applying RouterBoard updates")
 		newOsStatus, newBoardStatus, err := applyComponentUpdate(conn, ctx, host, "RouterBoard", "/system/reboot", true, deps)
 		if err != nil {
 			return nil, nil, err
 		}
-		if displayStepCallback != nil {
-			displayStepCallback("⏳", "Waiting for router to come back up…")
-		}
+		reportStep("⏳", "Waiting for router to come back up…")
 		finalOsStatus = newOsStatus
 		finalBoardStatus = newBoardStatus
 	}
 
-	if displayStepCallback != nil {
-		displayStepCallback("⏳", "Checking final update status…")
-	}
+	reportStep("⏳", "Checking final update status…")
 	if finalOsStatus == nil {
 		slog.Warn("post-update status check failed, update outcome unverified", "host", host)
-		if displayStepCallback != nil {
-			displayStepCallback("❓", "Update applied, status unverified")
-		}
+		reportStep("❓", "Update applied, status unverified")
 		return nil, nil, nil
-	}
-	if displayStepCallback != nil {
-		emoji, message := formatUpdateResult(finalOsStatus, finalBoardStatus)
-		displayStepCallback(emoji, message)
 	}
 
 	return finalOsStatus, finalBoardStatus, nil

@@ -104,9 +104,9 @@ func (h *HostLine) renderUnlocked() string {
 	if h.done {
 		// Format: [overallEmoji] [hostname] [step emojis] [finalMessage]
 		if summary == "" {
-			return fmt.Sprintf("%s %s  %s", h.overallEmoji, hostname, h.finalMessage)
+			return fmt.Sprintf("%s %s %s", h.overallEmoji, hostname, h.finalMessage)
 		}
-		return fmt.Sprintf("%s %s  %s %s", h.overallEmoji, hostname, summary, h.finalMessage)
+		return fmt.Sprintf("%s %s %s %s", h.overallEmoji, hostname, summary, h.finalMessage)
 	}
 
 	// In-progress: [overallEmoji] [hostname] [step emojis] [currentEmoji currentLabel]
@@ -119,12 +119,12 @@ func (h *HostLine) renderUnlocked() string {
 		return fmt.Sprintf("%s %s", h.overallEmoji, hostname)
 	}
 	if summary == "" {
-		return fmt.Sprintf("%s %s  %s", h.overallEmoji, hostname, current)
+		return fmt.Sprintf("%s %s %s", h.overallEmoji, hostname, current)
 	}
 	if current == "" {
-		return fmt.Sprintf("%s %s  %s", h.overallEmoji, hostname, summary)
+		return fmt.Sprintf("%s %s %s", h.overallEmoji, hostname, summary)
 	}
-	return fmt.Sprintf("%s %s  %s %s", h.overallEmoji, hostname, summary, current)
+	return fmt.Sprintf("%s %s %s %s", h.overallEmoji, hostname, summary, current)
 }
 
 // render returns the current display line for this host.

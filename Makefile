@@ -5,7 +5,7 @@ BINARY_NAME=mikrotik-fleet-autopilot
 BUILD_DIR=bin
 GO=go
 SHARED_TEST_PACKAGES=common/sshmocks_test
-TEST_PKGS := $(shell go list ./... | grep -v '$(SHARED_TEST_PACKAGES)')
+TEST_PKGS := $(shell go list ./... | grep -v "$(SHARED_TEST_PACKAGES)"")
 
 # Version info (can be overridden)
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")

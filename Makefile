@@ -4,6 +4,8 @@
 BINARY_NAME=mikrotik-fleet-autopilot
 BUILD_DIR=bin
 GO=go
+SHARED_TEST_PACKAGES=common/sshmocks_test
+TEST_PKGS = $(shell $(GO) list ./... | grep -v "$(SHARED_TEST_PACKAGES)")
 
 # Version info (can be overridden)
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -35,20 +37,20 @@ clean: ## Remove build artifacts
 
 test: ## Run all tests
 	@echo "Running tests..."
-	$(GO) test ./...
+	$(GO) test $(TEST_PKGS)
 
 test-verbose:
 	@echo "Running tests (verbose)..."
-	$(GO) test -v ./...
+	$(GO) test -v $(TEST_PKGS)
 
 test-benchmark: ## Run benchmarks
 	@echo "Running benchmarks..."
-	$(GO) test -bench=. ./...
+	$(GO) test -bench=. $(TEST_PKGS)
 
 test-coverage: ## Run tests with coverage report
 	@echo "Running tests with coverage..."
 	@mkdir -p $(BUILD_DIR)
-	@$(GO) test -coverprofile=$(BUILD_DIR)/coverage.out ./...
+	@$(GO) test -coverprofile=$(BUILD_DIR)/coverage.out $(TEST_PKGS)
 	@echo "\n=== Coverage by Package ==="
 	@$(GO) tool cover -func=$(BUILD_DIR)/coverage.out | grep -v "^mode:"
 	@echo "\n=== Total Coverage ==="

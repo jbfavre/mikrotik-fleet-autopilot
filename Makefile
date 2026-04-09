@@ -4,7 +4,7 @@
 BINARY_NAME=mikrotik-fleet-autopilot
 BUILD_DIR=bin
 GO=go
-SHARED_TEST_PACKAGES=/common/sshmocks_test
+SHARED_TEST_PACKAGES=common/sshmocks_test
 TEST_PKGS := $(shell go list ./... | grep -v '$(SHARED_TEST_PACKAGES)')
 
 # Version info (can be overridden)

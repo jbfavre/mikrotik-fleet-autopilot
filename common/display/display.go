@@ -3,6 +3,7 @@ package display
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -81,7 +82,9 @@ func (h *HostLine) Finish(overallEmoji, message string) {
 	h.overallEmoji = overallEmoji
 	h.finalMessage = message
 	if !h.liveMode {
-		fmt.Fprintf(h.out, "%s\n", h.renderUnlocked())
+		if _, err := fmt.Fprintf(h.out, "%s\n", h.renderUnlocked()); err != nil {
+			slog.Debug("display: failed to write host line", "host", h.hostname, "error", err)
+		}
 	}
 }
 
@@ -239,7 +242,9 @@ func (d *LiveDisplay) Stop() {
 		return
 	}
 	defer d.release()
-	liveterm.Stop(false)
+	if err := liveterm.Stop(false); err != nil {
+		slog.Debug("display: failed to stop live terminal", "error", err)
+	}
 }
 
 // renderLines returns all host lines for liveterm to display.

@@ -83,7 +83,7 @@ func (h *HostLine) Finish(overallEmoji, message string) {
 	h.finalMessage = message
 	if !h.liveMode {
 		if _, err := fmt.Fprintf(h.out, "%s\n", h.renderUnlocked()); err != nil {
-			slog.Debug("display: failed to write host line", "host", h.hostname, "error", err)
+			slog.Warn("display: failed to write host line", "host", h.hostname, "error", err)
 		}
 	}
 }
@@ -243,7 +243,7 @@ func (d *LiveDisplay) Stop() {
 	}
 	defer d.release()
 	if err := liveterm.Stop(false); err != nil {
-		slog.Debug("display: failed to stop live terminal", "error", err)
+		slog.Warn("display: failed to stop live terminal", "error", err)
 	}
 }
 

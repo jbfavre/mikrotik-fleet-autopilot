@@ -12,6 +12,7 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/display"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
@@ -107,18 +108,28 @@ var Command = []*cli.Command{
 				ExportConfigFunc:     export.Export,
 			}
 
+			// Set up live display
+			disp := display.New(os.Stdout, coreCfg.Hosts, coreCfg.Debug)
+			disp.Start()
+			defer disp.Stop()
+
 			var lastErr error
 			if len(coreCfg.Hosts) == 0 {
 				slog.Warn("no hosts defined in configuration, nothing to enroll")
 				lastErr = fmt.Errorf("no hosts defined in configuration")
 			}
-			for _, host := range coreCfg.Hosts {
-				if err := enroll(ctx, host, enrollCfg, deps); err != nil {
-					fmt.Printf("❌ %s: Enrollment failed\n", host)
+			for i, host := range coreCfg.Hosts {
+				line := disp.Line(i)
+				displayStepCallback := display.NewStepCallback(line)
+				if err := enroll(ctx, host, enrollCfg, deps, displayStepCallback); err != nil {
+					line.CompleteStep("❌")
+					line.FinishError(fmt.Sprintf("Enrollment failed: %s", err.Error()))
 					lastErr = err
+					slog.Error("enrollment failed", "host", host, "hostname", enrollCfg.Hostname, "error", err)
 					// Continue with other hosts even if one fails
 				} else {
-					fmt.Printf("✅ %s: Enrollment completed successfully\n", host)
+					slog.Info("enrollment completed successfully", "host", host, "hostname", enrollCfg.Hostname)
+					line.Finish("✅", "Enrollment completed successfully")
 				}
 			}
 			return lastErr
@@ -127,7 +138,13 @@ var Command = []*cli.Command{
 }
 
 // enroll is the entry point for the enrollment command
-func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps EnrollDependencies) error {
+func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps EnrollDependencies, displayStepCallback display.StepCallback) error {
+	// Internal helper function to manage display updates if a callback is provided, or do nothing if not.
+	reportStep := func(icon, msg string) {
+		if displayStepCallback != nil {
+			displayStepCallback(icon, msg)
+		}
+	}
 
 	// Set enrollment mode in context to allow host key capture
 	ctx = context.WithValue(ctx, core.EnrollmentKey, true)
@@ -156,11 +173,13 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	slog.Info("starting enrollment", "host", host, "hostname", hostname)
 
 	// Step 1: Always update host key first
+	reportStep("⏳", "Updating SSH host key…")
 	fingerprint, err := updateHostKey(ctx, host, deps)
 	if err != nil {
 		slog.Error("failed to capture host key", "host", host, "error", err)
 		return fmt.Errorf("failed to capture host key: %w", err)
 	}
+	reportStep("✅", "SSH host key successfully updated")
 	slog.Debug("host key captured", "host", host, "hostname", hostname, "fingerprint", fingerprint)
 
 	// Handle update-hostkey-only mode
@@ -170,10 +189,12 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	}
 
 	// Step 2: Establish connection
+	reportStep("⏳", "Connecting to router…")
 	conn, err := connectToRouter(ctx, host, hostname, deps)
 	if err != nil {
 		return err
 	}
+	reportStep("✅", "Connected")
 	defer func() {
 		if conn != nil {
 			_ = conn.Close()
@@ -181,46 +202,57 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	}()
 
 	// Step 3: Apply pre-enrollment script
+	reportStep("⏳", "Applying pre-enroll script…")
 	if err := applyPreEnrollScript(conn, enrollCfg); err != nil {
 		slog.Error("pre-enroll script failed", "host", host, "hostname", hostname, "error", err)
 		return fmt.Errorf("failed to apply pre-enroll script: %w", err)
 	}
+	reportStep("✅", "Pre-enroll script applied successfully")
 
 	// Step 4: Set router identity
+	reportStep("⏳", "Setting router identity…")
 	if err := setRouterIdentity(conn, hostname); err != nil {
 		slog.Error("failed to set router identity", "host", host, "hostname", hostname, "error", err)
 		return fmt.Errorf("failed to set router identity: %w", err)
 	}
-	slog.Debug("router identity set", "host", host, "hostname", hostname)
+	reportStep("✅", "Router identity set successfully")
 
 	// Step 5: Apply updates (optional)
 	if enrollCfg.SkipUpdates {
+		reportStep("❓", "Skipping updates…")
 		slog.Warn("skipping updates", "host", host, "hostname", hostname, "--skip-updates value", enrollCfg.SkipUpdates)
 	} else {
+		reportStep("⏳", "Applying updates…")
 		if err := applyUpdates(ctx, host, hostname, deps); err != nil {
 			slog.Error("failed to apply updates", "host", host, "hostname", hostname, "error", err)
+			reportStep("⚠️", "Failed to apply updates…")
 			// Non-fatal because router might not have internet access yet
 		}
+		reportStep("✅", "Updates applied successfully")
 	}
 
 	// Step 6: Export configuration (optional)
 	if enrollCfg.SkipExport {
+		reportStep("❓", "Skipping export…")
 		slog.Warn("skipping export", "host", host, "hostname", hostname, "--skip-export value", enrollCfg.SkipExport)
 	} else {
+		reportStep("⏳", "Exporting configuration…")
 		conn, err = exportConfiguration(ctx, host, hostname, enrollCfg, deps, conn)
 		if err != nil {
 			slog.Error("configuration export failed", "host", host, "hostname", hostname, "error", err)
 			return fmt.Errorf("failed to export configuration: %w", err)
 		}
+		reportStep("✅", "Configuration successfully exported")
 	}
 
 	// Step 7: Apply post-enrollment script
+	reportStep("⏳", "Applying post-enroll script…")
 	if err := applyPostEnrollScript(conn, enrollCfg); err != nil {
 		slog.Error("post-enroll script failed", "host", host, "hostname", hostname, "error", err)
 		return fmt.Errorf("failed to apply post-enroll script: %w", err)
 	}
+	reportStep("✅", "Post-enroll script applied successfully")
 
-	slog.Info("enrollment completed successfully", "host", host, "hostname", hostname)
 	return nil
 }
 

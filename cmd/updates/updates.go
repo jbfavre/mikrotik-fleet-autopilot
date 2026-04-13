@@ -77,7 +77,7 @@ var Command = []*cli.Command{
 					// Offline is unknown, not a fatal failure; don't set lastErr.
 				} else if err != nil {
 					line.CompleteStep("❌")
-					line.FinishError("updates failed: " + err.Error())
+					line.FinishError(err.Error())
 					lastErr = err
 					// Continue with other hosts even if one fails
 				} else if osStatus == nil {

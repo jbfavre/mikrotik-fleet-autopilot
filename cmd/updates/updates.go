@@ -126,19 +126,21 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 
 	slog.Debug("subcommand apply-updates flag", "value", cfg.UpdatesApply)
 
-	// SSH init
+	// Step 1: Establish SSH connection
+	reportStep("⏳", "Connecting to router…")
 	slog.Info("Initializing SSH connection")
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
 		slog.Debug("failed to connect", "host", host, "error", err)
 		return nil, nil, fmt.Errorf("%w: failed to connect: %w", ErrCannotCheckUpdates, err)
 	}
+	reportStep("✅", "Connected")
 	defer func() {
 		_ = conn.Close()
 	}()
 	slog.Debug("SSH connection created", "host", host)
 
-	// Step 1: Check current status
+	// Step 2: Check current status
 	reportStep("⏳", "Checking current update status…")
 	slog.Info("Checking current update status")
 	osStatus, boardStatus, err := checkCurrentStatus(conn)
@@ -147,7 +149,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	}
 	reportStep("✅", "Checked update status")
 
-	// Step 2: Apply updates if requested and needed
+	// Step 3: Apply updates if requested and needed
 	if !cfg.UpdatesApply {
 		// Only checking updates, not applying
 		slog.Info("Updates apply not requested, skipping update application")
@@ -161,7 +163,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	osUpToDate := osStatus.Installed == osStatus.Available
 	boardUpToDate := boardStatus == nil || boardStatus.Installed == boardStatus.Available
 
-	// Apply RouterOS update if needed
+	// Step 4: Manage RouterOS update
 	if !osUpToDate {
 		reportStep("⏳", "Applying RouterOS update…")
 		slog.Info("Applying RouterOS updates")
@@ -238,7 +240,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		}
 	}
 
-	// Apply RouterBoard update if needed (only for physical routers)
+	// Step 5: Manage RouterBoard update if needed (only for physical routers)
 	if !boardUpToDate && boardStatus != nil {
 		reportStep("⏳", "Applying RouterBoard update…")
 		slog.Info("Applying RouterBoard updates")

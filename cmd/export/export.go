@@ -70,7 +70,7 @@ var Command = []*cli.Command{
 				displayStepCallback := display.NewStepCallback(line)
 				filename, err := export(ctx, host, "", exportCfg, deps, displayStepCallback) // Empty preferred filename = derive automatically
 				if err != nil {
-					line.FinishError("export failed: " + err.Error())
+					line.FinishError(err.Error())
 					lastErr = err
 					// Continue with other hosts even if one fails
 				} else {

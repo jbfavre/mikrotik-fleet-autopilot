@@ -2054,7 +2054,7 @@ func TestEnrollWorkflow(t *testing.T) {
 			ctx = context.WithValue(ctx, core.ConfigKey, coreConfig)
 
 			// Execute enroll
-			err := enroll(ctx, tt.host, cfg, deps)
+			err := enroll(ctx, tt.host, cfg, deps, nil)
 
 			// Verify results
 			if tt.wantErr {

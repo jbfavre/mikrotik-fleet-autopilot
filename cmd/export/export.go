@@ -96,7 +96,7 @@ func Export(ctx context.Context, host string, exportOutputDir string, exportShow
 	return err
 }
 
-func export(ctx context.Context, host string, preferredFilename string, cfg ExportConfig, deps ExportDependencies, displayStepCallback display.StepCallback) (string, error) {
+func export(ctx context.Context, host string, preferredFilename string, cfg ExportConfig, deps ExportDependencies, displayStepCallback func(string, string)) (string, error) {
 	reportStep := func(icon, msg string) {
 		if displayStepCallback != nil {
 			displayStepCallback(icon, msg)

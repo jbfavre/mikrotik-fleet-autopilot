@@ -155,17 +155,17 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 		hostInfo := ssh.ParseHost(host)
 		filename = fmt.Sprintf("%s.rsc", hostInfo.ShortName)
 	}
-	filepath := filepath.Join(cfg.OutputDir, filename)
+	outputPath := filepath.Join(cfg.OutputDir, filename)
 
 	reportStep("⏳", "Writing configuration file…")
-	slog.Debug("writing configuration", "file", filepath, "size", len(result))
-	if err := os.WriteFile(filepath, []byte(result), 0644); err != nil {
+	slog.Debug("writing configuration", "file", outputPath, "size", len(result))
+	if err := os.WriteFile(outputPath, []byte(result), 0644); err != nil {
 		reportStep("❌", "Failed to write configuration file")
-		slog.Error("failed to write configuration file", "host", host, "file", filepath, "error", err)
+		slog.Error("failed to write configuration file", "host", host, "file", outputPath, "error", err)
 		return "", fmt.Errorf("failed to write configuration file: %w", err)
 	}
 	reportStep("✅", "Wrote configuration file")
 
-	slog.Info("configuration exported successfully", "host", host, "file", filename)
+	slog.Info("configuration exported successfully", "host", host, "file", outputPath)
 	return filename, nil
 }

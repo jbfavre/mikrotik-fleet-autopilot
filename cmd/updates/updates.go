@@ -111,7 +111,7 @@ func Updates(ctx context.Context, host string) error {
 	return err
 }
 
-func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDependencies, displayStepCallback func(string, string)) (*UpdateStatus, *UpdateStatus, error) {
+func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDependencies, displayStepCallback display.StepCallback) (*UpdateStatus, *UpdateStatus, error) {
 	// Internal helper function to manage display updates if a callback is provided, or do nothing if not.
 	reportStep := func(icon, msg string) {
 		if displayStepCallback != nil {

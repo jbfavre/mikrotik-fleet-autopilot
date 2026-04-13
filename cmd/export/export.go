@@ -116,7 +116,6 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 	slog.Debug("initializing SSH connection", "host", host)
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
-		reportStep("❌", "SSH connection failed")
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
 		return "", fmt.Errorf("failed to create SSH connection: %w", err)
 	}
@@ -135,7 +134,6 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 
 	result, err := conn.Run(sshCmd)
 	if err != nil {
-		reportStep("❌", "Export command failed")
 		slog.Error("failed to export configuration", "host", host, "error", err)
 		return "", fmt.Errorf("failed to export configuration: %w", err)
 	}
@@ -161,7 +159,6 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 	reportStep("⏳", "Writing configuration file…")
 	slog.Debug("writing configuration", "file", outputPath, "size", len(result))
 	if err := os.WriteFile(outputPath, []byte(result), 0644); err != nil {
-		reportStep("❌", "Failed to write configuration file")
 		slog.Error("failed to write configuration file", "host", host, "file", outputPath, "error", err)
 		return "", fmt.Errorf("failed to write configuration file: %w", err)
 	}

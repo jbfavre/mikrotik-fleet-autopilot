@@ -77,7 +77,7 @@ var Command = []*cli.Command{
 					// Offline is unknown, not a fatal failure; don't set lastErr.
 				} else if err != nil {
 					line.CompleteStep("❌")
-					line.FinishError("updates failed: " + err.Error())
+					line.FinishError(err.Error())
 					lastErr = err
 					// Continue with other hosts even if one fails
 				} else if osStatus == nil {
@@ -111,7 +111,7 @@ func Updates(ctx context.Context, host string) error {
 	return err
 }
 
-func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDependencies, displayStepCallback display.StepCallback) (*UpdateStatus, *UpdateStatus, error) {
+func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDependencies, displayStepCallback func(string, string)) (*UpdateStatus, *UpdateStatus, error) {
 	// Internal helper function to manage display updates if a callback is provided, or do nothing if not.
 	reportStep := func(icon, msg string) {
 		if displayStepCallback != nil {

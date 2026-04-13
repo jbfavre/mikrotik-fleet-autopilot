@@ -123,13 +123,13 @@ var Command = []*cli.Command{
 				displayStepCallback := display.NewStepCallback(line)
 				if err := enroll(ctx, host, enrollCfg, deps, displayStepCallback); err != nil {
 					line.CompleteStep("❌")
-					line.FinishError(fmt.Sprintf("%s: Enrollment failed: %s", host, err.Error()))
+					line.FinishError(fmt.Sprintf("Enrollment failed: %s", err.Error()))
 					lastErr = err
 					slog.Error("enrollment failed", "host", host, "hostname", enrollCfg.Hostname, "error", err)
 					// Continue with other hosts even if one fails
 				} else {
 					slog.Info("enrollment completed successfully", "host", host, "hostname", enrollCfg.Hostname)
-					line.Finish("✅", fmt.Sprintf("%s: Enrollment completed successfully", host))
+					line.Finish("✅", "Enrollment completed successfully")
 				}
 			}
 			return lastErr
@@ -218,30 +218,32 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	reportStep("✅", "Router identity set successfully")
 
 	// Step 5: Apply updates (optional)
-	reportStep("⏳", "Applying updates…")
 	if enrollCfg.SkipUpdates {
+		reportStep("❓", "Skipping updates…")
 		slog.Warn("skipping updates", "host", host, "hostname", hostname, "--skip-updates value", enrollCfg.SkipUpdates)
 	} else {
+		reportStep("⏳", "Applying updates…")
 		if err := applyUpdates(ctx, host, hostname, deps); err != nil {
 			slog.Error("failed to apply updates", "host", host, "hostname", hostname, "error", err)
 			reportStep("⚠️", "Failed to apply updates…")
 			// Non-fatal because router might not have internet access yet
 		}
+		reportStep("✅", "Updates applied successfully")
 	}
-	reportStep("✅", "Updates applied successfully")
 
 	// Step 6: Export configuration (optional)
-	reportStep("⏳", "Exporting configuration…")
 	if enrollCfg.SkipExport {
+		reportStep("❓", "Skipping export…")
 		slog.Warn("skipping export", "host", host, "hostname", hostname, "--skip-export value", enrollCfg.SkipExport)
 	} else {
+		reportStep("⏳", "Exporting configuration…")
 		conn, err = exportConfiguration(ctx, host, hostname, enrollCfg, deps, conn)
 		if err != nil {
 			slog.Error("configuration export failed", "host", host, "hostname", hostname, "error", err)
 			return fmt.Errorf("failed to export configuration: %w", err)
 		}
+		reportStep("✅", "Configuration successfully exported")
 	}
-	reportStep("✅", "Configuration successfully exported")
 
 	// Step 7: Apply post-enrollment script
 	reportStep("⏳", "Applying post-enroll script…")

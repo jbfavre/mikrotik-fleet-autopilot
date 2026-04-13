@@ -10,6 +10,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/display"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
@@ -57,16 +58,23 @@ var Command = []*cli.Command{
 				SSHConnectionFactory: ssh.CreateConnection,
 			}
 
+			// Setup console display
+			disp := display.New(os.Stdout, coreCfg.Hosts, coreCfg.Debug)
+			disp.Start()
+			defer disp.Stop()
+
 			// Iterate over all hosts
 			var lastErr error
-			for _, host := range coreCfg.Hosts {
-				filename, err := export(ctx, host, "", exportCfg, deps) // Empty preferred filename = derive automatically
+			for i, host := range coreCfg.Hosts {
+				line := disp.Line(i)
+				displayStepCallback := display.NewStepCallback(line)
+				filename, err := export(ctx, host, "", exportCfg, deps, displayStepCallback) // Empty preferred filename = derive automatically
 				if err != nil {
-					fmt.Printf("❌ %s: Export failed\n", host)
+					line.FinishError("export failed: " + err.Error())
 					lastErr = err
 					// Continue with other hosts even if one fails
 				} else {
-					fmt.Printf("✅ %s: Configuration exported to %s\n", host, filename)
+					line.Finish("✅", fmt.Sprintf("Configuration exported to %s", filename))
 				}
 			}
 			return lastErr
@@ -84,11 +92,17 @@ func Export(ctx context.Context, host string, exportOutputDir string, exportShow
 	deps := ExportDependencies{
 		SSHConnectionFactory: ssh.CreateConnection,
 	}
-	_, err := export(ctx, host, preferredFilename, cfg, deps) // filename intentionally discarded; caller (enroll) manages output
+	_, err := export(ctx, host, preferredFilename, cfg, deps, nil) // filename intentionally discarded; caller (enroll) manages output
 	return err
 }
 
-func export(ctx context.Context, host string, preferredFilename string, cfg ExportConfig, deps ExportDependencies) (string, error) {
+func export(ctx context.Context, host string, preferredFilename string, cfg ExportConfig, deps ExportDependencies, displayStepCallback display.StepCallback) (string, error) {
+	reportStep := func(icon, msg string) {
+		if displayStepCallback != nil {
+			displayStepCallback(icon, msg)
+		}
+	}
+
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("context cancelled: %w", err)
@@ -96,32 +110,42 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 
 	slog.Info("exporting configuration", "host", host)
 
+	// Step 1: Establish SSH connection
+	reportStep("⏳", "Connecting to router…")
 	slog.Debug("initializing SSH connection", "host", host)
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
+		reportStep("❌", "SSH connection failed")
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
 		return "", fmt.Errorf("failed to create SSH connection: %w", err)
 	}
+	reportStep("✅", "Connected")
 	defer func() {
 		_ = conn.Close()
 	}()
 
+	// Step 2: Execute export command
 	sshCmd := "/export terse"
 	if cfg.ShowSensitive {
 		sshCmd += " show-sensitive"
 	}
+	reportStep("⏳", "Running export command…")
 	slog.Debug("executing export command", "command", sshCmd, "show-sensitive", cfg.ShowSensitive)
 
 	result, err := conn.Run(sshCmd)
 	if err != nil {
+		reportStep("❌", "Export command failed")
 		slog.Error("failed to export configuration", "host", host, "error", err)
 		return "", fmt.Errorf("failed to export configuration: %w", err)
 	}
+	reportStep("✅", "Export command completed")
 
-	// Clean up Windows line endings (CRLF -> LF)
+	// Step 3: Clean up Windows line endings (CRLF -> LF)
+	reportStep("⏳", "Normalizing line endings…")
 	result = strings.ReplaceAll(result, "\r\n", "\n")
+	reportStep("✅", "Normalized output")
 
-	// Generate output filename
+	// Step 4: Writing configuration to file
 	var filename string
 	if preferredFilename != "" {
 		// Use provided name (from enroll's --hostname)
@@ -133,11 +157,14 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 	}
 	filepath := filepath.Join(cfg.OutputDir, filename)
 
+	reportStep("⏳", "Writing configuration file…")
 	slog.Debug("writing configuration", "file", filepath, "size", len(result))
 	if err := os.WriteFile(filepath, []byte(result), 0644); err != nil {
+		reportStep("❌", "Failed to write configuration file")
 		slog.Error("failed to write configuration file", "host", host, "file", filepath, "error", err)
 		return "", fmt.Errorf("failed to write configuration file: %w", err)
 	}
+	reportStep("✅", "Wrote configuration file")
 
 	slog.Info("configuration exported successfully", "host", host, "file", filename)
 	return filename, nil

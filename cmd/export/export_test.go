@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -249,7 +250,7 @@ add name=bridge1`,
 			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			// Call the function
-			filename, err := export(ctx, tt.host, "", cfg, deps)
+			filename, err := export(ctx, tt.host, "", cfg, deps, nil)
 
 			// Verify error expectations
 			if (err != nil) != tt.wantErr {
@@ -408,7 +409,7 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 			ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 			// Call export
-			_, err = export(ctx, tt.host, tt.preferredFilename, cfg, deps)
+			_, err = export(ctx, tt.host, tt.preferredFilename, cfg, deps, nil)
 			if err != nil {
 				t.Fatalf("export() failed: %v", err)
 			}
@@ -453,7 +454,7 @@ func TestExport_SSHConnectionFactoryError(t *testing.T) {
 	ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 	// Call export - should fail
-	_, err := export(ctx, "test-host", "", cfg, deps)
+	_, err := export(ctx, "test-host", "", cfg, deps, nil)
 	if err == nil {
 		t.Error("export() should fail when SSH connection cannot be established")
 	}
@@ -505,12 +506,63 @@ func TestExport_CloseError(t *testing.T) {
 	ctx = context.WithValue(ctx, core.SshManagerKey, &sshmocks_test.MockManager{})
 
 	// Export should succeed even if close fails (error is silently ignored)
-	_, err = export(ctx, "test-host", "", cfg, deps)
+	_, err = export(ctx, "test-host", "", cfg, deps, nil)
 	if err != nil {
 		t.Errorf("export() should succeed even with close error, got: %v", err)
 	}
 
 	if !closeCalled {
 		t.Error("Close() was not called")
+	}
+}
+
+func TestExport_StepCallbackSequence(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := ExportConfig{
+		ShowSensitive: false,
+		OutputDir:     tmpDir,
+	}
+
+	deps := ExportDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			return &sshmocks_test.MockRunner{
+				RunFunc: func(cmd string) (string, error) {
+					return "/interface bridge\nadd name=bridge1", nil
+				},
+				CloseFunc: func() error {
+					return nil
+				},
+			}, nil
+		},
+	}
+
+	type step struct {
+		emoji string
+		msg   string
+	}
+	var got []step
+	stepCallback := func(emoji, msg string) {
+		got = append(got, step{emoji: emoji, msg: msg})
+	}
+
+	ctx := context.Background()
+	_, err := export(ctx, "router1", "", cfg, deps, stepCallback)
+	if err != nil {
+		t.Fatalf("export() failed: %v", err)
+	}
+
+	want := []step{
+		{emoji: "⏳", msg: "Connecting to router…"},
+		{emoji: "✅", msg: "Connected"},
+		{emoji: "⏳", msg: "Running export command…"},
+		{emoji: "✅", msg: "Export command completed"},
+		{emoji: "⏳", msg: "Normalizing line endings…"},
+		{emoji: "✅", msg: "Normalized output"},
+		{emoji: "⏳", msg: "Writing configuration file…"},
+		{emoji: "✅", msg: "Wrote configuration file"},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("step callback sequence mismatch\n got: %#v\nwant: %#v", got, want)
 	}
 }

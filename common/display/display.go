@@ -186,7 +186,9 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 }
 
 // initNonLive allocates d.pendingLines and wires each HostLine.pending to it.
-// Must be called whenever the display transitions to non-live mode.
+// Called during initial construction when the display starts in non-live mode,
+// and whenever a live-mode display transitions to non-live mode via Start's
+// fallback paths (singleton contention or liveterm.Start failure).
 func (d *LiveDisplay) initNonLive() {
 	d.pendingLines = make([]string, len(d.lines))
 	for _, l := range d.lines {

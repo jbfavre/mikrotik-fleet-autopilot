@@ -3,10 +3,13 @@ package enroll
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
@@ -108,33 +111,87 @@ var Command = []*cli.Command{
 				ExportConfigFunc:     export.Export,
 			}
 
-			// Set up live display
-			disp := display.New(os.Stdout, coreCfg.Hosts, coreCfg.Debug)
-			disp.Start()
-			defer disp.Stop()
+			if err := validateEnrollAction(enrollCfg, coreCfg.Hosts); err != nil {
+				return err
+			}
 
-			var lastErr error
-			if len(coreCfg.Hosts) == 0 {
-				slog.Warn("no hosts defined in configuration, nothing to enroll")
-				lastErr = fmt.Errorf("no hosts defined in configuration")
-			}
-			for i, host := range coreCfg.Hosts {
-				line := disp.Line(i)
-				displayStepCallback := display.NewStepCallback(line)
-				if err := enroll(ctx, host, enrollCfg, deps, displayStepCallback); err != nil {
-					line.CompleteStep("❌")
-					line.FinishError(fmt.Sprintf("Enrollment failed: %s", err.Error()))
-					lastErr = err
-					slog.Error("enrollment failed", "host", host, "hostname", enrollCfg.Hostname, "error", err)
-					// Continue with other hosts even if one fails
-				} else {
-					slog.Info("enrollment completed successfully", "host", host, "hostname", enrollCfg.Hostname)
-					line.Finish("✅", "Enrollment completed successfully")
-				}
-			}
-			return lastErr
+			return runEnrollForHosts(ctx, coreCfg.Hosts, coreCfg.Debug, coreCfg.NoMultithread, enrollCfg, deps, os.Stdout)
 		},
 	},
+}
+
+// maxConcurrentHosts limits the number of hosts processed simultaneously in
+// multithread mode to avoid opening too many SSH connections at once.
+const maxConcurrentHosts = 20
+
+func validateEnrollAction(cfg EnrollConfig, hosts []string) error {
+	if cfg.Force && cfg.UpdateHostKeyOnly {
+		return fmt.Errorf("cannot use --force and --update-hostkey-only together")
+	}
+	if len(hosts) == 0 {
+		return fmt.Errorf("no hosts specified or discovered")
+	}
+	if cfg.UpdateHostKeyOnly {
+		return nil
+	}
+	if len(hosts) != 1 {
+		return fmt.Errorf("enroll command requires exactly one host, got %d", len(hosts))
+	}
+	if cfg.Hostname == "" {
+		return fmt.Errorf("--hostname is required for enrollment")
+	}
+	return nil
+}
+
+func runEnrollForHosts(ctx context.Context, hosts []string, debug, noMultithread bool, cfg EnrollConfig, deps EnrollDependencies, out io.Writer) error {
+	disp := display.New(out, hosts, debug)
+	disp.SetConcurrent(!noMultithread)
+	disp.Start()
+	defer disp.Stop()
+
+	// errs is indexed by host position so results are collected in host-list
+	// order regardless of goroutine completion order.
+	errs := make([]error, len(hosts))
+	var wg sync.WaitGroup
+
+	processHost := func(i int, host string) {
+		line := disp.Line(i)
+		displayStepCallback := display.NewStepCallback(line)
+		if err := enroll(ctx, host, cfg, deps, displayStepCallback); err != nil {
+			line.CompleteStep("❌")
+			line.FinishError(fmt.Sprintf("Enrollment failed: %s", err.Error()))
+			errs[i] = err
+			slog.Error("enrollment failed", "host", host, "hostname", cfg.Hostname, "error", err)
+			return
+		}
+		slog.Info("enrollment completed successfully", "host", host, "hostname", cfg.Hostname)
+		line.Finish("✅", "Enrollment completed successfully")
+	}
+
+	sem := make(chan struct{}, maxConcurrentHosts)
+	var ctxErr error
+loop:
+	for i, host := range hosts {
+		if noMultithread {
+			processHost(i, host)
+		} else {
+			wg.Add(1)
+			select {
+			case sem <- struct{}{}:
+				go func(idx int, h string) {
+					defer wg.Done()
+					defer func() { <-sem }()
+					processHost(idx, h)
+				}(i, host)
+			case <-ctx.Done():
+				wg.Done()
+				ctxErr = ctx.Err()
+				break loop
+			}
+		}
+	}
+	wg.Wait()
+	return errors.Join(append(errs, ctxErr)...)
 }
 
 // enroll is the entry point for the enrollment command

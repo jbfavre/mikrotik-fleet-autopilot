@@ -1459,6 +1459,13 @@ func TestRunUpdatesForHosts_Concurrent(t *testing.T) {
 	var inFlight atomic.Int32
 	var maxInFlight atomic.Int32
 
+	nHosts := len(hosts)
+	// allStarted is closed once every goroutine has incremented inFlight,
+	// so maxInFlight is captured while all connections are simultaneously
+	// in-flight without relying on timing or sleep.
+	allStarted := make(chan struct{})
+	var startedCount atomic.Int32
+
 	baseFact := makeRouterSSHFactory(
 		map[string]bool{"router-offline": true},
 		map[string]bool{"router-apply-fail": true},
@@ -1472,9 +1479,12 @@ func TestRunUpdatesForHosts_Concurrent(t *testing.T) {
 				break
 			}
 		}
-		// Hold the connection open briefly so that all goroutines overlap and
-		// maxInFlight is captured while multiple connections are in-flight.
-		time.Sleep(10 * time.Millisecond)
+		// Barrier: block until every goroutine has reached this point.
+		if startedCount.Add(1) == int32(nHosts) {
+			close(allStarted)
+		} else {
+			<-allStarted
+		}
 		runner, err := baseFact(ctx, host)
 		if err != nil {
 			inFlight.Add(-1)

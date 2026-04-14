@@ -156,7 +156,7 @@ var (
 type LiveDisplay struct {
 	lines        []*HostLine
 	liveMode     bool
-	concurrent   bool   // when true, non-live Finish buffers; Stop flushes in host-list order
+	concurrent   bool // when true, non-live Finish buffers; Stop flushes in host-list order
 	out          io.Writer
 	pendingLines []string // non-live concurrent mode: one buffered output line per host, flushed in order by Stop
 }

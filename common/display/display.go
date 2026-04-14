@@ -84,7 +84,7 @@ func (h *HostLine) Finish(overallEmoji, message string) {
 	h.done = true
 	h.overallEmoji = overallEmoji
 	h.finalMessage = message
-	if !h.liveMode && h.pending != nil {
+	if !h.liveMode {
 		(*h.pending)[h.index] = h.renderUnlocked()
 	}
 }

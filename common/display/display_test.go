@@ -169,28 +169,28 @@ func TestMultipleHosts(t *testing.T) {
 // TestOutputOrder verifies that Stop flushes host lines in host-list order even
 // when goroutines call Finish out of order (simulating concurrent completion).
 func TestOutputOrder(t *testing.T) {
-	hosts := []string{"alpha.example.com", "beta.example.com", "gamma.example.com"}
+	hosts := []string{"host1.example.com", "host2.example.com", "host3.example.com"}
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, hosts)
 
 	// Finish hosts in reverse order to simulate out-of-order concurrent completion.
-	d.Line(2).Finish("✅", "gamma done")
-	d.Line(0).Finish("✅", "alpha done")
-	d.Line(1).Finish("✅", "beta done")
+	d.Line(2).Finish("✅", "host3 done")
+	d.Line(0).Finish("✅", "host1 done")
+	d.Line(1).Finish("✅", "host2 done")
 
 	d.Stop()
 	output := buf.String()
 
 	// Output must list hosts in the original host-list order.
-	alphaIdx := strings.Index(output, "alpha.example.com")
-	betaIdx := strings.Index(output, "beta.example.com")
-	gammaIdx := strings.Index(output, "gamma.example.com")
-	if alphaIdx < 0 || betaIdx < 0 || gammaIdx < 0 {
+	idx1 := strings.Index(output, "host1.example.com")
+	idx2 := strings.Index(output, "host2.example.com")
+	idx3 := strings.Index(output, "host3.example.com")
+	if idx1 < 0 || idx2 < 0 || idx3 < 0 {
 		t.Fatalf("output missing one or more hostnames: %q", output)
 	}
-	if !(alphaIdx < betaIdx && betaIdx < gammaIdx) {
-		t.Errorf("output not in host-list order: alpha=%d beta=%d gamma=%d\n%s",
-			alphaIdx, betaIdx, gammaIdx, output)
+	if !(idx1 < idx2 && idx2 < idx3) {
+		t.Errorf("output not in host-list order: host1=%d host2=%d host3=%d\n%s",
+			idx1, idx2, idx3, output)
 	}
 }
 

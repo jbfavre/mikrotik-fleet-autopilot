@@ -76,11 +76,10 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithrea
 	disp.Start()
 	defer disp.Stop()
 
-	var (
-		errMu    sync.Mutex
-		firstErr error
-		wg       sync.WaitGroup
-	)
+	// errs is indexed by host position so results are collected in host-list
+	// order regardless of goroutine completion order.
+	errs := make([]error, len(hosts))
+	var wg sync.WaitGroup
 
 	processHost := func(i int, host string) {
 		line := disp.Line(i)
@@ -90,15 +89,11 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithrea
 		case errors.Is(err, ErrCannotCheckUpdates):
 			line.CompleteStep("❓")
 			line.Finish("❓", err.Error())
-			// Offline is unknown, not a fatal failure; don't set firstErr.
+			// Offline is unknown, not a fatal failure; don't set errs[i].
 		case err != nil:
 			line.CompleteStep("❌")
 			line.FinishError(err.Error())
-			errMu.Lock()
-			if firstErr == nil {
-				firstErr = err
-			}
-			errMu.Unlock()
+			errs[i] = err
 		case osStatus == nil:
 			line.Finish("❓", "update applied, status unverified")
 		default:
@@ -122,7 +117,7 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithrea
 		}
 	}
 	wg.Wait()
-	return firstErr
+	return errors.Join(errs...)
 }
 
 type UpdateStatus struct {

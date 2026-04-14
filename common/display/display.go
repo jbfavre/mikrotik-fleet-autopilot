@@ -26,7 +26,8 @@ type completedStep struct {
 // HostLine tracks the display state for a single host.
 type HostLine struct {
 	mu            sync.Mutex
-	writeMu       *sync.Mutex // shared with LiveDisplay; serialises writes to out in non-live mode
+	index         int    // position in the parent LiveDisplay.pendingLines slice
+	pending       *[]string // points to LiveDisplay.pendingLines; nil in live mode
 	hostname      string
 	hostnameWidth int
 	overallEmoji  string // ⏳ while in-progress; set to the final status emoji by Finish
@@ -36,7 +37,6 @@ type HostLine struct {
 	done          bool
 	finalMessage  string // set by Finish; does not include the hostname or overall emoji
 	liveMode      bool
-	out           io.Writer
 }
 
 // StepCallback is used to update step display for a host.
@@ -76,19 +76,16 @@ func (h *HostLine) CompleteStep(emoji string) {
 // Finish marks the line as done with an overall status emoji and a final message.
 // overallEmoji should be one of ✅, ❌, ❓, ⚠️.
 // message is the human-readable result description (no hostname, no leading emoji).
+// In non-live mode the rendered line is buffered and written to out in host-list
+// order when LiveDisplay.Stop is called.
 func (h *HostLine) Finish(overallEmoji, message string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.done = true
 	h.overallEmoji = overallEmoji
 	h.finalMessage = message
-	if !h.liveMode {
-		h.writeMu.Lock()
-		_, err := fmt.Fprintf(h.out, "%s\n", h.renderUnlocked())
-		h.writeMu.Unlock()
-		if err != nil {
-			slog.Warn("display: failed to write host line", "host", h.hostname, "error", err)
-		}
+	if !h.liveMode && h.pending != nil {
+		(*h.pending)[h.index] = h.renderUnlocked()
 	}
 }
 
@@ -149,10 +146,10 @@ var (
 
 // LiveDisplay manages per-host live output lines.
 type LiveDisplay struct {
-	lines    []*HostLine
-	liveMode bool
-	out      io.Writer
-	writeMu  sync.Mutex // serialises writes to out across all HostLines in non-live mode
+	lines        []*HostLine
+	liveMode     bool
+	out          io.Writer
+	pendingLines []string // non-live mode: one buffered output line per host, flushed in order by Stop
 }
 
 // New creates a LiveDisplay. If debug=true or stdout is not a TTY, falls back to verbose mode.
@@ -170,14 +167,22 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 		liveMode: liveMode,
 		out:      out,
 	}
+
+	var pending *[]string
+	if !liveMode {
+		slots := make([]string, len(hosts))
+		d.pendingLines = slots
+		pending = &d.pendingLines
+	}
+
 	for i, host := range hosts {
 		d.lines[i] = &HostLine{
 			hostname:      host,
 			hostnameWidth: hostnameWidth,
 			overallEmoji:  "⏳",
 			liveMode:      liveMode,
-			out:           out,
-			writeMu:       &d.writeMu,
+			index:         i,
+			pending:       pending,
 		}
 	}
 	return d
@@ -241,14 +246,24 @@ func (d *LiveDisplay) release() {
 	}
 }
 
-// Stop finalises live output. In fallback mode this is a no-op.
+// Stop finalises output. In live mode it stops liveterm. In non-live mode it
+// flushes all buffered host lines to out in host-list order, so that concurrent
+// goroutines that finish at different times still produce deterministic output.
 func (d *LiveDisplay) Stop() {
-	if !d.liveMode {
+	if d.liveMode {
+		defer d.release()
+		if err := liveterm.Stop(false); err != nil {
+			slog.Warn("display: failed to stop live terminal", "error", err)
+		}
 		return
 	}
-	defer d.release()
-	if err := liveterm.Stop(false); err != nil {
-		slog.Warn("display: failed to stop live terminal", "error", err)
+	for _, line := range d.pendingLines {
+		if line == "" {
+			continue
+		}
+		if _, err := fmt.Fprintf(d.out, "%s\n", line); err != nil {
+			slog.Warn("display: failed to write host line", "error", err)
+		}
 	}
 }
 

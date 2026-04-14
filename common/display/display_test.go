@@ -37,7 +37,7 @@ func TestNewFallbackMode(t *testing.T) {
 func TestStartStopFallback(t *testing.T) {
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, []string{"router1"})
-	// In fallback mode Start/Stop should be no-ops and not panic.
+	// In fallback mode Start is a no-op; Stop flushes buffered lines (none here).
 	d.Start()
 	d.Stop()
 }
@@ -84,7 +84,8 @@ func TestFinishFallback(t *testing.T) {
 	l.CompleteStep("✅")
 	l.Finish("✅", "is up-to-date (RouterOS: 7.16)")
 
-	// In fallback mode, Finish should write the rendered line to out.
+	// In fallback mode, Finish buffers the rendered line; Stop flushes it to out.
+	d.Stop()
 	output := buf.String()
 	if !strings.HasPrefix(output, "✅") {
 		t.Errorf("Finish() output = %q, want ✅ overall status at start", output)
@@ -115,6 +116,7 @@ func TestFinishErrorFallback(t *testing.T) {
 	l.CompleteStep("⏳")
 	l.FinishError("updates failed: ssh: connect: timeout")
 
+	d.Stop()
 	output := buf.String()
 	if !strings.Contains(output, "❌") {
 		t.Errorf("FinishError() output = %q, want ❌", output)
@@ -155,11 +157,40 @@ func TestMultipleHosts(t *testing.T) {
 		l.Finish("✅", host+" is up-to-date")
 	}
 
+	d.Stop()
 	output := buf.String()
 	for _, host := range hosts {
 		if !strings.Contains(output, host) {
 			t.Errorf("output missing host %q: %s", host, output)
 		}
+	}
+}
+
+// TestOutputOrder verifies that Stop flushes host lines in host-list order even
+// when goroutines call Finish out of order (simulating concurrent completion).
+func TestOutputOrder(t *testing.T) {
+	hosts := []string{"alpha.example.com", "beta.example.com", "gamma.example.com"}
+	var buf bytes.Buffer
+	d := newTestDisplay(&buf, hosts)
+
+	// Finish hosts in reverse order to simulate out-of-order concurrent completion.
+	d.Line(2).Finish("✅", "gamma done")
+	d.Line(0).Finish("✅", "alpha done")
+	d.Line(1).Finish("✅", "beta done")
+
+	d.Stop()
+	output := buf.String()
+
+	// Output must list hosts in the original host-list order.
+	alphaIdx := strings.Index(output, "alpha.example.com")
+	betaIdx := strings.Index(output, "beta.example.com")
+	gammaIdx := strings.Index(output, "gamma.example.com")
+	if alphaIdx < 0 || betaIdx < 0 || gammaIdx < 0 {
+		t.Fatalf("output missing one or more hostnames: %q", output)
+	}
+	if !(alphaIdx < betaIdx && betaIdx < gammaIdx) {
+		t.Errorf("output not in host-list order: alpha=%d beta=%d gamma=%d\n%s",
+			alphaIdx, betaIdx, gammaIdx, output)
 	}
 }
 
@@ -389,8 +420,9 @@ func TestSingletonFallback(t *testing.T) {
 		}
 	}
 
-	// In plain-text fallback, Finish writes directly to the writer.
+	// In plain-text fallback, Finish buffers the line; Stop flushes it to out in order.
 	second.Line(0).Finish("✅", "up-to-date")
+	second.Stop()
 	if !strings.Contains(buf2.String(), "router2") {
 		t.Errorf("expected plain-text output for second display after fallback, got %q", buf2.String())
 	}

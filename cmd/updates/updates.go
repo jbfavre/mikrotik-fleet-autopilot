@@ -104,6 +104,7 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithrea
 	}
 
 	sem := make(chan struct{}, maxConcurrentHosts)
+	var ctxErr error
 loop:
 	for i, host := range hosts {
 		if noMultithread {
@@ -119,12 +120,13 @@ loop:
 				}(i, host)
 			case <-ctx.Done():
 				wg.Done()
+				ctxErr = ctx.Err()
 				break loop
 			}
 		}
 	}
 	wg.Wait()
-	return errors.Join(errs...)
+	return errors.Join(append(errs, ctxErr)...)
 }
 
 type UpdateStatus struct {

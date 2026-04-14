@@ -201,14 +201,26 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 // caller sees per-host progress in real time.
 func (d *LiveDisplay) SetConcurrent(concurrent bool) {
 	d.concurrent = concurrent
+	if !concurrent {
+		d.clearNonLive()
+		return
+	}
 	// If we are already in non-live mode (e.g. debug=true) and switching to
 	// concurrent, initialise the pending buffer now so that HostLine.Finish
 	// can start buffering without waiting for Start to be called.
-	if concurrent && !d.liveMode && d.pendingLines == nil {
+	if !d.liveMode && d.pendingLines == nil {
 		d.initNonLive()
 	}
 }
 
+// clearNonLive removes any non-live buffering state so sequential mode writes
+// each line immediately instead of buffering for Stop.
+func (d *LiveDisplay) clearNonLive() {
+	d.pendingLines = nil
+	for _, l := range d.lines {
+		l.pending = nil
+	}
+}
 // initNonLive allocates d.pendingLines and wires each HostLine.pending to it.
 // Called during initial construction when the display starts in non-live mode,
 // and whenever a live-mode display transitions to non-live mode via Start's

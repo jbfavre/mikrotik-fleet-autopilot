@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -60,36 +62,58 @@ var Command = []*cli.Command{
 				ReconnectDelay:       10 * time.Second,
 			}
 
-			// Set up live display
-			disp := display.New(os.Stdout, coreCfg.Hosts, coreCfg.Debug)
-			disp.Start()
-			defer disp.Stop()
-
-			// Iterate over all hosts
-			var lastErr error
-			for i, host := range coreCfg.Hosts {
-				line := disp.Line(i)
-				displayStepCallback := display.NewStepCallback(line)
-				osStatus, boardStatus, err := updates(ctx, host, updatesCfg, deps, displayStepCallback)
-				if errors.Is(err, ErrCannotCheckUpdates) {
-					line.CompleteStep("❓")
-					line.Finish("❓", err.Error())
-					// Offline is unknown, not a fatal failure; don't set lastErr.
-				} else if err != nil {
-					line.CompleteStep("❌")
-					line.FinishError(err.Error())
-					lastErr = err
-					// Continue with other hosts even if one fails
-				} else if osStatus == nil {
-					line.Finish("❓", "update applied, status unverified")
-				} else {
-					emoji, msg := formatUpdateResult(osStatus, boardStatus)
-					line.Finish(emoji, msg)
-				}
-			}
-			return lastErr
+			return runUpdatesForHosts(ctx, coreCfg.Hosts, coreCfg.Debug, coreCfg.NoMultithread, updatesCfg, deps, os.Stdout)
 		},
 	},
+}
+
+func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithread bool, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
+	disp := display.New(out, hosts, debug)
+	disp.Start()
+	defer disp.Stop()
+
+	var (
+		errMu   sync.Mutex
+		lastErr error
+		wg      sync.WaitGroup
+	)
+
+	processHost := func(i int, host string) {
+		line := disp.Line(i)
+		displayStepCallback := display.NewStepCallback(line)
+		osStatus, boardStatus, err := updates(ctx, host, cfg, deps, displayStepCallback)
+		switch {
+		case errors.Is(err, ErrCannotCheckUpdates):
+			line.CompleteStep("❓")
+			line.Finish("❓", err.Error())
+			// Offline is unknown, not a fatal failure; don't set lastErr.
+		case err != nil:
+			line.CompleteStep("❌")
+			line.FinishError(err.Error())
+			errMu.Lock()
+			lastErr = err
+			errMu.Unlock()
+		case osStatus == nil:
+			line.Finish("❓", "update applied, status unverified")
+		default:
+			emoji, msg := formatUpdateResult(osStatus, boardStatus)
+			line.Finish(emoji, msg)
+		}
+	}
+
+	for i, host := range hosts {
+		if noMultithread {
+			processHost(i, host)
+		} else {
+			wg.Add(1)
+			go func(idx int, h string) {
+				defer wg.Done()
+				processHost(idx, h)
+			}(i, host)
+		}
+	}
+	wg.Wait()
+	return lastErr
 }
 
 type UpdateStatus struct {

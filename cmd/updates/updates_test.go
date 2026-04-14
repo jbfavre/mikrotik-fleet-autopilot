@@ -1,12 +1,14 @@
 package updates
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1365,4 +1367,156 @@ func TestUpdatesRouterOSStagingRouterBoardFirmware(t *testing.T) {
 			}
 		})
 	}
+}
+
+// makeRouterSSHFactory returns a factory with configurable per-host command behaviour:
+//   - offlineHosts: check-for-updates returns a DNS error (ErrCannotCheckUpdates path, ❓)
+//   - installErrHosts: update is available but install command fails (hard failure path, ❌)
+//   - all other hosts: RouterOS up to date, no board (success path, ✅)
+func makeRouterSSHFactory(offlineHosts, installErrHosts map[string]bool) func(context.Context, string) (ssh.RunnerInterface, error) {
+	return func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+		return &sshmocks_test.MockRunner{
+			RunFunc: func(cmd string) (string, error) {
+				if cmd == "/system/package/update/check-for-updates" {
+					if offlineHosts[host] {
+						return `  status: ERROR: could not resolve dns name (timeout)`, nil
+					}
+					if installErrHosts[host] {
+						return `  status: New version available
+  installed-version: 7.13.0
+  latest-version: 7.14.1`, nil
+					}
+					return `  status: Updated
+  installed-version: 7.14.1
+  latest-version: 7.14.1`, nil
+				}
+				if cmd == "/system/routerboard/print" {
+					return `  routerboard: no`, nil
+				}
+				if cmd == "/system/package/update/install" {
+					if installErrHosts[host] {
+						return "", fmt.Errorf("permission denied: install not allowed")
+					}
+					return "System will reboot", nil
+				}
+				return "", nil
+			},
+			CloseFunc: func() error { return nil },
+		}, nil
+	}
+}
+
+func TestRunUpdatesForHosts_Sequential(t *testing.T) {
+	hosts := []string{"router-ok", "router-offline", "router-apply-fail"}
+
+	deps := UpdatesDependencies{
+		SSHConnectionFactory: makeRouterSSHFactory(
+			map[string]bool{"router-offline": true},
+			map[string]bool{"router-apply-fail": true},
+		),
+		ReconnectDelay: 10 * time.Millisecond,
+	}
+
+	cfg := UpdatesConfig{UpdatesApply: true}
+
+	var out bytes.Buffer
+	err := runUpdatesForHosts(context.Background(), hosts, true, true, cfg, deps, &out)
+	if err == nil {
+		t.Fatal("runUpdatesForHosts() expected a non-nil error for router-apply-fail, got nil")
+	}
+
+	output := out.String()
+
+	// router-ok: up to date
+	if !strings.Contains(output, "router-ok") {
+		t.Errorf("output missing router-ok line: %q", output)
+	}
+	if !strings.Contains(output, "✅") {
+		t.Errorf("output missing ✅ for router-ok: %q", output)
+	}
+
+	// router-offline: unknown (❓)
+	if !strings.Contains(output, "router-offline") {
+		t.Errorf("output missing router-offline line: %q", output)
+	}
+	if !strings.Contains(output, "❓") {
+		t.Errorf("output missing ❓ for router-offline: %q", output)
+	}
+
+	// router-apply-fail: hard failure (❌)
+	if !strings.Contains(output, "router-apply-fail") {
+		t.Errorf("output missing router-apply-fail line: %q", output)
+	}
+	if !strings.Contains(output, "❌") {
+		t.Errorf("output missing ❌ for router-apply-fail: %q", output)
+	}
+}
+
+func TestRunUpdatesForHosts_Concurrent(t *testing.T) {
+	hosts := []string{"router-ok", "router-offline", "router-apply-fail"}
+
+	// Count concurrent in-flight connections to verify parallelism actually happens.
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+
+	baseFact := makeRouterSSHFactory(
+		map[string]bool{"router-offline": true},
+		map[string]bool{"router-apply-fail": true},
+	)
+
+	countingFact := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+		current := inFlight.Add(1)
+		for {
+			old := maxInFlight.Load()
+			if current <= old || maxInFlight.CompareAndSwap(old, current) {
+				break
+			}
+		}
+		runner, err := baseFact(ctx, host)
+		if err != nil {
+			inFlight.Add(-1)
+			return nil, err
+		}
+		orig := runner.(*sshmocks_test.MockRunner)
+		origClose := orig.CloseFunc
+		orig.CloseFunc = func() error {
+			inFlight.Add(-1)
+			if origClose != nil {
+				return origClose()
+			}
+			return nil
+		}
+		return orig, nil
+	}
+
+	deps := UpdatesDependencies{
+		SSHConnectionFactory: countingFact,
+		ReconnectDelay:       10 * time.Millisecond,
+	}
+
+	cfg := UpdatesConfig{UpdatesApply: true}
+
+	var out bytes.Buffer
+	err := runUpdatesForHosts(context.Background(), hosts, true, false, cfg, deps, &out)
+	if err == nil {
+		t.Fatal("runUpdatesForHosts() expected a non-nil error for router-apply-fail, got nil")
+	}
+
+	output := out.String()
+
+	// All three hosts must appear in output
+	for _, host := range hosts {
+		if !strings.Contains(output, host) {
+			t.Errorf("output missing %q: %q", host, output)
+		}
+	}
+
+	if !strings.Contains(output, "✅") {
+		t.Errorf("output missing ✅ for router-ok: %q", output)
+	}
+	if !strings.Contains(output, "❌") {
+		t.Errorf("output missing ❌ for router-apply-fail: %q", output)
+	}
+
+	t.Logf("peak concurrent SSH connections: %d", maxInFlight.Load())
 }

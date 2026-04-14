@@ -339,6 +339,8 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		hostname        string
 		setupHostKey    bool
 		setupConfigFile bool
+		wantHostKeyGone bool
+		wantConfigGone  bool
 		wantErr         bool
 		errContains     string
 	}{
@@ -348,6 +350,8 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			hostname:        "router1",
 			setupHostKey:    true,
 			setupConfigFile: true,
+			wantHostKeyGone: true,
+			wantConfigGone:  true,
 			wantErr:         false,
 		},
 		{
@@ -356,6 +360,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			hostname:        "router2",
 			setupHostKey:    true,
 			setupConfigFile: false,
+			wantHostKeyGone: true,
 			wantErr:         false,
 		},
 		{
@@ -364,6 +369,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			hostname:        "router3",
 			setupHostKey:    false,
 			setupConfigFile: true,
+			wantConfigGone:  true,
 			wantErr:         false,
 		},
 		{
@@ -380,6 +386,8 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			hostname:        "router5",
 			setupHostKey:    true,
 			setupConfigFile: true,
+			wantHostKeyGone: true,
+			wantConfigGone:  true,
 			wantErr:         false,
 		},
 	}
@@ -414,7 +422,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			}
 
 			// Execute
-			err := deleteExistingEnrollment(tt.host, tt.hostname)
+			result, err := deleteExistingEnrollment(tt.host, tt.hostname)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
@@ -425,6 +433,16 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			if tt.wantErr && tt.errContains != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("deleteExistingEnrollment() error = %v, should contain %q", err, tt.errContains)
+				}
+			}
+
+			if !tt.wantErr {
+				if result.hostKeyDeleted != tt.wantHostKeyGone {
+					t.Errorf("deleteExistingEnrollment() hostKeyDeleted = %v, want %v", result.hostKeyDeleted, tt.wantHostKeyGone)
+				}
+				gotConfigDeleted := result.configDeleted != ""
+				if gotConfigDeleted != tt.wantConfigGone {
+					t.Errorf("deleteExistingEnrollment() configDeleted = %q, want config deleted = %v", result.configDeleted, tt.wantConfigGone)
 				}
 			}
 
@@ -1593,7 +1611,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 
 					// Handle force re-enrollment
 					if err == nil && enrollCfg.Force {
-						err = deleteExistingEnrollment(host, host)
+						_, err = deleteExistingEnrollment(host, host)
 						if err != nil {
 							err = fmt.Errorf("failed to remove existing enrollment: %w", err)
 						}

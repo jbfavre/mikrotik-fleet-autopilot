@@ -38,6 +38,11 @@ type EnrollDependencies struct {
 	ExportConfigFunc     func(context.Context, string, string, bool, string) error
 }
 
+type deleteExistingEnrollmentResult struct {
+	hostKeyDeleted bool
+	configDeleted  string
+}
+
 var Command = []*cli.Command{
 	{
 		Name:  "enroll",
@@ -216,10 +221,23 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	// Handle force re-enrollment by removing existing artifacts
 	if enrollCfg.Force {
 		slog.Info("force re-enrollment requested", "host", host)
-		if err := deleteExistingEnrollment(host, hostname); err != nil {
+		reportStep("⏳", "Removing existing enrollment artifacts…")
+		cleanupResult, err := deleteExistingEnrollment(host, hostname)
+		if err != nil {
 			slog.Error("failed to remove existing enrollment", "host", host, "hostname", hostname, "error", err)
 			return fmt.Errorf("failed to remove existing enrollment: %w", err)
 		}
+		switch {
+		case cleanupResult.hostKeyDeleted && cleanupResult.configDeleted != "":
+			reportStep("⏳", fmt.Sprintf("Removed existing host key and config file %s", cleanupResult.configDeleted))
+		case cleanupResult.hostKeyDeleted:
+			reportStep("⏳", "Removed existing host key")
+		case cleanupResult.configDeleted != "":
+			reportStep("⏳", fmt.Sprintf("Removed existing config file %s", cleanupResult.configDeleted))
+		default:
+			reportStep("⏳", "No existing enrollment artifacts found")
+		}
+		reportStep("✅", "Removed existing enrollment artifacts")
 	}
 
 	// Check if context is already cancelled
@@ -415,7 +433,6 @@ func applyConfigFile(conn ssh.RunnerInterface, filePath string) error {
 func setRouterIdentity(conn ssh.RunnerInterface, hostname string) error {
 	if hostname == "" {
 		slog.Debug("skipping router identity set, hostname is empty", "hostname", hostname)
-		fmt.Printf("❓ Router identity set skipped. --hostname not provided\n")
 		return nil
 	}
 	cmd := fmt.Sprintf("/system identity set name=%s", hostname)
@@ -479,18 +496,21 @@ func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (s
 	return newInfo.Fingerprint, nil
 }
 
-// deleteExistingEnrollment removes all enrollment artifacts for a host
-func deleteExistingEnrollment(host string, hostname string) error {
+// deleteExistingEnrollment removes all enrollment artifacts for a host.
+// It returns metadata describing what was removed so the caller can decide
+// how to surface that information through the display system.
+func deleteExistingEnrollment(host string, hostname string) (deleteExistingEnrollmentResult, error) {
 	slog.Info("deleting existing enrollment artifacts", "host", host, "hostname", hostname)
+	result := deleteExistingEnrollmentResult{}
 
 	// Delete host key
 	if ssh.HostKeyExists(host) {
 		slog.Debug("deleting host key", "host", host, "hostname", hostname)
 		if err := ssh.DeleteHostKey(host); err != nil {
 			slog.Error("failed to delete host key", "host", host, "hostname", hostname, "error", err)
-			return fmt.Errorf("failed to delete host key: %w", err)
+			return result, fmt.Errorf("failed to delete host key: %w", err)
 		}
-		fmt.Printf("Removed existing host key for %s\n", host)
+		result.hostKeyDeleted = true
 	}
 
 	// Delete config file
@@ -500,11 +520,11 @@ func deleteExistingEnrollment(host string, hostname string) error {
 		slog.Debug("deleting config file", "host", host, "hostname", hostname, "file", configFile)
 		if err := os.Remove(configFile); err != nil {
 			slog.Error("failed to delete config file", "host", host, "hostname", hostname, "file", configFile, "error", err)
-			return fmt.Errorf("failed to delete config file: %w", err)
+			return result, fmt.Errorf("failed to delete config file: %w", err)
 		}
-		fmt.Printf("Removed existing config file %s\n", configFile)
+		result.configDeleted = configFile
 	}
 
 	slog.Info("existing enrollment artifacts deleted", "host", host, "hostname", hostname)
-	return nil
+	return result, nil
 }

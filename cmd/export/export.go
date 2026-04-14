@@ -61,7 +61,9 @@ var Command = []*cli.Command{
 				SSHConnectionFactory: ssh.CreateConnection,
 			}
 
-			return runExportForHosts(ctx, coreCfg.Hosts, coreCfg.Debug, coreCfg.NoMultithread, exportCfg, deps, os.Stdout)
+			opts := RunExportOptions{Debug: coreCfg.Debug, NoMultithread: coreCfg.NoMultithread}
+
+			return runExportForHosts(ctx, coreCfg.Hosts, opts, exportCfg, deps, os.Stdout)
 		},
 	},
 }
@@ -70,9 +72,16 @@ var Command = []*cli.Command{
 // multithread mode to avoid opening too many SSH connections at once.
 const maxConcurrentHosts = 20
 
-func runExportForHosts(ctx context.Context, hosts []string, debug, noMultithread bool, cfg ExportConfig, deps ExportDependencies, out io.Writer) error {
-	disp := display.New(out, hosts, debug)
-	disp.SetConcurrent(!noMultithread)
+// RunExportOptions groups execution flags for runExportForHosts so call sites
+// remain self-describing and can be extended safely in the future.
+type RunExportOptions struct {
+	Debug         bool
+	NoMultithread bool
+}
+
+func runExportForHosts(ctx context.Context, hosts []string, opts RunExportOptions, cfg ExportConfig, deps ExportDependencies, out io.Writer) error {
+	disp := display.New(out, hosts, opts.Debug)
+	disp.SetConcurrent(!opts.NoMultithread)
 	disp.Start()
 	defer disp.Stop()
 
@@ -98,7 +107,7 @@ func runExportForHosts(ctx context.Context, hosts []string, debug, noMultithread
 	var ctxErr error
 loop:
 	for i, host := range hosts {
-		if noMultithread {
+		if opts.NoMultithread {
 			processHost(i, host)
 		} else {
 			wg.Add(1)

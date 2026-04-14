@@ -168,13 +168,6 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 		out:      out,
 	}
 
-	var pending *[]string
-	if !liveMode {
-		slots := make([]string, len(hosts))
-		d.pendingLines = slots
-		pending = &d.pendingLines
-	}
-
 	for i, host := range hosts {
 		d.lines[i] = &HostLine{
 			hostname:      host,
@@ -182,10 +175,23 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 			overallEmoji:  "⏳",
 			liveMode:      liveMode,
 			index:         i,
-			pending:       pending,
 		}
 	}
+
+	if !liveMode {
+		d.initNonLive()
+	}
+
 	return d
+}
+
+// initNonLive allocates d.pendingLines and wires each HostLine.pending to it.
+// Must be called whenever the display transitions to non-live mode.
+func (d *LiveDisplay) initNonLive() {
+	d.pendingLines = make([]string, len(d.lines))
+	for _, l := range d.lines {
+		l.pending = &d.pendingLines
+	}
 }
 
 // Line returns the HostLine for the i-th host (0-indexed).
@@ -210,6 +216,7 @@ func (d *LiveDisplay) Start() {
 		for _, l := range d.lines {
 			l.liveMode = false
 		}
+		d.initNonLive()
 		return
 	}
 
@@ -223,6 +230,7 @@ func (d *LiveDisplay) Start() {
 		for _, l := range d.lines {
 			l.liveMode = false
 		}
+		d.initNonLive()
 	}
 }
 

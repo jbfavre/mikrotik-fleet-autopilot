@@ -47,11 +47,13 @@ func TestBuildCommandFlags(t *testing.T) {
 	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
 
 	expectedFlags := map[string]bool{
-		"host":           false,
-		"ssh-user":       false,
-		"ssh-password":   false,
-		"ssh-passphrase": false,
-		"debug":          false,
+		"host":               false,
+		"ssh-user":           false,
+		"ssh-password":       false,
+		"ssh-passphrase":     false,
+		"debug":              false,
+		"no-multithread":     false,
+		"skip-hostkey-check": false,
 	}
 
 	// Check all expected flags exist
@@ -71,8 +73,8 @@ func TestBuildCommandFlags(t *testing.T) {
 	}
 
 	// Test that we have the right number of flags
-	if len(cmd.Flags) != 6 {
-		t.Errorf("Expected 6 flags, got %d", len(cmd.Flags))
+	if len(cmd.Flags) != 7 {
+		t.Errorf("Expected 7 flags, got %d", len(cmd.Flags))
 	}
 }
 

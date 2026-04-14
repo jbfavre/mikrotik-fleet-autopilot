@@ -37,7 +37,7 @@ func TestNewFallbackMode(t *testing.T) {
 func TestStartStopFallback(t *testing.T) {
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, []string{"router1"})
-	// In fallback mode Start/Stop should be no-ops and not panic.
+	// In fallback mode Start is a no-op; Stop flushes buffered lines (none here).
 	d.Start()
 	d.Stop()
 }
@@ -84,7 +84,7 @@ func TestFinishFallback(t *testing.T) {
 	l.CompleteStep("✅")
 	l.Finish("✅", "is up-to-date (RouterOS: 7.16)")
 
-	// In fallback mode, Finish should write the rendered line to out.
+	// In non-concurrent non-live mode, Finish writes immediately to out.
 	output := buf.String()
 	if !strings.HasPrefix(output, "✅") {
 		t.Errorf("Finish() output = %q, want ✅ overall status at start", output)
@@ -95,6 +95,7 @@ func TestFinishFallback(t *testing.T) {
 	if !strings.Contains(output, "is up-to-date (RouterOS: 7.16)") {
 		t.Errorf("Finish() output = %q, want final message present", output)
 	}
+	d.Stop() // no-op for sequential non-live mode
 
 	// render() after Finish should produce the same line.
 	got := l.render()
@@ -115,6 +116,7 @@ func TestFinishErrorFallback(t *testing.T) {
 	l.CompleteStep("⏳")
 	l.FinishError("updates failed: ssh: connect: timeout")
 
+	// In non-concurrent non-live mode, FinishError writes immediately to out.
 	output := buf.String()
 	if !strings.Contains(output, "❌") {
 		t.Errorf("FinishError() output = %q, want ❌", output)
@@ -122,6 +124,7 @@ func TestFinishErrorFallback(t *testing.T) {
 	if !strings.Contains(output, "badrouter.example.c…") {
 		t.Errorf("FinishError() output = %q, want truncated hostname", output)
 	}
+	d.Stop() // no-op for sequential non-live mode
 }
 
 func TestHostLineThreadSafety(t *testing.T) {
@@ -155,11 +158,41 @@ func TestMultipleHosts(t *testing.T) {
 		l.Finish("✅", host+" is up-to-date")
 	}
 
+	d.Stop()
 	output := buf.String()
 	for _, host := range hosts {
 		if !strings.Contains(output, host) {
 			t.Errorf("output missing host %q: %s", host, output)
 		}
+	}
+}
+
+// TestOutputOrder verifies that Stop flushes host lines in host-list order even
+// when goroutines call Finish out of order (simulating concurrent completion).
+func TestOutputOrder(t *testing.T) {
+	hosts := []string{"host1.example.com", "host2.example.com", "host3.example.com"}
+	var buf bytes.Buffer
+	d := newTestDisplay(&buf, hosts)
+	d.SetConcurrent(true) // enable buffering so Stop flushes in host-list order
+
+	// Finish hosts in reverse order to simulate out-of-order concurrent completion.
+	d.Line(2).Finish("✅", "host3 done")
+	d.Line(0).Finish("✅", "host1 done")
+	d.Line(1).Finish("✅", "host2 done")
+
+	d.Stop()
+	output := buf.String()
+
+	// Output must list hosts in the original host-list order.
+	idx1 := strings.Index(output, "host1.example.com")
+	idx2 := strings.Index(output, "host2.example.com")
+	idx3 := strings.Index(output, "host3.example.com")
+	if idx1 < 0 || idx2 < 0 || idx3 < 0 {
+		t.Fatalf("output missing one or more hostnames: %q", output)
+	}
+	if !(idx1 < idx2 && idx2 < idx3) {
+		t.Errorf("output not in host-list order: host1=%d host2=%d host3=%d\n%s",
+			idx1, idx2, idx3, output)
 	}
 }
 
@@ -389,11 +422,12 @@ func TestSingletonFallback(t *testing.T) {
 		}
 	}
 
-	// In plain-text fallback, Finish writes directly to the writer.
+	// In plain-text fallback (non-concurrent), Finish writes immediately to out.
 	second.Line(0).Finish("✅", "up-to-date")
 	if !strings.Contains(buf2.String(), "router2") {
 		t.Errorf("expected plain-text output for second display after fallback, got %q", buf2.String())
 	}
+	second.Stop() // no-op in non-concurrent non-live mode
 }
 
 // TestSingletonReleasedAfterStop verifies that after Stop the singleton slot

@@ -92,7 +92,9 @@ func (h *HostLine) Finish(overallEmoji, message string) {
 			(*h.pending)[h.index] = h.renderUnlocked()
 		} else {
 			// sequential mode: write immediately for real-time feedback
-			fmt.Fprintf(h.out, "%s\n", h.renderUnlocked())
+			if _, err := fmt.Fprintf(h.out, "%s\n", h.renderUnlocked()); err != nil {
+				slog.Warn("failed to write host output", "host", h.hostname, "error", err)
+			}
 		}
 	}
 }

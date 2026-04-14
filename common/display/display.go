@@ -221,6 +221,7 @@ func (d *LiveDisplay) clearNonLive() {
 		l.pending = nil
 	}
 }
+
 // initNonLive allocates d.pendingLines and wires each HostLine.pending to it.
 // Called during initial construction when the display starts in non-live mode,
 // and whenever a live-mode display transitions to non-live mode via Start's

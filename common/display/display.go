@@ -26,6 +26,7 @@ type completedStep struct {
 // HostLine tracks the display state for a single host.
 type HostLine struct {
 	mu            sync.Mutex
+	writeMu       *sync.Mutex // shared with LiveDisplay; serialises writes to out in non-live mode
 	hostname      string
 	hostnameWidth int
 	overallEmoji  string // ⏳ while in-progress; set to the final status emoji by Finish
@@ -82,7 +83,10 @@ func (h *HostLine) Finish(overallEmoji, message string) {
 	h.overallEmoji = overallEmoji
 	h.finalMessage = message
 	if !h.liveMode {
-		if _, err := fmt.Fprintf(h.out, "%s\n", h.renderUnlocked()); err != nil {
+		h.writeMu.Lock()
+		_, err := fmt.Fprintf(h.out, "%s\n", h.renderUnlocked())
+		h.writeMu.Unlock()
+		if err != nil {
 			slog.Warn("display: failed to write host line", "host", h.hostname, "error", err)
 		}
 	}
@@ -148,6 +152,7 @@ type LiveDisplay struct {
 	lines    []*HostLine
 	liveMode bool
 	out      io.Writer
+	writeMu  sync.Mutex // serialises writes to out across all HostLines in non-live mode
 }
 
 // New creates a LiveDisplay. If debug=true or stdout is not a TTY, falls back to verbose mode.
@@ -160,22 +165,22 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 	}
 	hostnameWidth := computeHostnameWidth(hosts)
 
-	lines := make([]*HostLine, len(hosts))
+	d := &LiveDisplay{
+		lines:    make([]*HostLine, len(hosts)),
+		liveMode: liveMode,
+		out:      out,
+	}
 	for i, host := range hosts {
-		lines[i] = &HostLine{
+		d.lines[i] = &HostLine{
 			hostname:      host,
 			hostnameWidth: hostnameWidth,
 			overallEmoji:  "⏳",
 			liveMode:      liveMode,
 			out:           out,
+			writeMu:       &d.writeMu,
 		}
 	}
-
-	return &LiveDisplay{
-		lines:    lines,
-		liveMode: liveMode,
-		out:      out,
-	}
+	return d
 }
 
 // Line returns the HostLine for the i-th host (0-indexed).

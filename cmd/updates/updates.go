@@ -67,6 +67,10 @@ var Command = []*cli.Command{
 	},
 }
 
+// maxConcurrentHosts limits the number of hosts processed simultaneously in
+// multithread mode to avoid opening too many SSH connections at once.
+const maxConcurrentHosts = 20
+
 func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithread bool, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
 	disp := display.New(out, hosts, debug)
 	disp.Start()
@@ -74,7 +78,7 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithrea
 
 	var (
 		errMu   sync.Mutex
-		lastErr error
+		firstErr error
 		wg      sync.WaitGroup
 	)
 
@@ -86,12 +90,14 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithrea
 		case errors.Is(err, ErrCannotCheckUpdates):
 			line.CompleteStep("❓")
 			line.Finish("❓", err.Error())
-			// Offline is unknown, not a fatal failure; don't set lastErr.
+			// Offline is unknown, not a fatal failure; don't set firstErr.
 		case err != nil:
 			line.CompleteStep("❌")
 			line.FinishError(err.Error())
 			errMu.Lock()
-			lastErr = err
+			if firstErr == nil {
+				firstErr = err
+			}
 			errMu.Unlock()
 		case osStatus == nil:
 			line.Finish("❓", "update applied, status unverified")
@@ -101,19 +107,22 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithrea
 		}
 	}
 
+	sem := make(chan struct{}, maxConcurrentHosts)
 	for i, host := range hosts {
 		if noMultithread {
 			processHost(i, host)
 		} else {
 			wg.Add(1)
+			sem <- struct{}{}
 			go func(idx int, h string) {
 				defer wg.Done()
+				defer func() { <-sem }()
 				processHost(idx, h)
 			}(i, host)
 		}
 	}
 	wg.Wait()
-	return lastErr
+	return firstErr
 }
 
 type UpdateStatus struct {

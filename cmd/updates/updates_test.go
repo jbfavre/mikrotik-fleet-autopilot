@@ -1472,6 +1472,9 @@ func TestRunUpdatesForHosts_Concurrent(t *testing.T) {
 				break
 			}
 		}
+		// Hold the connection open briefly so that all goroutines overlap and
+		// maxInFlight is captured while multiple connections are in-flight.
+		time.Sleep(10 * time.Millisecond)
 		runner, err := baseFact(ctx, host)
 		if err != nil {
 			inFlight.Add(-1)
@@ -1518,5 +1521,10 @@ func TestRunUpdatesForHosts_Concurrent(t *testing.T) {
 		t.Errorf("output missing ❌ for router-apply-fail: %q", output)
 	}
 
+	// Assert that goroutines actually ran concurrently: with the delay above
+	// all 3 goroutines should be in-flight at the same time.
+	if maxInFlight.Load() <= 1 {
+		t.Errorf("expected maxInFlight > 1 (goroutines should run concurrently), got %d", maxInFlight.Load())
+	}
 	t.Logf("peak concurrent SSH connections: %d", maxInFlight.Load())
 }

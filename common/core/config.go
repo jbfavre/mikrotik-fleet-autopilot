@@ -5,6 +5,7 @@ type Config struct {
 	User             string
 	Debug            bool
 	SkipHostKeyCheck bool
+	NoMultithread    bool
 }
 
 // GetSkipHostKeyCheck returns the SkipHostKeyCheck flag for host key verification

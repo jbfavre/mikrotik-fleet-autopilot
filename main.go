@@ -85,6 +85,12 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Usage:       "Enable debug logging",
 				Destination: &globalConfig.Debug,
 			},
+			&cli.BoolFlag{
+				Name:        "no-multithread",
+				Value:       false,
+				Usage:       "Disable parallel host processing (sequential fallback)",
+				Destination: &globalConfig.NoMultithread,
+			},
 		},
 		Commands: append(append(export.Command, updates.Command...), enroll.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {

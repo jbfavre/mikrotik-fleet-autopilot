@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
@@ -616,6 +615,12 @@ func TestRunExportForHosts_Concurrent(t *testing.T) {
 
 	var inFlight atomic.Int32
 	var maxInFlight atomic.Int32
+	nHosts := len(hosts)
+	// allStarted is closed once every goroutine has incremented inFlight,
+	// so maxInFlight is captured while all connections are simultaneously
+	// in-flight without relying on timing or sleep.
+	allStarted := make(chan struct{})
+	var startedCount atomic.Int32
 
 	deps := ExportDependencies{
 		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
@@ -626,11 +631,15 @@ func TestRunExportForHosts_Concurrent(t *testing.T) {
 					break
 				}
 			}
+			// Barrier: block until every goroutine has reached this point.
+			if startedCount.Add(1) == int32(nHosts) {
+				close(allStarted)
+			} else {
+				<-allStarted
+			}
 
 			return &sshmocks_test.MockRunner{
 				RunFunc: func(cmd string) (string, error) {
-					// Force overlap across goroutines.
-					time.Sleep(20 * time.Millisecond)
 					return "/interface bridge\nadd name=bridge1", nil
 				},
 				CloseFunc: func() error {
@@ -655,7 +664,8 @@ func TestRunExportForHosts_Concurrent(t *testing.T) {
 			t.Errorf("output missing host %q: %q", host, output)
 		}
 	}
-	if maxInFlight.Load() < 2 {
-		t.Errorf("expected concurrent execution, peak in-flight connections=%d", maxInFlight.Load())
+	if maxInFlight.Load() <= 1 {
+		t.Errorf("expected maxInFlight > 1 (goroutines should run concurrently), got %d", maxInFlight.Load())
 	}
+	t.Logf("peak concurrent SSH connections: %d", maxInFlight.Load())
 }

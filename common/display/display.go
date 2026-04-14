@@ -26,7 +26,7 @@ type completedStep struct {
 // HostLine tracks the display state for a single host.
 type HostLine struct {
 	mu            sync.Mutex
-	index         int    // position in the parent LiveDisplay.pendingLines slice
+	index         int       // position in the parent LiveDisplay.pendingLines slice
 	pending       *[]string // points to LiveDisplay.pendingLines; nil in live mode
 	hostname      string
 	hostnameWidth int

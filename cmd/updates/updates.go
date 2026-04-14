@@ -77,9 +77,9 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithrea
 	defer disp.Stop()
 
 	var (
-		errMu   sync.Mutex
+		errMu    sync.Mutex
 		firstErr error
-		wg      sync.WaitGroup
+		wg       sync.WaitGroup
 	)
 
 	processHost := func(i int, host string) {

@@ -190,7 +190,7 @@ func TestOutputOrder(t *testing.T) {
 	if idx1 < 0 || idx2 < 0 || idx3 < 0 {
 		t.Fatalf("output missing one or more hostnames: %q", output)
 	}
-	if !(idx1 < idx2 && idx2 < idx3) {
+	if idx1 >= idx2 || idx2 >= idx3 {
 		t.Errorf("output not in host-list order: host1=%d host2=%d host3=%d\n%s",
 			idx1, idx2, idx3, output)
 	}

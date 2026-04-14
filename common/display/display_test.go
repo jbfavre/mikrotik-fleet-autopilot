@@ -84,8 +84,7 @@ func TestFinishFallback(t *testing.T) {
 	l.CompleteStep("✅")
 	l.Finish("✅", "is up-to-date (RouterOS: 7.16)")
 
-	// In fallback mode, Finish buffers the rendered line; Stop flushes it to out.
-	d.Stop()
+	// In non-concurrent non-live mode, Finish writes immediately to out.
 	output := buf.String()
 	if !strings.HasPrefix(output, "✅") {
 		t.Errorf("Finish() output = %q, want ✅ overall status at start", output)
@@ -96,6 +95,7 @@ func TestFinishFallback(t *testing.T) {
 	if !strings.Contains(output, "is up-to-date (RouterOS: 7.16)") {
 		t.Errorf("Finish() output = %q, want final message present", output)
 	}
+	d.Stop() // no-op for sequential non-live mode
 
 	// render() after Finish should produce the same line.
 	got := l.render()
@@ -116,7 +116,7 @@ func TestFinishErrorFallback(t *testing.T) {
 	l.CompleteStep("⏳")
 	l.FinishError("updates failed: ssh: connect: timeout")
 
-	d.Stop()
+	// In non-concurrent non-live mode, FinishError writes immediately to out.
 	output := buf.String()
 	if !strings.Contains(output, "❌") {
 		t.Errorf("FinishError() output = %q, want ❌", output)
@@ -124,6 +124,7 @@ func TestFinishErrorFallback(t *testing.T) {
 	if !strings.Contains(output, "badrouter.example.c…") {
 		t.Errorf("FinishError() output = %q, want truncated hostname", output)
 	}
+	d.Stop() // no-op for sequential non-live mode
 }
 
 func TestHostLineThreadSafety(t *testing.T) {
@@ -172,6 +173,7 @@ func TestOutputOrder(t *testing.T) {
 	hosts := []string{"host1.example.com", "host2.example.com", "host3.example.com"}
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, hosts)
+	d.SetConcurrent(true) // enable buffering so Stop flushes in host-list order
 
 	// Finish hosts in reverse order to simulate out-of-order concurrent completion.
 	d.Line(2).Finish("✅", "host3 done")
@@ -420,12 +422,12 @@ func TestSingletonFallback(t *testing.T) {
 		}
 	}
 
-	// In plain-text fallback, Finish buffers the line; Stop flushes it to out in order.
+	// In plain-text fallback (non-concurrent), Finish writes immediately to out.
 	second.Line(0).Finish("✅", "up-to-date")
-	second.Stop()
 	if !strings.Contains(buf2.String(), "router2") {
 		t.Errorf("expected plain-text output for second display after fallback, got %q", buf2.String())
 	}
+	second.Stop() // no-op in non-concurrent non-live mode
 }
 
 // TestSingletonReleasedAfterStop verifies that after Stop the singleton slot

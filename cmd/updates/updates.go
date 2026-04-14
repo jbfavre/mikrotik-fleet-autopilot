@@ -73,6 +73,7 @@ const maxConcurrentHosts = 20
 
 func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithread bool, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
 	disp := display.New(out, hosts, debug)
+	disp.SetConcurrent(!noMultithread)
 	disp.Start()
 	defer disp.Stop()
 
@@ -103,17 +104,23 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithrea
 	}
 
 	sem := make(chan struct{}, maxConcurrentHosts)
+loop:
 	for i, host := range hosts {
 		if noMultithread {
 			processHost(i, host)
 		} else {
 			wg.Add(1)
-			sem <- struct{}{}
-			go func(idx int, h string) {
-				defer wg.Done()
-				defer func() { <-sem }()
-				processHost(idx, h)
-			}(i, host)
+			select {
+			case sem <- struct{}{}:
+				go func(idx int, h string) {
+					defer wg.Done()
+					defer func() { <-sem }()
+					processHost(idx, h)
+				}(i, host)
+			case <-ctx.Done():
+				wg.Done()
+				break loop
+			}
 		}
 	}
 	wg.Wait()

@@ -27,7 +27,8 @@ type completedStep struct {
 type HostLine struct {
 	mu            sync.Mutex
 	index         int       // position in the parent LiveDisplay.pendingLines slice
-	pending       *[]string // points to LiveDisplay.pendingLines; nil in live mode
+	pending       *[]string // points to LiveDisplay.pendingLines; nil when not buffering (sequential non-live)
+	out           io.Writer // used for immediate writes in sequential non-live mode
 	hostname      string
 	hostnameWidth int
 	overallEmoji  string // ⏳ while in-progress; set to the final status emoji by Finish
@@ -76,8 +77,9 @@ func (h *HostLine) CompleteStep(emoji string) {
 // Finish marks the line as done with an overall status emoji and a final message.
 // overallEmoji should be one of ✅, ❌, ❓, ⚠️.
 // message is the human-readable result description (no hostname, no leading emoji).
-// In non-live mode the rendered line is buffered and written to out in host-list
-// order when LiveDisplay.Stop is called.
+// In concurrent non-live mode the rendered line is buffered and written to out in
+// host-list order when LiveDisplay.Stop is called. In sequential non-live mode the
+// line is written immediately so the caller sees progress in real time.
 func (h *HostLine) Finish(overallEmoji, message string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -85,7 +87,13 @@ func (h *HostLine) Finish(overallEmoji, message string) {
 	h.overallEmoji = overallEmoji
 	h.finalMessage = message
 	if !h.liveMode {
-		(*h.pending)[h.index] = h.renderUnlocked()
+		if h.pending != nil {
+			// concurrent mode: buffer for ordered flush in Stop
+			(*h.pending)[h.index] = h.renderUnlocked()
+		} else {
+			// sequential mode: write immediately for real-time feedback
+			fmt.Fprintf(h.out, "%s\n", h.renderUnlocked())
+		}
 	}
 }
 
@@ -148,8 +156,9 @@ var (
 type LiveDisplay struct {
 	lines        []*HostLine
 	liveMode     bool
+	concurrent   bool   // when true, non-live Finish buffers; Stop flushes in host-list order
 	out          io.Writer
-	pendingLines []string // non-live mode: one buffered output line per host, flushed in order by Stop
+	pendingLines []string // non-live concurrent mode: one buffered output line per host, flushed in order by Stop
 }
 
 // New creates a LiveDisplay. If debug=true or stdout is not a TTY, falls back to verbose mode.
@@ -175,14 +184,27 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 			overallEmoji:  "⏳",
 			liveMode:      liveMode,
 			index:         i,
+			out:           out,
 		}
 	}
 
-	if !liveMode {
+	return d
+}
+
+// SetConcurrent marks the display as serving concurrent host processing.
+// Must be called before Start. In concurrent non-live mode, HostLine.Finish
+// buffers each line and LiveDisplay.Stop flushes them in host-list order so
+// that output is deterministic regardless of goroutine completion order.
+// In the default sequential mode, Finish writes each line immediately so the
+// caller sees per-host progress in real time.
+func (d *LiveDisplay) SetConcurrent(concurrent bool) {
+	d.concurrent = concurrent
+	// If we are already in non-live mode (e.g. debug=true) and switching to
+	// concurrent, initialise the pending buffer now so that HostLine.Finish
+	// can start buffering without waiting for Start to be called.
+	if concurrent && !d.liveMode && d.pendingLines == nil {
 		d.initNonLive()
 	}
-
-	return d
 }
 
 // initNonLive allocates d.pendingLines and wires each HostLine.pending to it.
@@ -218,7 +240,9 @@ func (d *LiveDisplay) Start() {
 		for _, l := range d.lines {
 			l.liveMode = false
 		}
-		d.initNonLive()
+		if d.concurrent {
+			d.initNonLive()
+		}
 		return
 	}
 
@@ -232,7 +256,9 @@ func (d *LiveDisplay) Start() {
 		for _, l := range d.lines {
 			l.liveMode = false
 		}
-		d.initNonLive()
+		if d.concurrent {
+			d.initNonLive()
+		}
 	}
 }
 
@@ -256,8 +282,8 @@ func (d *LiveDisplay) release() {
 	}
 }
 
-// Stop finalises output. In live mode it stops liveterm. In non-live mode it
-// flushes all buffered host lines to out in host-list order, so that concurrent
+// Stop finalises output. In live mode it stops liveterm. In concurrent non-live
+// mode it flushes all buffered host lines to out in host-list order, so that
 // goroutines that finish at different times still produce deterministic output.
 func (d *LiveDisplay) Stop() {
 	if d.liveMode {
@@ -267,12 +293,12 @@ func (d *LiveDisplay) Stop() {
 		}
 		return
 	}
-	for _, line := range d.pendingLines {
+	for i, line := range d.pendingLines {
 		if line == "" {
 			continue
 		}
 		if _, err := fmt.Fprintf(d.out, "%s\n", line); err != nil {
-			slog.Warn("display: failed to write host line", "error", err)
+			slog.Warn("display: failed to write host line", "error", err, "line_index", i, "hostname", d.lines[i].hostname)
 		}
 	}
 }

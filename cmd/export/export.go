@@ -2,11 +2,14 @@ package export
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
@@ -58,29 +61,63 @@ var Command = []*cli.Command{
 				SSHConnectionFactory: ssh.CreateConnection,
 			}
 
-			// Setup console display
-			disp := display.New(os.Stdout, coreCfg.Hosts, coreCfg.Debug)
-			disp.Start()
-			defer disp.Stop()
-
-			// Iterate over all hosts
-			var lastErr error
-			for i, host := range coreCfg.Hosts {
-				line := disp.Line(i)
-				displayStepCallback := display.NewStepCallback(line)
-				filename, err := export(ctx, host, "", exportCfg, deps, displayStepCallback) // Empty preferred filename = derive automatically
-				if err != nil {
-					line.CompleteStep("❌")
-					line.FinishError(err.Error())
-					lastErr = err
-					// Continue with other hosts even if one fails
-				} else {
-					line.Finish("✅", fmt.Sprintf("Configuration exported to %s", filename))
-				}
-			}
-			return lastErr
+			return runExportForHosts(ctx, coreCfg.Hosts, coreCfg.Debug, coreCfg.NoMultithread, exportCfg, deps, os.Stdout)
 		},
 	},
+}
+
+// maxConcurrentHosts limits the number of hosts processed simultaneously in
+// multithread mode to avoid opening too many SSH connections at once.
+const maxConcurrentHosts = 20
+
+func runExportForHosts(ctx context.Context, hosts []string, debug, noMultithread bool, cfg ExportConfig, deps ExportDependencies, out io.Writer) error {
+	disp := display.New(out, hosts, debug)
+	disp.SetConcurrent(!noMultithread)
+	disp.Start()
+	defer disp.Stop()
+
+	// errs is indexed by host position so results are collected in host-list
+	// order regardless of goroutine completion order.
+	errs := make([]error, len(hosts))
+	var wg sync.WaitGroup
+
+	processHost := func(i int, host string) {
+		line := disp.Line(i)
+		displayStepCallback := display.NewStepCallback(line)
+		filename, err := export(ctx, host, "", cfg, deps, displayStepCallback) // Empty preferred filename = derive automatically
+		if err != nil {
+			line.CompleteStep("❌")
+			line.FinishError(err.Error())
+			errs[i] = err
+			return
+		}
+		line.Finish("✅", fmt.Sprintf("Configuration exported to %s", filename))
+	}
+
+	sem := make(chan struct{}, maxConcurrentHosts)
+	var ctxErr error
+loop:
+	for i, host := range hosts {
+		if noMultithread {
+			processHost(i, host)
+		} else {
+			wg.Add(1)
+			select {
+			case sem <- struct{}{}:
+				go func(idx int, h string) {
+					defer wg.Done()
+					defer func() { <-sem }()
+					processHost(idx, h)
+				}(i, host)
+			case <-ctx.Done():
+				wg.Done()
+				ctxErr = ctx.Err()
+				break loop
+			}
+		}
+	}
+	wg.Wait()
+	return errors.Join(append(errs, ctxErr)...)
 }
 
 // Export is a public wrapper that exports configuration for a single host

@@ -1,12 +1,14 @@
 package export
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
@@ -565,4 +567,105 @@ func TestExport_StepCallbackSequence(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("step callback sequence mismatch\n got: %#v\nwant: %#v", got, want)
 	}
+}
+
+func TestRunExportForHosts_Sequential(t *testing.T) {
+	hosts := []string{"router-ok", "router-fail"}
+	tmpDir := t.TempDir()
+
+	deps := ExportDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			return &sshmocks_test.MockRunner{
+				RunFunc: func(cmd string) (string, error) {
+					if host == "router-fail" {
+						return "", fmt.Errorf("boom")
+					}
+					return "/interface bridge\nadd name=bridge1", nil
+				},
+				CloseFunc: func() error {
+					return nil
+				},
+			}, nil
+		},
+	}
+
+	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir}
+
+	var out bytes.Buffer
+	err := runExportForHosts(context.Background(), hosts, true, true, cfg, deps, &out)
+	if err == nil {
+		t.Fatal("runExportForHosts() expected non-nil error when one host fails")
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "router-ok") || !strings.Contains(output, "router-fail") {
+		t.Errorf("output should contain both hosts, got: %q", output)
+	}
+	if !strings.Contains(output, "Configuration exported to router-ok.rsc") {
+		t.Errorf("missing success message, got: %q", output)
+	}
+	if !strings.Contains(output, "failed to export configuration: boom") {
+		t.Errorf("missing failure message, got: %q", output)
+	}
+}
+
+func TestRunExportForHosts_Concurrent(t *testing.T) {
+	hosts := []string{"router-1", "router-2", "router-3"}
+	tmpDir := t.TempDir()
+
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+	nHosts := len(hosts)
+	// allStarted is closed once every goroutine has incremented inFlight,
+	// so maxInFlight is captured while all connections are simultaneously
+	// in-flight without relying on timing or sleep.
+	allStarted := make(chan struct{})
+	var startedCount atomic.Int32
+
+	deps := ExportDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			current := inFlight.Add(1)
+			for {
+				old := maxInFlight.Load()
+				if current <= old || maxInFlight.CompareAndSwap(old, current) {
+					break
+				}
+			}
+			// Barrier: block until every goroutine has reached this point.
+			if startedCount.Add(1) == int32(nHosts) {
+				close(allStarted)
+			} else {
+				<-allStarted
+			}
+
+			return &sshmocks_test.MockRunner{
+				RunFunc: func(cmd string) (string, error) {
+					return "/interface bridge\nadd name=bridge1", nil
+				},
+				CloseFunc: func() error {
+					inFlight.Add(-1)
+					return nil
+				},
+			}, nil
+		},
+	}
+
+	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir}
+
+	var out bytes.Buffer
+	err := runExportForHosts(context.Background(), hosts, true, false, cfg, deps, &out)
+	if err != nil {
+		t.Fatalf("runExportForHosts() unexpected error: %v", err)
+	}
+
+	output := out.String()
+	for _, host := range hosts {
+		if !strings.Contains(output, host) {
+			t.Errorf("output missing host %q: %q", host, output)
+		}
+	}
+	if maxInFlight.Load() <= 1 {
+		t.Errorf("expected maxInFlight > 1 (goroutines should run concurrently), got %d", maxInFlight.Load())
+	}
+	t.Logf("peak concurrent SSH connections: %d", maxInFlight.Load())
 }

@@ -235,10 +235,10 @@ func TestUpdates(t *testing.T) {
 			name:         "SSH connection failure",
 			host:         "router7.example.com",
 			applyUpdates: false,
-			sshError:     fmt.Errorf("connection timeout"),
+			sshError:     fmt.Errorf("%w: connection timeout", ssh.ErrConnectionFailed),
 			wantErr:      true,
 			wantOffline:  true,
-			errContains:  "failed to connect",
+			errContains:  "cannot connect to router",
 		},
 		{
 			name:         "Check for updates command fails",

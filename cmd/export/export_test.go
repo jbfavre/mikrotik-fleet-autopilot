@@ -435,7 +435,7 @@ func TestExport_FilenameEdgeCases(t *testing.T) {
 func TestExport_SSHConnectionFactoryError(t *testing.T) {
 	// Mock SSH connection factory to return error
 	mockSSHFactory := func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
-		return nil, fmt.Errorf("SSH connection failed: timeout")
+		return nil, fmt.Errorf("%w: timeout", ssh.ErrConnectionFailed)
 	}
 
 	cfg := ExportConfig{
@@ -461,7 +461,7 @@ func TestExport_SSHConnectionFactoryError(t *testing.T) {
 		t.Error("export() should fail when SSH connection cannot be established")
 	}
 
-	if !strings.Contains(err.Error(), "failed to create SSH connection") {
+	if !strings.Contains(err.Error(), "cannot connect to router") {
 		t.Errorf("error message should mention SSH connection failure, got: %v", err)
 	}
 }

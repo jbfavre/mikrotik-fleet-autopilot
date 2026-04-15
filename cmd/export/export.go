@@ -90,13 +90,18 @@ func runExportForHosts(ctx context.Context, hosts []string, opts RunExportOption
 		line := disp.Line(i)
 		displayStepCallback := display.NewStepCallback(line)
 		filename, err := export(ctx, host, "", cfg, deps, displayStepCallback) // Empty preferred filename = derive automatically
-		if err != nil {
+		switch {
+		case errors.Is(err, ssh.ErrConnectionFailed):
+			line.CompleteStep("❓")
+			line.Finish("❓", err.Error())
+			// Offline is unknown, not a fatal failure; don't set errs[i].
+		case err != nil:
 			line.CompleteStep("❌")
 			line.FinishError(err.Error())
 			errs[i] = err
-			return
+		default:
+			line.Finish("✅", fmt.Sprintf("Configuration exported to %s", filename))
 		}
-		line.Finish("✅", fmt.Sprintf("Configuration exported to %s", filename))
 	}
 
 	sem := make(chan struct{}, opts.MaxConcurrentHosts)
@@ -158,8 +163,12 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 	slog.Debug("initializing SSH connection", "host", host)
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
+		if errors.Is(err, ssh.ErrConnectionFailed) {
+			slog.Warn("cannot connect to router", "host", host, "error", err)
+			return "", fmt.Errorf("%w", err)
+		}
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
-		return "", fmt.Errorf("failed to create SSH connection: %w", err)
+		return "", fmt.Errorf("%w", err)
 	}
 	reportStep("✅", "Connected")
 	defer func() {

@@ -61,8 +61,9 @@ var Command = []*cli.Command{
 				SSHConnectionFactory: ssh.CreateConnection,
 				ReconnectDelay:       10 * time.Second,
 			}
+			opts := RunUpdatesOptions{Debug: coreCfg.Debug, NoMultithread: coreCfg.NoMultithread}
 
-			return runUpdatesForHosts(ctx, coreCfg.Hosts, coreCfg.Debug, coreCfg.NoMultithread, updatesCfg, deps, os.Stdout)
+			return runUpdatesForHosts(ctx, coreCfg.Hosts, opts, updatesCfg, deps, os.Stdout)
 		},
 	},
 }
@@ -71,9 +72,16 @@ var Command = []*cli.Command{
 // multithread mode to avoid opening too many SSH connections at once.
 const maxConcurrentHosts = 20
 
-func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithread bool, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
-	disp := display.New(out, hosts, debug)
-	disp.SetConcurrent(!noMultithread)
+// RunUpdatesOptions groups execution flags for runUpdatesForHosts so call sites
+// remain self-describing and can be extended safely in the future.
+type RunUpdatesOptions struct {
+	Debug         bool
+	NoMultithread bool
+}
+
+func runUpdatesForHosts(ctx context.Context, hosts []string, opts RunUpdatesOptions, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
+	disp := display.New(out, hosts, opts.Debug)
+	disp.SetConcurrent(!opts.NoMultithread)
 	disp.Start()
 	defer disp.Stop()
 
@@ -107,7 +115,7 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, debug, noMultithrea
 	var ctxErr error
 loop:
 	for i, host := range hosts {
-		if noMultithread {
+		if opts.NoMultithread {
 			processHost(i, host)
 		} else {
 			wg.Add(1)

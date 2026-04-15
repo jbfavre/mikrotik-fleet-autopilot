@@ -3,10 +3,13 @@ package enroll
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
@@ -33,6 +36,11 @@ type EnrollDependencies struct {
 	SSHConnectionFactory func(context.Context, string) (ssh.RunnerInterface, error)
 	ApplyUpdatesFunc     func(context.Context, string) error
 	ExportConfigFunc     func(context.Context, string, string, bool, string) error
+}
+
+type deleteExistingEnrollmentResult struct {
+	hostKeyDeleted bool
+	configDeleted  string
 }
 
 var Command = []*cli.Command{
@@ -108,33 +116,79 @@ var Command = []*cli.Command{
 				ExportConfigFunc:     export.Export,
 			}
 
-			// Set up live display
-			disp := display.New(os.Stdout, coreCfg.Hosts, coreCfg.Debug)
-			disp.Start()
-			defer disp.Stop()
-
-			var lastErr error
-			if len(coreCfg.Hosts) == 0 {
-				slog.Warn("no hosts defined in configuration, nothing to enroll")
-				lastErr = fmt.Errorf("no hosts defined in configuration")
-			}
-			for i, host := range coreCfg.Hosts {
-				line := disp.Line(i)
-				displayStepCallback := display.NewStepCallback(line)
-				if err := enroll(ctx, host, enrollCfg, deps, displayStepCallback); err != nil {
-					line.CompleteStep("❌")
-					line.FinishError(fmt.Sprintf("Enrollment failed: %s", err.Error()))
-					lastErr = err
-					slog.Error("enrollment failed", "host", host, "hostname", enrollCfg.Hostname, "error", err)
-					// Continue with other hosts even if one fails
-				} else {
-					slog.Info("enrollment completed successfully", "host", host, "hostname", enrollCfg.Hostname)
-					line.Finish("✅", "Enrollment completed successfully")
-				}
-			}
-			return lastErr
+			return runEnrollForHosts(ctx, coreCfg.Hosts, coreCfg.Debug, coreCfg.NoMultithread, enrollCfg, deps, os.Stdout)
 		},
 	},
+}
+
+// maxConcurrentHosts limits the number of hosts processed simultaneously in
+// multithread mode to avoid opening too many SSH connections at once.
+const maxConcurrentHosts = 20
+
+func runEnrollForHosts(ctx context.Context, hosts []string, debug, noMultithread bool, cfg EnrollConfig, deps EnrollDependencies, out io.Writer) error {
+	if cfg.Force && cfg.UpdateHostKeyOnly {
+		return fmt.Errorf("cannot use --force and --update-hostkey-only together")
+	}
+	if len(hosts) == 0 {
+		return fmt.Errorf("no hosts specified or discovered")
+	}
+	if !cfg.UpdateHostKeyOnly {
+		if len(hosts) != 1 {
+			return fmt.Errorf("enroll command requires exactly one host, got %d", len(hosts))
+		}
+		if cfg.Hostname == "" {
+			return fmt.Errorf("--hostname is required for enrollment")
+		}
+	}
+
+	disp := display.New(out, hosts, debug)
+	disp.SetConcurrent(!noMultithread)
+	disp.Start()
+	defer disp.Stop()
+
+	// errs is indexed by host position so results are collected in host-list
+	// order regardless of goroutine completion order.
+	errs := make([]error, len(hosts))
+	var wg sync.WaitGroup
+
+	processHost := func(i int, host string) {
+		line := disp.Line(i)
+		displayStepCallback := display.NewStepCallback(line)
+		if err := enroll(ctx, host, cfg, deps, displayStepCallback); err != nil {
+			line.CompleteStep("❌")
+			line.FinishError(fmt.Sprintf("Enrollment failed: %s", err.Error()))
+			errs[i] = err
+			slog.Error("enrollment failed", "host", host, "hostname", cfg.Hostname, "error", err)
+			return
+		}
+		slog.Info("enrollment completed successfully", "host", host, "hostname", cfg.Hostname)
+		line.Finish("✅", "Enrollment completed successfully")
+	}
+
+	sem := make(chan struct{}, maxConcurrentHosts)
+	var ctxErr error
+loop:
+	for i, host := range hosts {
+		if noMultithread {
+			processHost(i, host)
+		} else {
+			wg.Add(1)
+			select {
+			case sem <- struct{}{}:
+				go func(idx int, h string) {
+					defer wg.Done()
+					defer func() { <-sem }()
+					processHost(idx, h)
+				}(i, host)
+			case <-ctx.Done():
+				wg.Done()
+				ctxErr = ctx.Err()
+				break loop
+			}
+		}
+	}
+	wg.Wait()
+	return errors.Join(append(errs, ctxErr)...)
 }
 
 // enroll is the entry point for the enrollment command
@@ -150,19 +204,27 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	ctx = context.WithValue(ctx, core.EnrollmentKey, true)
 	slog.Debug("enrollment mode enabled in context")
 
-	// Validate flag combination
-	if enrollCfg.Force && enrollCfg.UpdateHostKeyOnly {
-		return fmt.Errorf("cannot use --force and --update-hostkey-only together")
-	}
-
 	hostname := enrollCfg.Hostname
 	// Handle force re-enrollment by removing existing artifacts
 	if enrollCfg.Force {
 		slog.Info("force re-enrollment requested", "host", host)
-		if err := deleteExistingEnrollment(host, hostname); err != nil {
+		reportStep("⏳", "Removing existing enrollment artifacts…")
+		cleanupResult, err := deleteExistingEnrollment(host, hostname)
+		if err != nil {
 			slog.Error("failed to remove existing enrollment", "host", host, "hostname", hostname, "error", err)
 			return fmt.Errorf("failed to remove existing enrollment: %w", err)
 		}
+		switch {
+		case cleanupResult.hostKeyDeleted && cleanupResult.configDeleted != "":
+			reportStep("⏳", fmt.Sprintf("Removed existing host key and config file %s", cleanupResult.configDeleted))
+		case cleanupResult.hostKeyDeleted:
+			reportStep("⏳", "Removed existing host key")
+		case cleanupResult.configDeleted != "":
+			reportStep("⏳", fmt.Sprintf("Removed existing config file %s", cleanupResult.configDeleted))
+		default:
+			reportStep("⏳", "No existing enrollment artifacts found")
+		}
+		reportStep("✅", "Removed existing enrollment artifacts")
 	}
 
 	// Check if context is already cancelled
@@ -358,7 +420,6 @@ func applyConfigFile(conn ssh.RunnerInterface, filePath string) error {
 func setRouterIdentity(conn ssh.RunnerInterface, hostname string) error {
 	if hostname == "" {
 		slog.Debug("skipping router identity set, hostname is empty", "hostname", hostname)
-		fmt.Printf("❓ Router identity set skipped. --hostname not provided\n")
 		return nil
 	}
 	cmd := fmt.Sprintf("/system identity set name=%s", hostname)
@@ -422,18 +483,21 @@ func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (s
 	return newInfo.Fingerprint, nil
 }
 
-// deleteExistingEnrollment removes all enrollment artifacts for a host
-func deleteExistingEnrollment(host string, hostname string) error {
+// deleteExistingEnrollment removes all enrollment artifacts for a host.
+// It returns metadata describing what was removed so the caller can decide
+// how to surface that information through the display system.
+func deleteExistingEnrollment(host string, hostname string) (deleteExistingEnrollmentResult, error) {
 	slog.Info("deleting existing enrollment artifacts", "host", host, "hostname", hostname)
+	result := deleteExistingEnrollmentResult{}
 
 	// Delete host key
 	if ssh.HostKeyExists(host) {
 		slog.Debug("deleting host key", "host", host, "hostname", hostname)
 		if err := ssh.DeleteHostKey(host); err != nil {
 			slog.Error("failed to delete host key", "host", host, "hostname", hostname, "error", err)
-			return fmt.Errorf("failed to delete host key: %w", err)
+			return result, fmt.Errorf("failed to delete host key: %w", err)
 		}
-		fmt.Printf("Removed existing host key for %s\n", host)
+		result.hostKeyDeleted = true
 	}
 
 	// Delete config file
@@ -443,11 +507,11 @@ func deleteExistingEnrollment(host string, hostname string) error {
 		slog.Debug("deleting config file", "host", host, "hostname", hostname, "file", configFile)
 		if err := os.Remove(configFile); err != nil {
 			slog.Error("failed to delete config file", "host", host, "hostname", hostname, "file", configFile, "error", err)
-			return fmt.Errorf("failed to delete config file: %w", err)
+			return result, fmt.Errorf("failed to delete config file: %w", err)
 		}
-		fmt.Printf("Removed existing config file %s\n", configFile)
+		result.configDeleted = configFile
 	}
 
 	slog.Info("existing enrollment artifacts deleted", "host", host, "hostname", hostname)
-	return nil
+	return result, nil
 }

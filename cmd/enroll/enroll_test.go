@@ -1,12 +1,14 @@
 package enroll
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -337,6 +339,8 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 		hostname        string
 		setupHostKey    bool
 		setupConfigFile bool
+		wantHostKeyGone bool
+		wantConfigGone  bool
 		wantErr         bool
 		errContains     string
 	}{
@@ -346,6 +350,8 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			hostname:        "router1",
 			setupHostKey:    true,
 			setupConfigFile: true,
+			wantHostKeyGone: true,
+			wantConfigGone:  true,
 			wantErr:         false,
 		},
 		{
@@ -354,6 +360,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			hostname:        "router2",
 			setupHostKey:    true,
 			setupConfigFile: false,
+			wantHostKeyGone: true,
 			wantErr:         false,
 		},
 		{
@@ -362,6 +369,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			hostname:        "router3",
 			setupHostKey:    false,
 			setupConfigFile: true,
+			wantConfigGone:  true,
 			wantErr:         false,
 		},
 		{
@@ -378,6 +386,8 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			hostname:        "router5",
 			setupHostKey:    true,
 			setupConfigFile: true,
+			wantHostKeyGone: true,
+			wantConfigGone:  true,
 			wantErr:         false,
 		},
 	}
@@ -412,7 +422,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			}
 
 			// Execute
-			err := deleteExistingEnrollment(tt.host, tt.hostname)
+			result, err := deleteExistingEnrollment(tt.host, tt.hostname)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
@@ -423,6 +433,16 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 			if tt.wantErr && tt.errContains != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("deleteExistingEnrollment() error = %v, should contain %q", err, tt.errContains)
+				}
+			}
+
+			if !tt.wantErr {
+				if result.hostKeyDeleted != tt.wantHostKeyGone {
+					t.Errorf("deleteExistingEnrollment() hostKeyDeleted = %v, want %v", result.hostKeyDeleted, tt.wantHostKeyGone)
+				}
+				gotConfigDeleted := result.configDeleted != ""
+				if gotConfigDeleted != tt.wantConfigGone {
+					t.Errorf("deleteExistingEnrollment() configDeleted = %q, want config deleted = %v", result.configDeleted, tt.wantConfigGone)
 				}
 			}
 
@@ -666,45 +686,8 @@ func TestEnrollActionValidation(t *testing.T) {
 				ExportConfigFunc:     export.Export,
 			}
 
-			// Validate flag combinations
-			if enrollCfg.Force && enrollCfg.UpdateHostKeyOnly {
-				err = fmt.Errorf("cannot use --force and --update-hostkey-only together")
-			} else if enrollCfg.UpdateHostKeyOnly {
-				// Batch mode: update hostkeys for all discovered hosts
-				if len(cfg.Hosts) > 1 {
-					successCount := 0
-					failCount := 0
-					var lastErr error
-
-					for _, host := range cfg.Hosts {
-						if _, updateErr := updateHostKey(ctx, host, deps); updateErr != nil {
-							failCount++
-							lastErr = updateErr
-						} else {
-							successCount++
-						}
-					}
-
-					if failCount > 0 && successCount == 0 {
-						err = fmt.Errorf("all host key updates failed")
-					} else if failCount > 0 {
-						err = fmt.Errorf("some host key updates failed: %w", lastErr)
-					}
-				} else if len(cfg.Hosts) == 1 {
-					// Single host mode
-					host := cfg.Hosts[0]
-					_, err = updateHostKey(ctx, host, deps)
-				} else {
-					err = fmt.Errorf("no hosts specified or discovered")
-				}
-			} else {
-				// Normal enrollment validation
-				if len(cfg.Hosts) != 1 {
-					err = fmt.Errorf("enroll command requires exactly one host, got %d", len(cfg.Hosts))
-				} else if enrollCfg.Hostname == "" {
-					err = fmt.Errorf("--hostname is required for enrollment")
-				}
-			}
+			var out bytes.Buffer
+			err = runEnrollForHosts(ctx, cfg.Hosts, true, true, enrollCfg, deps, &out)
 
 			// Verify error expectation
 			if (err != nil) != tt.wantErr {
@@ -732,6 +715,130 @@ func TestEnrollActionValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunEnrollForHosts_Sequential(t *testing.T) {
+	hosts := []string{"router-ok", "router-fail"}
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer func() {
+		_ = os.Chdir(originalWd)
+	}()
+	_ = os.Chdir(tmpDir)
+
+	deps := EnrollDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			if host == "router-fail" {
+				return nil, fmt.Errorf("connection refused")
+			}
+			srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
+			dstFile := ssh.HostKeyFilePath(host)
+			if err := copyFile(srcFile, dstFile); err != nil {
+				return nil, err
+			}
+			return &sshmocks_test.MockRunner{
+				CloseFunc: func() error { return nil },
+				RunFunc:   func(cmd string) (string, error) { return "", nil },
+			}, nil
+		},
+		ApplyUpdatesFunc: updates.Updates,
+		ExportConfigFunc: export.Export,
+	}
+
+	cfg := EnrollConfig{UpdateHostKeyOnly: true}
+
+	var out bytes.Buffer
+	err := runEnrollForHosts(context.Background(), hosts, true, true, cfg, deps, &out)
+	if err == nil {
+		t.Fatal("runEnrollForHosts() expected non-nil error when one host fails")
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "router-ok") || !strings.Contains(output, "router-fail") {
+		t.Errorf("output should contain both hosts, got: %q", output)
+	}
+	if !strings.Contains(output, "Enrollment completed successfully") {
+		t.Errorf("missing success message, got: %q", output)
+	}
+	if !strings.Contains(output, "Enrollment failed: failed to capture host key: failed to connect to device: connection refused") {
+		t.Errorf("missing failure message, got: %q", output)
+	}
+	if !ssh.HostKeyExists("router-ok") {
+		t.Error("expected host key for router-ok to be created")
+	}
+	if ssh.HostKeyExists("router-fail") {
+		t.Error("did not expect host key for router-fail to be created")
+	}
+}
+
+func TestRunEnrollForHosts_Concurrent(t *testing.T) {
+	hosts := []string{"router-1", "router-2", "router-3"}
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer func() {
+		_ = os.Chdir(originalWd)
+	}()
+	_ = os.Chdir(tmpDir)
+
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+	nHosts := len(hosts)
+	allStarted := make(chan struct{})
+	var startedCount atomic.Int32
+
+	deps := EnrollDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			current := inFlight.Add(1)
+			for {
+				old := maxInFlight.Load()
+				if current <= old || maxInFlight.CompareAndSwap(old, current) {
+					break
+				}
+			}
+			if startedCount.Add(1) == int32(nHosts) {
+				close(allStarted)
+			} else {
+				<-allStarted
+			}
+			srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
+			dstFile := ssh.HostKeyFilePath(host)
+			if err := copyFile(srcFile, dstFile); err != nil {
+				inFlight.Add(-1)
+				return nil, err
+			}
+			return &sshmocks_test.MockRunner{
+				CloseFunc: func() error {
+					inFlight.Add(-1)
+					return nil
+				},
+				RunFunc: func(cmd string) (string, error) { return "", nil },
+			}, nil
+		},
+		ApplyUpdatesFunc: updates.Updates,
+		ExportConfigFunc: export.Export,
+	}
+
+	cfg := EnrollConfig{UpdateHostKeyOnly: true}
+
+	var out bytes.Buffer
+	err := runEnrollForHosts(context.Background(), hosts, true, false, cfg, deps, &out)
+	if err != nil {
+		t.Fatalf("runEnrollForHosts() unexpected error: %v", err)
+	}
+
+	output := out.String()
+	for _, host := range hosts {
+		if !strings.Contains(output, host) {
+			t.Errorf("output missing host %q: %q", host, output)
+		}
+		if !ssh.HostKeyExists(host) {
+			t.Errorf("expected host key for %s to be created", host)
+		}
+	}
+	if maxInFlight.Load() <= 1 {
+		t.Errorf("expected maxInFlight > 1 (goroutines should run concurrently), got %d", maxInFlight.Load())
+	}
+	t.Logf("peak concurrent SSH connections: %d", maxInFlight.Load())
 }
 
 func TestConnectToRouter(t *testing.T) {
@@ -1501,7 +1608,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 
 					// Handle force re-enrollment
 					if err == nil && enrollCfg.Force {
-						err = deleteExistingEnrollment(host, host)
+						_, err = deleteExistingEnrollment(host, host)
 						if err != nil {
 							err = fmt.Errorf("failed to remove existing enrollment: %w", err)
 						}
@@ -1944,19 +2051,6 @@ func TestEnrollWorkflow(t *testing.T) {
 					t.Error("Host key file should exist")
 				}
 			},
-		},
-		{
-			name:              "error: force and update-host-key-only conflict",
-			host:              "test-router12",
-			hostname:          "test-router12",
-			force:             true,
-			updateHostKeyOnly: true,
-			setupMocks: func(t *testing.T) EnrollDependencies {
-				return EnrollDependencies{}
-			},
-			setupFiles:  func(t *testing.T, hostname string) {},
-			wantErr:     true,
-			errContains: "cannot use --force and --update-hostkey-only together",
 		},
 		{
 			name:     "error: SSH connection failure",

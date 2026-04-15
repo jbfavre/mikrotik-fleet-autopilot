@@ -590,9 +590,10 @@ func TestRunExportForHosts_Sequential(t *testing.T) {
 	}
 
 	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir}
+	opts := RunExportOptions{Debug: true, NoMultithread: true}
 
 	var out bytes.Buffer
-	err := runExportForHosts(context.Background(), hosts, true, true, cfg, deps, &out)
+	err := runExportForHosts(context.Background(), hosts, opts, cfg, deps, &out)
 	if err == nil {
 		t.Fatal("runExportForHosts() expected non-nil error when one host fails")
 	}
@@ -651,9 +652,10 @@ func TestRunExportForHosts_Concurrent(t *testing.T) {
 	}
 
 	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir}
+	opts := RunExportOptions{Debug: true, NoMultithread: false}
 
 	var out bytes.Buffer
-	err := runExportForHosts(context.Background(), hosts, true, false, cfg, deps, &out)
+	err := runExportForHosts(context.Background(), hosts, opts, cfg, deps, &out)
 	if err != nil {
 		t.Fatalf("runExportForHosts() unexpected error: %v", err)
 	}

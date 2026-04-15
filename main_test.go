@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"runtime"
@@ -526,7 +527,10 @@ func TestBuildCommandMaxConcurrentHostsFlag(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cancel()
-	_ = cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "--max-concurrent-hosts", "4", "updates"})
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "--max-concurrent-hosts", "4", "updates"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cmd.Run() error = %v, want context.Canceled", err)
+	}
 	if globalConfig.MaxConcurrentHosts != 4 {
 		t.Errorf("MaxConcurrentHosts = %d, want 4", globalConfig.MaxConcurrentHosts)
 	}
@@ -545,7 +549,10 @@ func TestBuildCommandMaxConcurrentHostsAutoDetect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cancel()
-	_ = cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "updates"})
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "updates"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cmd.Run() error = %v, want context.Canceled", err)
+	}
 	if globalConfig.EffectiveMaxConcurrent != runtime.NumCPU() {
 		t.Errorf("EffectiveMaxConcurrent = %d, want %d", globalConfig.EffectiveMaxConcurrent, runtime.NumCPU())
 	}
@@ -577,7 +584,10 @@ func TestBuildCommandMaxConcurrentHostsSequential(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cancel()
-	_ = cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "--max-concurrent-hosts", "1", "updates"})
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "--max-concurrent-hosts", "1", "updates"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cmd.Run() error = %v, want context.Canceled", err)
+	}
 	if globalConfig.EffectiveMaxConcurrent != 1 {
 		t.Errorf("EffectiveMaxConcurrent = %d, want 1", globalConfig.EffectiveMaxConcurrent)
 	}

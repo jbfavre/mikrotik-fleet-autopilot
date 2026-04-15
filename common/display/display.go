@@ -194,9 +194,12 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 }
 
 // SetConcurrent marks the display as serving concurrent host processing.
-// Must be called before Start. In concurrent non-live mode, HostLine.Finish
-// buffers each line and LiveDisplay.Stop flushes them in host-list order so
-// that output is deterministic regardless of goroutine completion order.
+// Must be called before Start. In concurrent mode the display always uses
+// non-live buffered output — even on a real TTY — so that goroutines finishing
+// at arbitrary times produce clean, deterministic one-line-per-host output
+// flushed in host-list order by Stop. Using liveterm with concurrent goroutines
+// causes intermediate step renders to appear in the scrollback, which is why
+// this path unconditionally disables live mode.
 // In the default sequential mode, Finish writes each line immediately so the
 // caller sees per-host progress in real time.
 func (d *LiveDisplay) SetConcurrent(concurrent bool) {
@@ -205,10 +208,15 @@ func (d *LiveDisplay) SetConcurrent(concurrent bool) {
 		d.clearNonLive()
 		return
 	}
-	// If we are already in non-live mode (e.g. debug=true) and switching to
-	// concurrent, initialise the pending buffer now so that HostLine.Finish
-	// can start buffering without waiting for Start to be called.
-	if !d.liveMode && d.pendingLines == nil {
+	// Concurrent mode always uses non-live buffered output regardless of TTY.
+	// Force liveMode off before Start is called so liveterm is never started.
+	if d.liveMode {
+		d.liveMode = false
+		for _, l := range d.lines {
+			l.liveMode = false
+		}
+	}
+	if d.pendingLines == nil {
 		d.initNonLive()
 	}
 }

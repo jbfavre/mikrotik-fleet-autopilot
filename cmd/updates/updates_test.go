@@ -1418,7 +1418,7 @@ func TestRunUpdatesForHosts_Sequential(t *testing.T) {
 	}
 
 	cfg := UpdatesConfig{UpdatesApply: true}
-	opts := RunUpdatesOptions{Debug: true, NoMultithread: true}
+	opts := RunUpdatesOptions{Debug: true, MaxConcurrentHosts: 1}
 
 	var out bytes.Buffer
 	err := runUpdatesForHosts(context.Background(), hosts, opts, cfg, deps, &out)
@@ -1509,7 +1509,7 @@ func TestRunUpdatesForHosts_Concurrent(t *testing.T) {
 	}
 
 	cfg := UpdatesConfig{UpdatesApply: true}
-	opts := RunUpdatesOptions{Debug: true, NoMultithread: false}
+	opts := RunUpdatesOptions{Debug: true, MaxConcurrentHosts: len(hosts)}
 
 	var out bytes.Buffer
 	err := runUpdatesForHosts(context.Background(), hosts, opts, cfg, deps, &out)

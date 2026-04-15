@@ -61,27 +61,23 @@ var Command = []*cli.Command{
 				SSHConnectionFactory: ssh.CreateConnection,
 				ReconnectDelay:       10 * time.Second,
 			}
-			opts := RunUpdatesOptions{Debug: coreCfg.Debug, NoMultithread: coreCfg.NoMultithread}
+			opts := RunUpdatesOptions{Debug: coreCfg.Debug, MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent}
 
 			return runUpdatesForHosts(ctx, coreCfg.Hosts, opts, updatesCfg, deps, os.Stdout)
 		},
 	},
 }
 
-// maxConcurrentHosts limits the number of hosts processed simultaneously in
-// multithread mode to avoid opening too many SSH connections at once.
-const maxConcurrentHosts = 20
-
 // RunUpdatesOptions groups execution flags for runUpdatesForHosts so call sites
 // remain self-describing and can be extended safely in the future.
 type RunUpdatesOptions struct {
-	Debug         bool
-	NoMultithread bool
+	Debug              bool
+	MaxConcurrentHosts int
 }
 
 func runUpdatesForHosts(ctx context.Context, hosts []string, opts RunUpdatesOptions, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
 	disp := display.New(out, hosts, opts.Debug)
-	disp.SetConcurrent(!opts.NoMultithread)
+	disp.SetConcurrent(opts.MaxConcurrentHosts > 1)
 	disp.Start()
 	defer disp.Stop()
 
@@ -111,11 +107,11 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, opts RunUpdatesOpti
 		}
 	}
 
-	sem := make(chan struct{}, maxConcurrentHosts)
+	sem := make(chan struct{}, opts.MaxConcurrentHosts)
 	var ctxErr error
 loop:
 	for i, host := range hosts {
-		if opts.NoMultithread {
+		if opts.MaxConcurrentHosts <= 1 {
 			processHost(i, host)
 		} else {
 			wg.Add(1)

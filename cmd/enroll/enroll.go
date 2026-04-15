@@ -116,16 +116,19 @@ var Command = []*cli.Command{
 				ExportConfigFunc:     export.Export,
 			}
 
-			return runEnrollForHosts(ctx, coreCfg.Hosts, coreCfg.Debug, coreCfg.NoMultithread, enrollCfg, deps, os.Stdout)
+			opts := RunEnrollOptions{Debug: coreCfg.Debug, MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent}
+
+			return runEnrollForHosts(ctx, coreCfg.Hosts, opts, enrollCfg, deps, os.Stdout)
 		},
 	},
 }
 
-// maxConcurrentHosts limits the number of hosts processed simultaneously in
-// multithread mode to avoid opening too many SSH connections at once.
-const maxConcurrentHosts = 20
+type RunEnrollOptions struct {
+	Debug              bool
+	MaxConcurrentHosts int
+}
 
-func runEnrollForHosts(ctx context.Context, hosts []string, debug, noMultithread bool, cfg EnrollConfig, deps EnrollDependencies, out io.Writer) error {
+func runEnrollForHosts(ctx context.Context, hosts []string, opts RunEnrollOptions, cfg EnrollConfig, deps EnrollDependencies, out io.Writer) error {
 	if cfg.Force && cfg.UpdateHostKeyOnly {
 		return fmt.Errorf("cannot use --force and --update-hostkey-only together")
 	}
@@ -141,8 +144,8 @@ func runEnrollForHosts(ctx context.Context, hosts []string, debug, noMultithread
 		}
 	}
 
-	disp := display.New(out, hosts, debug)
-	disp.SetConcurrent(!noMultithread)
+	disp := display.New(out, hosts, opts.Debug)
+	disp.SetConcurrent(opts.MaxConcurrentHosts > 1)
 	disp.Start()
 	defer disp.Stop()
 
@@ -165,11 +168,11 @@ func runEnrollForHosts(ctx context.Context, hosts []string, debug, noMultithread
 		line.Finish("✅", "Enrollment completed successfully")
 	}
 
-	sem := make(chan struct{}, maxConcurrentHosts)
+	sem := make(chan struct{}, opts.MaxConcurrentHosts)
 	var ctxErr error
 loop:
 	for i, host := range hosts {
-		if noMultithread {
+		if opts.MaxConcurrentHosts <= 1 {
 			processHost(i, host)
 		} else {
 			wg.Add(1)

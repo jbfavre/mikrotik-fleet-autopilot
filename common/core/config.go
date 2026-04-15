@@ -18,7 +18,7 @@ type Config struct {
 //
 // Behavior:
 //   - negative values are rejected with an error
-//   - 0 auto-detects using the local CPU count
+//   - 0 auto-detects using GOMAXPROCS (respects container CPU quotas and GOMAXPROCS env var)
 //   - 1 forces sequential execution
 //   - 2 and above enables parallel processing with that cap
 func ResolveMaxConcurrentHosts(configuredValue int) (int, error) {
@@ -26,7 +26,7 @@ func ResolveMaxConcurrentHosts(configuredValue int) (int, error) {
 		return 0, fmt.Errorf("--max-concurrent-hosts must be 0 (auto-detect), 1 (sequential), or >= 2")
 	}
 	if configuredValue == 0 {
-		return runtime.NumCPU(), nil
+		return runtime.GOMAXPROCS(0), nil
 	}
 	return configuredValue, nil
 }

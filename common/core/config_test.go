@@ -58,9 +58,9 @@ func TestResolveMaxConcurrentHosts(t *testing.T) {
 		wantErr         bool
 	}{
 		{
-			name:            "zero auto-detects cpu count",
+			name:            "zero auto-detects max procs",
 			configuredValue: 0,
-			want:            runtime.NumCPU(),
+			want:            runtime.GOMAXPROCS(0),
 		},
 		{
 			name:            "one forces sequential",

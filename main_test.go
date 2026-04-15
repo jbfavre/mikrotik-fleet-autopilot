@@ -553,8 +553,9 @@ func TestBuildCommandMaxConcurrentHostsAutoDetect(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("cmd.Run() error = %v, want context.Canceled", err)
 	}
-	if globalConfig.EffectiveMaxConcurrent != runtime.NumCPU() {
-		t.Errorf("EffectiveMaxConcurrent = %d, want %d", globalConfig.EffectiveMaxConcurrent, runtime.NumCPU())
+	expectedMaxConcurrent := runtime.GOMAXPROCS(0)
+	if globalConfig.EffectiveMaxConcurrent != expectedMaxConcurrent {
+		t.Errorf("EffectiveMaxConcurrent = %d, want %d", globalConfig.EffectiveMaxConcurrent, expectedMaxConcurrent)
 	}
 }
 

@@ -102,10 +102,10 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 			slog.Info("Starting global")
 
 			effectiveMaxConcurrent, err := core.ResolveMaxConcurrentHosts(globalConfig.MaxConcurrentHosts)
-			slog.Debug("resolved max concurrent hosts", "configured", globalConfig.MaxConcurrentHosts, "effective", effectiveMaxConcurrent)
 			if err != nil {
 				return ctx, err
 			}
+			slog.Debug("resolved max concurrent hosts", "configured", globalConfig.MaxConcurrentHosts, "effective", effectiveMaxConcurrent)
 			globalConfig.EffectiveMaxConcurrent = effectiveMaxConcurrent
 
 			// Check if a subcommand was provided

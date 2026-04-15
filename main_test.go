@@ -524,6 +524,7 @@ func TestBuildCommandMaxConcurrentHostsFlag(t *testing.T) {
 	// Use a pre-cancelled context so the root Before hook fires (binding flags into
 	// globalConfig) but the subcommand action exits immediately without SSH work.
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cancel()
 	_ = cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "--max-concurrent-hosts", "4", "updates"})
 	if globalConfig.MaxConcurrentHosts != 4 {
@@ -542,6 +543,7 @@ func TestBuildCommandMaxConcurrentHostsAutoDetect(t *testing.T) {
 	// Use a pre-cancelled context so the root Before hook fires (binding flags into
 	// globalConfig) but the subcommand action exits immediately without SSH work.
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cancel()
 	_ = cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "updates"})
 	if globalConfig.EffectiveMaxConcurrent != runtime.NumCPU() {
@@ -573,6 +575,7 @@ func TestBuildCommandMaxConcurrentHostsSequential(t *testing.T) {
 	// Use a pre-cancelled context so the root Before hook fires (binding flags into
 	// globalConfig) but the subcommand action exits immediately without SSH work.
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cancel()
 	_ = cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "--max-concurrent-hosts", "1", "updates"})
 	if globalConfig.EffectiveMaxConcurrent != 1 {

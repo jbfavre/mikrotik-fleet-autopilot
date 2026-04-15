@@ -205,10 +205,6 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	slog.Debug("enrollment mode enabled in context")
 
 	hostname := enrollCfg.Hostname
-	// Validate flag combination
-	if enrollCfg.Force && enrollCfg.UpdateHostKeyOnly {
-		return fmt.Errorf("cannot use --force and --update-hostkey-only together")
-	}
 	// Handle force re-enrollment by removing existing artifacts
 	if enrollCfg.Force {
 		slog.Info("force re-enrollment requested", "host", host)

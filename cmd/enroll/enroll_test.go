@@ -2053,19 +2053,6 @@ func TestEnrollWorkflow(t *testing.T) {
 			},
 		},
 		{
-			name:              "error: force and update-host-key-only conflict",
-			host:              "test-router12",
-			hostname:          "test-router12",
-			force:             true,
-			updateHostKeyOnly: true,
-			setupMocks: func(t *testing.T) EnrollDependencies {
-				return EnrollDependencies{}
-			},
-			setupFiles:  func(t *testing.T, hostname string) {},
-			wantErr:     true,
-			errContains: "cannot use --force and --update-hostkey-only together",
-		},
-		{
 			name:     "error: SSH connection failure",
 			host:     "test-router15",
 			hostname: "test-router15",

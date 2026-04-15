@@ -687,7 +687,8 @@ func TestEnrollActionValidation(t *testing.T) {
 			}
 
 			var out bytes.Buffer
-			err = runEnrollForHosts(ctx, cfg.Hosts, true, true, enrollCfg, deps, &out)
+			opts := RunEnrollOptions{Debug: true, MaxConcurrentHosts: 1}
+			err = runEnrollForHosts(ctx, cfg.Hosts, opts, enrollCfg, deps, &out)
 
 			// Verify error expectation
 			if (err != nil) != tt.wantErr {
@@ -748,7 +749,8 @@ func TestRunEnrollForHosts_Sequential(t *testing.T) {
 	cfg := EnrollConfig{UpdateHostKeyOnly: true}
 
 	var out bytes.Buffer
-	err := runEnrollForHosts(context.Background(), hosts, true, true, cfg, deps, &out)
+	opts := RunEnrollOptions{Debug: true, MaxConcurrentHosts: 1}
+	err := runEnrollForHosts(context.Background(), hosts, opts, cfg, deps, &out)
 	if err == nil {
 		t.Fatal("runEnrollForHosts() expected non-nil error when one host fails")
 	}
@@ -821,7 +823,8 @@ func TestRunEnrollForHosts_Concurrent(t *testing.T) {
 	cfg := EnrollConfig{UpdateHostKeyOnly: true}
 
 	var out bytes.Buffer
-	err := runEnrollForHosts(context.Background(), hosts, true, false, cfg, deps, &out)
+	opts := RunEnrollOptions{Debug: true, MaxConcurrentHosts: len(hosts)}
+	err := runEnrollForHosts(context.Background(), hosts, opts, cfg, deps, &out)
 	if err != nil {
 		t.Fatalf("runEnrollForHosts() unexpected error: %v", err)
 	}

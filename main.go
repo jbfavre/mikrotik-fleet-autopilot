@@ -85,11 +85,11 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Usage:       "Enable debug logging",
 				Destination: &globalConfig.Debug,
 			},
-			&cli.BoolFlag{
-				Name:        "no-multithread",
-				Value:       false,
-				Usage:       "Disable parallel host processing (sequential fallback)",
-				Destination: &globalConfig.NoMultithread,
+			&cli.IntFlag{
+				Name:        "max-concurrent-hosts",
+				Value:       0,
+				Usage:       "Maximum number of hosts to process in parallel (0 = auto-detect, 1 = sequential, >=2 = parallel with that cap)",
+				Destination: &globalConfig.MaxConcurrentHosts,
 			},
 		},
 		Commands: append(append(export.Command, updates.Command...), enroll.Command...),
@@ -101,10 +101,17 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 			}
 			slog.Info("Starting global")
 
+			effectiveMaxConcurrent, err := core.ResolveMaxConcurrentHosts(globalConfig.MaxConcurrentHosts)
+			if err != nil {
+				return ctx, err
+			}
+			slog.Debug("resolved max concurrent hosts", "configured", globalConfig.MaxConcurrentHosts, "effective", effectiveMaxConcurrent)
+			globalConfig.EffectiveMaxConcurrent = effectiveMaxConcurrent
+
 			// Check if a subcommand was provided
 			// If not, the help will be shown automatically by urfave/cli
 			if cmd.Args().Len() > 0 {
-				slog.Debug("cmd args", "args", cmd.Args())
+				slog.Debug("command line arguments", "args", cmd.Args())
 				// Setup hosts
 				if *hosts != "" {
 					// Split comma-separated hosts

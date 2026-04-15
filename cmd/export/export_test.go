@@ -590,7 +590,7 @@ func TestRunExportForHosts_Sequential(t *testing.T) {
 	}
 
 	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir}
-	opts := RunExportOptions{Debug: true, NoMultithread: true}
+	opts := RunExportOptions{Debug: true, MaxConcurrentHosts: 1}
 
 	var out bytes.Buffer
 	err := runExportForHosts(context.Background(), hosts, opts, cfg, deps, &out)
@@ -652,7 +652,7 @@ func TestRunExportForHosts_Concurrent(t *testing.T) {
 	}
 
 	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir}
-	opts := RunExportOptions{Debug: true, NoMultithread: false}
+	opts := RunExportOptions{Debug: true, MaxConcurrentHosts: len(hosts)}
 
 	var out bytes.Buffer
 	err := runExportForHosts(context.Background(), hosts, opts, cfg, deps, &out)

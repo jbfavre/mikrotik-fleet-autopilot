@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
@@ -47,13 +50,13 @@ func TestBuildCommandFlags(t *testing.T) {
 	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
 
 	expectedFlags := map[string]bool{
-		"host":               false,
-		"ssh-user":           false,
-		"ssh-password":       false,
-		"ssh-passphrase":     false,
-		"debug":              false,
-		"no-multithread":     false,
-		"skip-hostkey-check": false,
+		"host":                 false,
+		"ssh-user":             false,
+		"ssh-password":         false,
+		"ssh-passphrase":       false,
+		"debug":                false,
+		"max-concurrent-hosts": false,
+		"skip-hostkey-check":   false,
 	}
 
 	// Check all expected flags exist
@@ -510,5 +513,83 @@ func TestBuildCommandDebugFlag(t *testing.T) {
 
 	if globalConfig.Debug {
 		t.Error("Debug flag should be false")
+	}
+}
+
+func TestBuildCommandMaxConcurrentHostsFlag(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	// Use a pre-cancelled context so the root Before hook fires (binding flags into
+	// globalConfig) but the subcommand action exits immediately without SSH work.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "--max-concurrent-hosts", "4", "updates"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cmd.Run() error = %v, want context.Canceled", err)
+	}
+	if globalConfig.MaxConcurrentHosts != 4 {
+		t.Errorf("MaxConcurrentHosts = %d, want 4", globalConfig.MaxConcurrentHosts)
+	}
+	if globalConfig.EffectiveMaxConcurrent != 4 {
+		t.Errorf("EffectiveMaxConcurrent = %d, want 4", globalConfig.EffectiveMaxConcurrent)
+	}
+}
+
+func TestBuildCommandMaxConcurrentHostsAutoDetect(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	// Use a pre-cancelled context so the root Before hook fires (binding flags into
+	// globalConfig) but the subcommand action exits immediately without SSH work.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "updates"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cmd.Run() error = %v, want context.Canceled", err)
+	}
+	expectedMaxConcurrent := runtime.GOMAXPROCS(0)
+	if globalConfig.EffectiveMaxConcurrent != expectedMaxConcurrent {
+		t.Errorf("EffectiveMaxConcurrent = %d, want %d", globalConfig.EffectiveMaxConcurrent, expectedMaxConcurrent)
+	}
+}
+
+func TestBuildCommandMaxConcurrentHostsRejectsInvalidOverride(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	// The Before hook must abort with an error before the subcommand action runs.
+	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--max-concurrent-hosts", "-1", "updates"})
+	if err == nil {
+		t.Fatal("cmd.Run() expected an error for negative max concurrency")
+	}
+	if !strings.Contains(err.Error(), "--max-concurrent-hosts must be") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildCommandMaxConcurrentHostsSequential(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	// Use a pre-cancelled context so the root Before hook fires (binding flags into
+	// globalConfig) but the subcommand action exits immediately without SSH work.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "--max-concurrent-hosts", "1", "updates"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cmd.Run() error = %v, want context.Canceled", err)
+	}
+	if globalConfig.EffectiveMaxConcurrent != 1 {
+		t.Errorf("EffectiveMaxConcurrent = %d, want 1", globalConfig.EffectiveMaxConcurrent)
 	}
 }

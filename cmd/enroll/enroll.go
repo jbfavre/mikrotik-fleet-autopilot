@@ -116,10 +116,6 @@ var Command = []*cli.Command{
 				ExportConfigFunc:     export.Export,
 			}
 
-			if err := validateEnrollAction(enrollCfg, coreCfg.Hosts); err != nil {
-				return err
-			}
-
 			return runEnrollForHosts(ctx, coreCfg.Hosts, coreCfg.Debug, coreCfg.NoMultithread, enrollCfg, deps, os.Stdout)
 		},
 	},
@@ -129,26 +125,22 @@ var Command = []*cli.Command{
 // multithread mode to avoid opening too many SSH connections at once.
 const maxConcurrentHosts = 20
 
-func validateEnrollAction(cfg EnrollConfig, hosts []string) error {
+func runEnrollForHosts(ctx context.Context, hosts []string, debug, noMultithread bool, cfg EnrollConfig, deps EnrollDependencies, out io.Writer) error {
 	if cfg.Force && cfg.UpdateHostKeyOnly {
 		return fmt.Errorf("cannot use --force and --update-hostkey-only together")
 	}
 	if len(hosts) == 0 {
 		return fmt.Errorf("no hosts specified or discovered")
 	}
-	if cfg.UpdateHostKeyOnly {
-		return nil
+	if !cfg.UpdateHostKeyOnly {
+		if len(hosts) != 1 {
+			return fmt.Errorf("enroll command requires exactly one host, got %d", len(hosts))
+		}
+		if cfg.Hostname == "" {
+			return fmt.Errorf("--hostname is required for enrollment")
+		}
 	}
-	if len(hosts) != 1 {
-		return fmt.Errorf("enroll command requires exactly one host, got %d", len(hosts))
-	}
-	if cfg.Hostname == "" {
-		return fmt.Errorf("--hostname is required for enrollment")
-	}
-	return nil
-}
 
-func runEnrollForHosts(ctx context.Context, hosts []string, debug, noMultithread bool, cfg EnrollConfig, deps EnrollDependencies, out io.Writer) error {
 	disp := display.New(out, hosts, debug)
 	disp.SetConcurrent(!noMultithread)
 	disp.Start()
@@ -212,12 +204,11 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	ctx = context.WithValue(ctx, core.EnrollmentKey, true)
 	slog.Debug("enrollment mode enabled in context")
 
+	hostname := enrollCfg.Hostname
 	// Validate flag combination
 	if enrollCfg.Force && enrollCfg.UpdateHostKeyOnly {
 		return fmt.Errorf("cannot use --force and --update-hostkey-only together")
 	}
-
-	hostname := enrollCfg.Hostname
 	// Handle force re-enrollment by removing existing artifacts
 	if enrollCfg.Force {
 		slog.Info("force re-enrollment requested", "host", host)

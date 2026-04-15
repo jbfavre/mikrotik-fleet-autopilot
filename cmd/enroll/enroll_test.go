@@ -686,11 +686,8 @@ func TestEnrollActionValidation(t *testing.T) {
 				ExportConfigFunc:     export.Export,
 			}
 
-			err = validateEnrollAction(enrollCfg, cfg.Hosts)
-			if err == nil && enrollCfg.UpdateHostKeyOnly {
-				var out bytes.Buffer
-				err = runEnrollForHosts(ctx, cfg.Hosts, true, true, enrollCfg, deps, &out)
-			}
+			var out bytes.Buffer
+			err = runEnrollForHosts(ctx, cfg.Hosts, true, true, enrollCfg, deps, &out)
 
 			// Verify error expectation
 			if (err != nil) != tt.wantErr {

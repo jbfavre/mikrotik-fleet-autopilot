@@ -94,7 +94,9 @@ func runExportForHosts(ctx context.Context, hosts []string, opts RunExportOption
 		case errors.Is(err, ssh.ErrConnectionFailed):
 			line.CompleteStep("❓")
 			line.Finish("❓", err.Error())
-			// Offline is unknown, not a fatal failure; don't set errs[i].
+			// Connection failures still mean the host export did not succeed,
+			// so record the error to ensure the overall command fails.
+			errs[i] = err
 		case err != nil:
 			line.CompleteStep("❌")
 			line.FinishError(err.Error())

@@ -672,3 +672,41 @@ func TestRunExportForHosts_Concurrent(t *testing.T) {
 	}
 	t.Logf("peak concurrent SSH connections: %d", maxInFlight.Load())
 }
+
+func TestRunExportForHosts_ConnectionFailureNonFatal(t *testing.T) {
+	hosts := []string{"router-ok", "router-offline"}
+	tmpDir := t.TempDir()
+
+	deps := ExportDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			if host == "router-offline" {
+				return nil, fmt.Errorf("%w: timeout", ssh.ErrConnectionFailed)
+			}
+			return &sshmocks_test.MockRunner{
+				RunFunc: func(cmd string) (string, error) {
+					return "/interface bridge\nadd name=bridge1", nil
+				},
+				CloseFunc: func() error {
+					return nil
+				},
+			}, nil
+		},
+	}
+
+	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir}
+	opts := RunExportOptions{Debug: true, MaxConcurrentHosts: 1}
+
+	var out bytes.Buffer
+	err := runExportForHosts(context.Background(), hosts, opts, cfg, deps, &out)
+	if err != nil {
+		t.Fatalf("runExportForHosts() expected nil error for connection failure, got: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "router-offline") {
+		t.Errorf("output missing offline host: %q", output)
+	}
+	if !strings.Contains(output, "❓") {
+		t.Errorf("output should include unknown status icon for offline host: %q", output)
+	}
+}

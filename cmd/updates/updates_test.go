@@ -126,6 +126,7 @@ func TestUpdates(t *testing.T) {
 		installError              error // if set, returned by /system/package/update/install
 		wantErr                   bool
 		wantOffline               bool // true when err should wrap ErrCannotCheckUpdates (router has no internet)
+		wantConnectionFailed      bool // true when err should wrap ssh.ErrConnectionFailed (router unreachable)
 		errContains               string
 		expectOsUpdate            bool
 		expectBoardUpdate         bool
@@ -232,13 +233,13 @@ func TestUpdates(t *testing.T) {
 			wantErr:           false,
 		},
 		{
-			name:         "SSH connection failure",
-			host:         "router7.example.com",
-			applyUpdates: false,
-			sshError:     fmt.Errorf("connection timeout"),
-			wantErr:      true,
-			wantOffline:  true,
-			errContains:  "failed to connect",
+			name:                 "SSH connection failure",
+			host:                 "router7.example.com",
+			applyUpdates:         false,
+			sshError:             fmt.Errorf("%w: connection timeout", ssh.ErrConnectionFailed),
+			wantErr:              true,
+			wantOffline:          false,
+			wantConnectionFailed: true,
 		},
 		{
 			name:         "Check for updates command fails",
@@ -393,6 +394,12 @@ func TestUpdates(t *testing.T) {
 				}
 				if !tt.wantOffline && errors.Is(err, ErrCannotCheckUpdates) {
 					t.Errorf("updates() error = %v, got ErrCannotCheckUpdates but wantOffline == false", err)
+				}
+				if tt.wantConnectionFailed && !errors.Is(err, ssh.ErrConnectionFailed) {
+					t.Errorf("updates() error = %v, want errors.Is(err, ssh.ErrConnectionFailed) == true", err)
+				}
+				if !tt.wantConnectionFailed && errors.Is(err, ssh.ErrConnectionFailed) {
+					t.Errorf("updates() error = %v, got ssh.ErrConnectionFailed but wantConnectionFailed == false", err)
 				}
 				// On error paths, statuses must be nil
 				if osStatus != nil {

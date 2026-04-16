@@ -233,12 +233,12 @@ func TestUpdates(t *testing.T) {
 			wantErr:           false,
 		},
 		{
-			name:         "SSH connection failure",
-			host:         "router7.example.com",
-			applyUpdates: false,
-			sshError:     fmt.Errorf("%w: connection timeout", ssh.ErrConnectionFailed),
-			wantErr:      true,
-			wantOffline:  false,
+			name:                 "SSH connection failure",
+			host:                 "router7.example.com",
+			applyUpdates:         false,
+			sshError:             fmt.Errorf("%w: connection timeout", ssh.ErrConnectionFailed),
+			wantErr:              true,
+			wantOffline:          false,
 			wantConnectionFailed: true,
 		},
 		{

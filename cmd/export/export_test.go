@@ -461,8 +461,8 @@ func TestExport_SSHConnectionFactoryError(t *testing.T) {
 		t.Error("export() should fail when SSH connection cannot be established")
 	}
 
-	if !strings.Contains(err.Error(), "cannot connect to router") {
-		t.Errorf("error message should mention SSH connection failure, got: %v", err)
+	if !strings.Contains(err.Error(), "failed to dial") {
+		t.Errorf("error message should mention dial failure, got: %v", err)
 	}
 }
 

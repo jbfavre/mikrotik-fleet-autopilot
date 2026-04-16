@@ -168,7 +168,7 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 			return "", fmt.Errorf("%w", err)
 		}
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
-		return "", fmt.Errorf("%w", err)
+		return "", fmt.Errorf("failed to create SSH connection: %w", err)
 	}
 	reportStep("✅", "Connected")
 	defer func() {

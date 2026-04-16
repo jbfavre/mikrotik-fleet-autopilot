@@ -89,7 +89,7 @@ func CreateConnection(ctx context.Context, host string) (RunnerInterface, error)
 	netConn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		slog.Debug("failed to dial", "address", address, "error", err)
-		return nil, fmt.Errorf("%w: failed to dial %s: %w", ErrConnectionFailed, address, err)
+		return nil, fmt.Errorf("%w %s: %w", ErrConnectionFailed, address, err)
 	}
 
 	// Perform SSH handshake
@@ -97,7 +97,7 @@ func CreateConnection(ctx context.Context, host string) (RunnerInterface, error)
 	if err != nil {
 		_ = netConn.Close() // Ignore close error when handshake failed
 		slog.Debug("SSH handshake failed", "address", address, "error", err)
-		return nil, fmt.Errorf("%w: SSH handshake failed for %s: %w", ErrConnectionFailed, address, err)
+		return nil, fmt.Errorf("SSH handshake failed for %s: %w", address, err)
 	}
 
 	client := ssh.NewClient(c, chans, reqs)

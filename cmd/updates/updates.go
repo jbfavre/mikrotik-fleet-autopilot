@@ -94,7 +94,6 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, opts RunUpdatesOpti
 		case errors.Is(err, ssh.ErrConnectionFailed), errors.Is(err, ErrCannotCheckUpdates):
 			line.CompleteStep("❓")
 			line.Finish("❓", err.Error())
-			errs[i] = err
 		case err != nil:
 			line.CompleteStep("❌")
 			line.FinishError(err.Error())

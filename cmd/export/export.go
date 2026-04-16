@@ -165,7 +165,7 @@ func export(ctx context.Context, host string, preferredFilename string, cfg Expo
 	if err != nil {
 		if errors.Is(err, ssh.ErrConnectionFailed) {
 			slog.Warn("cannot connect to router", "host", host, "error", err)
-			return "", fmt.Errorf("%w", err)
+			return "", err
 		}
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
 		return "", fmt.Errorf("failed to create SSH connection: %w", err)

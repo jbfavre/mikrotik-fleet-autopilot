@@ -3,6 +3,7 @@ package export
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -461,8 +462,8 @@ func TestExport_SSHConnectionFactoryError(t *testing.T) {
 		t.Error("export() should fail when SSH connection cannot be established")
 	}
 
-	if !strings.Contains(err.Error(), "failed to dial") {
-		t.Errorf("error message should mention dial failure, got: %v", err)
+	if !errors.Is(err, ssh.ErrConnectionFailed) {
+		t.Errorf("error should wrap ssh.ErrConnectionFailed, got: %v", err)
 	}
 }
 

@@ -173,10 +173,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
 		slog.Debug("failed to connect", "host", host, "error", err)
-		if errors.Is(err, ssh.ErrConnectionFailed) {
-			return nil, nil, fmt.Errorf("%w: failed to connect: %w", ErrCannotCheckUpdates, err)
-		}
-		return nil, nil, fmt.Errorf("failed to connect: %w", err)
+		return nil, nil, fmt.Errorf("%w: failed to connect: %w", ErrCannotCheckUpdates, err)
 	}
 	reportStep("✅", "Connected")
 	defer func() {

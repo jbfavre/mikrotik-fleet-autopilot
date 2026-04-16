@@ -91,7 +91,7 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, opts RunUpdatesOpti
 		displayStepCallback := display.NewStepCallback(line)
 		osStatus, boardStatus, err := updates(ctx, host, cfg, deps, displayStepCallback)
 		switch {
-		case errors.Is(err, ssh.ErrConnectionFailed):
+		case errors.Is(err, ssh.ErrConnectionFailed), errors.Is(err, ErrCannotCheckUpdates):
 			line.CompleteStep("❓")
 			line.Finish("❓", err.Error())
 			errs[i] = err
@@ -174,7 +174,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	if err != nil {
 		if errors.Is(err, ssh.ErrConnectionFailed) {
 			slog.Warn("cannot connect to router", "host", host, "error", err)
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("%w: %w", ErrCannotCheckUpdates, err)
 		}
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
 		return nil, nil, fmt.Errorf("failed to create SSH connection: %w", err)

@@ -174,7 +174,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 	if err != nil {
 		if errors.Is(err, ssh.ErrConnectionFailed) {
 			slog.Warn("cannot connect to router", "host", host, "error", err)
-			return nil, nil, fmt.Errorf("%w: %w", ErrCannotCheckUpdates, err)
+			return nil, nil, err
 		}
 		slog.Error("failed to create SSH connection", "host", host, "error", err)
 		return nil, nil, fmt.Errorf("failed to create SSH connection: %w", err)

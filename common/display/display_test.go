@@ -9,14 +9,14 @@ import (
 
 // newTestDisplay creates a LiveDisplay in non-TTY/debug fallback mode for testing.
 func newTestDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
-	return New(out, hosts, true)
+	return New(out, hosts, InitOptions{Debug: true, Mode: ModeAuto, Concurrent: false})
 }
 
 // newLiveModeDisplay creates a LiveDisplay that believes it is in live mode,
 // without actually starting liveterm (for singleton guard testing).
 func newLiveModeDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
-	d := New(out, hosts, true) // starts in fallback
-	d.liveMode = true          // pretend it is live-capable
+	d := New(out, hosts, InitOptions{Debug: true, Mode: ModeAuto, Concurrent: false}) // starts in fallback
+	d.liveMode = true                                                                 // pretend it is live-capable
 	d.isTTY = true
 	d.debug = false
 	for _, l := range d.lines {
@@ -27,9 +27,9 @@ func newLiveModeDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
 
 func TestSetConcurrentAutoKeepsLiveWhenCapable(t *testing.T) {
 	var buf bytes.Buffer
-	d := newLiveModeDisplay(&buf, []string{"router1"})
-	d.SetMode(ModeAuto)
-	d.SetConcurrent(true)
+	d := New(&buf, []string{"router1"}, InitOptions{Debug: false, Mode: ModeAuto, Concurrent: true})
+	d.isTTY = true
+	d.applyMode(ModeAuto)
 
 	if !d.liveMode {
 		t.Fatal("expected live mode to stay enabled in concurrent auto mode on a live-capable terminal")
@@ -41,9 +41,9 @@ func TestSetConcurrentAutoKeepsLiveWhenCapable(t *testing.T) {
 
 func TestSetModeBufferedForcesConcurrentBuffering(t *testing.T) {
 	var buf bytes.Buffer
-	d := newLiveModeDisplay(&buf, []string{"router1", "router2"})
-	d.SetMode(ModeBuffered)
-	d.SetConcurrent(true)
+	d := New(&buf, []string{"router1", "router2"}, InitOptions{Debug: false, Mode: ModeBuffered, Concurrent: true})
+	d.isTTY = true
+	d.applyMode(ModeBuffered)
 
 	if d.liveMode {
 		t.Fatal("expected live mode to be disabled in buffered mode")
@@ -97,8 +97,7 @@ func TestNewFallbackMode(t *testing.T) {
 func TestStartStopFallback(t *testing.T) {
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, []string{"router1"})
-	// In fallback mode Start is a no-op; Stop flushes buffered lines (none here).
-	d.Start()
+	// In fallback mode start is a no-op; Stop flushes buffered lines (none here).
 	d.Stop()
 }
 
@@ -232,8 +231,7 @@ func TestMultipleHosts(t *testing.T) {
 func TestOutputOrder(t *testing.T) {
 	hosts := []string{"host1.example.com", "host2.example.com", "host3.example.com"}
 	var buf bytes.Buffer
-	d := newTestDisplay(&buf, hosts)
-	d.SetConcurrent(true) // enable buffering so Stop flushes in host-list order
+	d := New(&buf, hosts, InitOptions{Debug: false, Mode: ModeBuffered, Concurrent: true})
 
 	// Finish hosts in reverse order to simulate out-of-order concurrent completion.
 	d.Line(2).Finish("✅", "host3 done")
@@ -471,10 +469,10 @@ func TestSingletonFallback(t *testing.T) {
 
 	// A second display in live mode should fall back to plain text.
 	second := newLiveModeDisplay(&buf2, []string{"router2"})
-	second.Start() // should detect activeLiveDisp != nil and fall back
+	second.start() // should detect activeLiveDisp != nil and fall back
 
 	if second.liveMode {
-		t.Error("second Start() should have fallen back to plain text when a display is already active")
+		t.Error("second start() should have fallen back to plain text when a display is already active")
 	}
 	for _, l := range second.lines {
 		if l.liveMode {

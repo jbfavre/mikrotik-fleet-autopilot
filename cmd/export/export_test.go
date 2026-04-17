@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/display"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 	"jb.favre/mikrotik-fleet-autopilot/common/sshmocks_test"
 )
@@ -590,11 +591,10 @@ func TestRunExportForHosts_Sequential(t *testing.T) {
 		},
 	}
 
-	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir}
-	opts := RunExportOptions{Debug: true, MaxConcurrentHosts: 1}
+	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir, Debug: true, MaxConcurrentHosts: 1, DisplayMode: display.ModeAuto}
 
 	var out bytes.Buffer
-	err := runExportForHosts(context.Background(), hosts, opts, cfg, deps, &out)
+	err := runExportForHosts(context.Background(), hosts, cfg, deps, &out)
 	if err == nil {
 		t.Fatal("runExportForHosts() expected non-nil error when one host fails")
 	}
@@ -652,11 +652,10 @@ func TestRunExportForHosts_Concurrent(t *testing.T) {
 		},
 	}
 
-	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir}
-	opts := RunExportOptions{Debug: true, MaxConcurrentHosts: len(hosts)}
+	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir, Debug: true, MaxConcurrentHosts: len(hosts), DisplayMode: display.ModeAuto}
 
 	var out bytes.Buffer
-	err := runExportForHosts(context.Background(), hosts, opts, cfg, deps, &out)
+	err := runExportForHosts(context.Background(), hosts, cfg, deps, &out)
 	if err != nil {
 		t.Fatalf("runExportForHosts() unexpected error: %v", err)
 	}
@@ -693,11 +692,10 @@ func TestRunExportForHosts_ConnectionFailureNonFatal(t *testing.T) {
 		},
 	}
 
-	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir}
-	opts := RunExportOptions{Debug: true, MaxConcurrentHosts: 1}
+	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir, Debug: true, MaxConcurrentHosts: 1, DisplayMode: display.ModeAuto}
 
 	var out bytes.Buffer
-	err := runExportForHosts(context.Background(), hosts, opts, cfg, deps, &out)
+	err := runExportForHosts(context.Background(), hosts, cfg, deps, &out)
 	if err != nil {
 		t.Fatalf("runExportForHosts() expected nil error for connection failure, got: %v", err)
 	}

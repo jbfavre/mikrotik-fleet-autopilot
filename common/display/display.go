@@ -26,6 +26,16 @@ const (
 	ModeBuffered Mode = "buffered"
 )
 
+// InitOptions configures display initialization parameters.
+type InitOptions struct {
+	// Debug indicates whether --debug is enabled. Debug has priority and disables live mode.
+	Debug bool
+	// Mode controls the display behavior (auto or buffered).
+	Mode Mode
+	// Concurrent enables ordered buffering when live mode is off.
+	Concurrent bool
+}
+
 // ParseMode parses a user-provided mode value.
 func ParseMode(value string) (Mode, error) {
 	mode := Mode(strings.ToLower(strings.TrimSpace(value)))
@@ -181,10 +191,8 @@ type LiveDisplay struct {
 	lines []*HostLine
 	out   io.Writer
 
-	// mode is the requested display policy configured by callers.
-	mode Mode
-	// liveMode is the effective runtime state after evaluating mode, debug, TTY,
-	// and any live startup fallback (for example singleton contention).
+	// liveMode is the effective runtime state after evaluating display mode,
+	// debug, TTY, and any live startup fallback (for example singleton contention).
 	liveMode bool
 
 	// isTTY is detected once at construction time and does not change.
@@ -198,11 +206,10 @@ type LiveDisplay struct {
 	pendingLines []string
 }
 
-// New creates a LiveDisplay. TTY detection is performed at construction time,
-// and the result is independent of the debug flag. Whether live mode is actually
-// enabled depends on both TTY capability and the display mode (which respects the
-// debug flag via applyMode).
-func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
+// New creates and initializes a LiveDisplay.
+// It applies display mode policy, configures concurrency behavior, and starts
+// live rendering when applicable.
+func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 	isTTY := false
 	if f, ok := out.(*os.File); ok {
 		isTTY = term.IsTerminal(int(f.Fd()))
@@ -212,8 +219,7 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 	d := &LiveDisplay{
 		lines: make([]*HostLine, len(hosts)),
 		isTTY: isTTY,
-		debug: debug,
-		mode:  ModeAuto,
+		debug: opts.Debug,
 		out:   out,
 	}
 
@@ -227,27 +233,22 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 		}
 	}
 
-	// Centralize mode setup in one place so constructor and runtime behavior match.
-	d.applyMode()
+	// Centralize mode and concurrency setup in one place so constructor and
+	// runtime behavior match.
+	d.applyMode(opts.Mode)
+	d.setConcurrent(opts.Concurrent)
+	d.start()
 
 	return d
 }
 
-// SetMode configures how concurrent output is rendered.
-// Must be called before Start.
-func (d *LiveDisplay) SetMode(mode Mode) {
-	d.mode = mode
-	d.applyMode()
-}
-
-// SetConcurrent marks the display as serving concurrent host processing.
-// Must be called before Start.
-func (d *LiveDisplay) SetConcurrent(concurrent bool) {
+// setConcurrent marks the display as serving concurrent host processing.
+func (d *LiveDisplay) setConcurrent(concurrent bool) {
 	d.concurrent = concurrent
-	d.applyMode()
+	d.applyConcurrencyBuffering()
 }
 
-func (d *LiveDisplay) applyMode() {
+func (d *LiveDisplay) applyMode(mode Mode) {
 	// Debug flag has priority: if --debug is enabled, always disable live mode
 	// to keep output clean and deterministic for log analysis.
 	if d.debug {
@@ -255,7 +256,7 @@ func (d *LiveDisplay) applyMode() {
 	} else {
 		var shouldLive bool
 
-		switch d.mode {
+		switch mode {
 		case ModeBuffered:
 			// Explicitly buffered: never use live updates
 			shouldLive = false
@@ -269,6 +270,12 @@ func (d *LiveDisplay) applyMode() {
 		d.setLiveMode(shouldLive)
 	}
 
+	d.applyConcurrencyBuffering()
+}
+
+// applyConcurrencyBuffering configures whether host lines are buffered until
+// Stop based on current concurrency + effective live mode.
+func (d *LiveDisplay) applyConcurrencyBuffering() {
 	// Concurrent runs in non-live mode are buffered so Stop can emit
 	// deterministic host-list ordering for non-interactive outputs.
 	if d.concurrent && !d.liveMode {
@@ -312,11 +319,11 @@ func (d *LiveDisplay) Line(i int) *HostLine {
 	return d.lines[i]
 }
 
-// Start begins live output. In fallback mode this is a no-op.
+// start begins live output. In fallback mode this is a no-op.
 // Only one LiveDisplay may be in live mode at a time: if another display is
-// already active, Start falls back to plain-text mode so that the existing
+// already active, start falls back to plain-text mode so that the existing
 // liveterm instance is not disturbed.
-func (d *LiveDisplay) Start() {
+func (d *LiveDisplay) start() {
 	if !d.liveMode {
 		return
 	}

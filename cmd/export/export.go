@@ -19,8 +19,11 @@ import (
 
 // ExportConfig holds all export configuration options
 type ExportConfig struct {
-	ShowSensitive bool
-	OutputDir     string
+	ShowSensitive      bool
+	OutputDir          string
+	Debug              bool
+	MaxConcurrentHosts int
+	DisplayMode        display.Mode
 }
 
 // ExportDependencies holds injectable dependencies for testing
@@ -58,38 +61,28 @@ var Command = []*cli.Command{
 
 			// Build export configuration from CLI flags
 			exportCfg := ExportConfig{
-				ShowSensitive: cmd.Bool("show-sensitive"),
-				OutputDir:     cmd.String("output-dir"),
+				ShowSensitive:      cmd.Bool("show-sensitive"),
+				OutputDir:          cmd.String("output-dir"),
+				Debug:              coreCfg.Debug,
+				MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent,
+				DisplayMode:        displayMode,
 			}
 
 			deps := ExportDependencies{
 				SSHConnectionFactory: ssh.CreateConnection,
 			}
 
-			opts := RunExportOptions{
-				Debug:              coreCfg.Debug,
-				MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent,
-				DisplayMode:        displayMode,
-			}
-
-			return runExportForHosts(ctx, coreCfg.Hosts, opts, exportCfg, deps, os.Stdout)
+			return runExportForHosts(ctx, coreCfg.Hosts, exportCfg, deps, os.Stdout)
 		},
 	},
 }
 
-// RunExportOptions groups execution flags for runExportForHosts so call sites
-// remain self-describing and can be extended safely in the future.
-type RunExportOptions struct {
-	Debug              bool
-	MaxConcurrentHosts int
-	DisplayMode        display.Mode
-}
-
-func runExportForHosts(ctx context.Context, hosts []string, opts RunExportOptions, cfg ExportConfig, deps ExportDependencies, out io.Writer) error {
-	disp := display.New(out, hosts, opts.Debug)
-	disp.SetMode(opts.DisplayMode)
-	disp.SetConcurrent(opts.MaxConcurrentHosts > 1)
-	disp.Start()
+func runExportForHosts(ctx context.Context, hosts []string, cfg ExportConfig, deps ExportDependencies, out io.Writer) error {
+	disp := display.New(out, hosts, display.InitOptions{
+		Debug:      cfg.Debug,
+		Mode:       cfg.DisplayMode,
+		Concurrent: cfg.MaxConcurrentHosts > 1,
+	})
 	defer disp.Stop()
 
 	// errs is indexed by host position so results are collected in host-list
@@ -114,11 +107,11 @@ func runExportForHosts(ctx context.Context, hosts []string, opts RunExportOption
 		}
 	}
 
-	sem := make(chan struct{}, opts.MaxConcurrentHosts)
+	sem := make(chan struct{}, cfg.MaxConcurrentHosts)
 	var ctxErr error
 loop:
 	for i, host := range hosts {
-		if opts.MaxConcurrentHosts <= 1 {
+		if cfg.MaxConcurrentHosts <= 1 {
 			processHost(i, host)
 		} else {
 			wg.Add(1)

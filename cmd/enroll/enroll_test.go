@@ -15,6 +15,7 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/display"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 	"jb.favre/mikrotik-fleet-autopilot/common/sshmocks_test"
 )
@@ -687,8 +688,10 @@ func TestEnrollActionValidation(t *testing.T) {
 			}
 
 			var out bytes.Buffer
-			opts := RunEnrollOptions{Debug: true, MaxConcurrentHosts: 1}
-			err = runEnrollForHosts(ctx, cfg.Hosts, opts, enrollCfg, deps, &out)
+			enrollCfg.Debug = true
+			enrollCfg.MaxConcurrentHosts = 1
+			enrollCfg.DisplayMode = display.ModeAuto
+			err = runEnrollForHosts(ctx, cfg.Hosts, enrollCfg, deps, &out)
 
 			// Verify error expectation
 			if (err != nil) != tt.wantErr {
@@ -746,11 +749,10 @@ func TestRunEnrollForHosts_Sequential(t *testing.T) {
 		ExportConfigFunc: export.Export,
 	}
 
-	cfg := EnrollConfig{UpdateHostKeyOnly: true}
+	cfg := EnrollConfig{UpdateHostKeyOnly: true, Debug: true, MaxConcurrentHosts: 1, DisplayMode: display.ModeAuto}
 
 	var out bytes.Buffer
-	opts := RunEnrollOptions{Debug: true, MaxConcurrentHosts: 1}
-	err := runEnrollForHosts(context.Background(), hosts, opts, cfg, deps, &out)
+	err := runEnrollForHosts(context.Background(), hosts, cfg, deps, &out)
 	if err == nil {
 		t.Fatal("runEnrollForHosts() expected non-nil error when one host fails")
 	}
@@ -820,11 +822,10 @@ func TestRunEnrollForHosts_Concurrent(t *testing.T) {
 		ExportConfigFunc: export.Export,
 	}
 
-	cfg := EnrollConfig{UpdateHostKeyOnly: true}
+	cfg := EnrollConfig{UpdateHostKeyOnly: true, Debug: true, MaxConcurrentHosts: len(hosts), DisplayMode: display.ModeAuto}
 
 	var out bytes.Buffer
-	opts := RunEnrollOptions{Debug: true, MaxConcurrentHosts: len(hosts)}
-	err := runEnrollForHosts(context.Background(), hosts, opts, cfg, deps, &out)
+	err := runEnrollForHosts(context.Background(), hosts, cfg, deps, &out)
 	if err != nil {
 		t.Fatalf("runEnrollForHosts() unexpected error: %v", err)
 	}

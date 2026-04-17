@@ -51,6 +51,11 @@ var Command = []*cli.Command{
 				return err
 			}
 
+			displayMode, err := display.ParseMode(coreCfg.DisplayMode)
+			if err != nil {
+				return err
+			}
+
 			// Build export configuration from CLI flags
 			exportCfg := ExportConfig{
 				ShowSensitive: cmd.Bool("show-sensitive"),
@@ -61,7 +66,11 @@ var Command = []*cli.Command{
 				SSHConnectionFactory: ssh.CreateConnection,
 			}
 
-			opts := RunExportOptions{Debug: coreCfg.Debug, MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent}
+			opts := RunExportOptions{
+				Debug:              coreCfg.Debug,
+				MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent,
+				DisplayMode:        displayMode,
+			}
 
 			return runExportForHosts(ctx, coreCfg.Hosts, opts, exportCfg, deps, os.Stdout)
 		},
@@ -73,10 +82,12 @@ var Command = []*cli.Command{
 type RunExportOptions struct {
 	Debug              bool
 	MaxConcurrentHosts int
+	DisplayMode        display.Mode
 }
 
 func runExportForHosts(ctx context.Context, hosts []string, opts RunExportOptions, cfg ExportConfig, deps ExportDependencies, out io.Writer) error {
 	disp := display.New(out, hosts, opts.Debug)
+	disp.SetMode(opts.DisplayMode)
 	disp.SetConcurrent(opts.MaxConcurrentHosts > 1)
 	disp.Start()
 	defer disp.Stop()

@@ -97,6 +97,11 @@ var Command = []*cli.Command{
 				return err
 			}
 
+			displayMode, err := display.ParseMode(coreCfg.DisplayMode)
+			if err != nil {
+				return err
+			}
+
 			// Build enrollment configuration from CLI flags
 			enrollCfg := EnrollConfig{
 				Hostname:          cmd.String("hostname"),
@@ -116,7 +121,11 @@ var Command = []*cli.Command{
 				ExportConfigFunc:     export.Export,
 			}
 
-			opts := RunEnrollOptions{Debug: coreCfg.Debug, MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent}
+			opts := RunEnrollOptions{
+				Debug:              coreCfg.Debug,
+				MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent,
+				DisplayMode:        displayMode,
+			}
 
 			return runEnrollForHosts(ctx, coreCfg.Hosts, opts, enrollCfg, deps, os.Stdout)
 		},
@@ -126,6 +135,7 @@ var Command = []*cli.Command{
 type RunEnrollOptions struct {
 	Debug              bool
 	MaxConcurrentHosts int
+	DisplayMode        display.Mode
 }
 
 func runEnrollForHosts(ctx context.Context, hosts []string, opts RunEnrollOptions, cfg EnrollConfig, deps EnrollDependencies, out io.Writer) error {
@@ -145,6 +155,7 @@ func runEnrollForHosts(ctx context.Context, hosts []string, opts RunEnrollOption
 	}
 
 	disp := display.New(out, hosts, opts.Debug)
+	disp.SetMode(opts.DisplayMode)
 	disp.SetConcurrent(opts.MaxConcurrentHosts > 1)
 	disp.Start()
 	defer disp.Stop()

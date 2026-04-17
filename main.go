@@ -94,7 +94,7 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 			&cli.BoolFlag{
 				Name:        "buffered-output",
 				Value:       false,
-				Usage:       "Force buffered host progress output (deterministic final flush). By default, live display is preferred on TTY unless --debug is enabled",
+				Usage:       "Force buffered host progress output in concurrent non-live mode; sequential runs still print each completed host line immediately (default prefers live output on TTY)",
 				Destination: &globalConfig.BufferedOutput,
 			},
 		},

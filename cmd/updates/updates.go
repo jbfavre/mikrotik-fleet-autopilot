@@ -51,6 +51,11 @@ var Command = []*cli.Command{
 				return err
 			}
 
+			displayMode, err := display.ParseMode(coreCfg.DisplayMode)
+			if err != nil {
+				return err
+			}
+
 			// Build updates configuration from CLI flags
 			updatesCfg := UpdatesConfig{
 				UpdatesApply: cmd.Bool("updates-apply"),
@@ -61,7 +66,11 @@ var Command = []*cli.Command{
 				SSHConnectionFactory: ssh.CreateConnection,
 				ReconnectDelay:       10 * time.Second,
 			}
-			opts := RunUpdatesOptions{Debug: coreCfg.Debug, MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent}
+			opts := RunUpdatesOptions{
+				Debug:              coreCfg.Debug,
+				MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent,
+				DisplayMode:        displayMode,
+			}
 
 			return runUpdatesForHosts(ctx, coreCfg.Hosts, opts, updatesCfg, deps, os.Stdout)
 		},
@@ -73,10 +82,12 @@ var Command = []*cli.Command{
 type RunUpdatesOptions struct {
 	Debug              bool
 	MaxConcurrentHosts int
+	DisplayMode        display.Mode
 }
 
 func runUpdatesForHosts(ctx context.Context, hosts []string, opts RunUpdatesOptions, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
 	disp := display.New(out, hosts, opts.Debug)
+	disp.SetMode(opts.DisplayMode)
 	disp.SetConcurrent(opts.MaxConcurrentHosts > 1)
 	disp.Start()
 	defer disp.Stop()

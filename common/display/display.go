@@ -339,15 +339,21 @@ func (d *LiveDisplay) release() {
 	}
 }
 
-// Stop finalises output. In live mode it stops liveterm. In concurrent non-live
-// mode it flushes all buffered host lines to out in host-list order, so that
-// goroutines that finish at different times still produce deterministic output.
+// Stop finalises output. In live mode it clears the live rendering area and
+// writes the final state of every host line to out, so the output is always
+// clean regardless of how well ANSI cursor control worked during rendering.
+// In concurrent non-live mode it flushes all buffered host lines to out in
+// host-list order, so that goroutines that finish at different times still
+// produce deterministic output.
 func (d *LiveDisplay) Stop() {
 	if d.liveMode {
 		defer d.release()
-		if err := liveterm.Stop(false); err != nil {
+		// Clear the live rendering area so intermediate frames are removed.
+		// We then write the definitive final lines ourselves below.
+		if err := liveterm.Stop(true); err != nil {
 			slog.Warn("display: failed to stop live terminal", "error", err)
 		}
+		d.writeFinalLines()
 		return
 	}
 	for i, line := range d.pendingLines {
@@ -356,6 +362,16 @@ func (d *LiveDisplay) Stop() {
 		}
 		if _, err := fmt.Fprintf(d.out, "%s\n", line); err != nil {
 			slog.Warn("display: failed to write host line", "error", err, "line_index", i, "hostname", d.lines[i].hostname)
+		}
+	}
+}
+
+// writeFinalLines renders every host line in its current state and writes
+// it to d.out. Called by Stop after the live terminal has been cleared.
+func (d *LiveDisplay) writeFinalLines() {
+	for _, l := range d.lines {
+		if _, err := fmt.Fprintf(d.out, "%s\n", l.render()); err != nil {
+			slog.Warn("display: failed to write final host line", "host", l.hostname, "error", err)
 		}
 	}
 }

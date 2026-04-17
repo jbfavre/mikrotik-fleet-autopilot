@@ -224,6 +224,68 @@ func TestOutputOrder(t *testing.T) {
 	}
 }
 
+// TestStopWritesFinalLinesExactlyOnce verifies that Stop produces exactly one
+// output line per host in concurrent non-live mode — no duplicates, no missing.
+func TestStopWritesFinalLinesExactlyOnce(t *testing.T) {
+	hosts := []string{"host1.example.com", "host2.example.com", "host3.example.com"}
+	var buf bytes.Buffer
+	d := New(&buf, hosts, InitOptions{Debug: false, PreferLiveMode: false, Concurrent: true})
+
+	d.Line(0).Finish("✅", "host1 done")
+	d.Line(1).Finish("❌", "host2 failed")
+	d.Line(2).Finish("✅", "host3 done")
+
+	d.Stop()
+	output := buf.String()
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+
+	if len(lines) != len(hosts) {
+		t.Errorf("expected exactly %d output lines, got %d:\n%s", len(hosts), len(lines), output)
+	}
+	for _, host := range hosts {
+		if count := strings.Count(output, host); count != 1 {
+			t.Errorf("host %q should appear exactly once, appeared %d times in:\n%s", host, count, output)
+		}
+	}
+}
+
+// TestWriteFinalLinesRendersAllHosts verifies that writeFinalLines writes one
+// rendered line per host to the output writer.
+func TestWriteFinalLinesRendersAllHosts(t *testing.T) {
+	hosts := []string{"router1", "router2", "router3"}
+	var buf bytes.Buffer
+	d := New(&buf, hosts, InitOptions{Debug: true, PreferLiveMode: false, Concurrent: false})
+
+	d.Line(0).CompleteStep("✅")
+	d.Line(0).Finish("✅", "up-to-date")
+	d.Line(1).CompleteStep("❌")
+	d.Line(1).FinishError("connection refused")
+	d.Line(2).CompleteStep("✅")
+	d.Line(2).Finish("✅", "up-to-date")
+
+	// Clear the buffer (Finish writes immediately in sequential non-live mode)
+	// and call writeFinalLines to verify it writes all lines.
+	buf.Reset()
+	d.writeFinalLines()
+	output := buf.String()
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+
+	if len(lines) != len(hosts) {
+		t.Errorf("expected %d lines, got %d:\n%s", len(hosts), len(lines), output)
+	}
+	for _, host := range hosts {
+		if !strings.Contains(output, host) {
+			t.Errorf("output should contain host %q:\n%s", host, output)
+		}
+	}
+	if !strings.Contains(output, "up-to-date") {
+		t.Errorf("output should contain 'up-to-date':\n%s", output)
+	}
+	if !strings.Contains(output, "connection refused") {
+		t.Errorf("output should contain 'connection refused':\n%s", output)
+	}
+}
+
 func TestHostnamePadding(t *testing.T) {
 	var buf bytes.Buffer
 	// Short hostname should be padded to the configured minimum width.

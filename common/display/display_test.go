@@ -224,9 +224,9 @@ func TestOutputOrder(t *testing.T) {
 	}
 }
 
-// TestStopWritesFinalLinesExactlyOnce verifies that Stop produces exactly one
+// TestStopProducesExactlyOneLinePerHost verifies that Stop produces exactly one
 // output line per host in concurrent non-live mode — no duplicates, no missing.
-func TestStopWritesFinalLinesExactlyOnce(t *testing.T) {
+func TestStopProducesExactlyOneLinePerHost(t *testing.T) {
 	hosts := []string{"host1.example.com", "host2.example.com", "host3.example.com"}
 	var buf bytes.Buffer
 	d := New(&buf, hosts, InitOptions{Debug: false, PreferLiveMode: false, Concurrent: true})
@@ -250,7 +250,11 @@ func TestStopWritesFinalLinesExactlyOnce(t *testing.T) {
 }
 
 // TestWriteFinalLinesRendersAllHosts verifies that writeFinalLines writes one
-// rendered line per host to the output writer.
+// rendered line per host to the output writer. This exercises the same helper
+// that Stop() calls after clearing the live terminal area. We cannot test the
+// live-mode Stop path end-to-end because liveterm requires a real TTY, but
+// this test ensures the final-output logic produces correct, non-duplicated
+// results.
 func TestWriteFinalLinesRendersAllHosts(t *testing.T) {
 	hosts := []string{"router1", "router2", "router3"}
 	var buf bytes.Buffer

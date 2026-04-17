@@ -24,7 +24,6 @@ type Mode string
 const (
 	ModeAuto     Mode = "auto"
 	ModeBuffered Mode = "buffered"
-	ModeLive     Mode = "live"
 )
 
 // ParseMode parses a user-provided mode value.
@@ -34,19 +33,11 @@ func ParseMode(value string) (Mode, error) {
 		return ModeAuto, nil
 	}
 	switch mode {
-	case ModeAuto, ModeBuffered, ModeLive:
+	case ModeAuto, ModeBuffered:
 		return mode, nil
 	default:
-		return "", fmt.Errorf("invalid display mode %q: must be auto, buffered, or live", value)
+		return "", fmt.Errorf("invalid display mode %q: must be auto or buffered", value)
 	}
-}
-
-// NormalizeMode coerces zero values to ModeAuto.
-func NormalizeMode(mode Mode) Mode {
-	if strings.TrimSpace(string(mode)) == "" {
-		return ModeAuto
-	}
-	return mode
 }
 
 // completedStep records an already-finished step with its emoticon.
@@ -187,31 +178,43 @@ var (
 
 // LiveDisplay manages per-host live output lines.
 type LiveDisplay struct {
-	lines        []*HostLine
-	liveMode     bool
-	baseLiveMode bool
-	concurrent   bool // when true, non-live Finish buffers; Stop flushes in host-list order
-	mode         Mode
-	out          io.Writer
-	pendingLines []string // non-live concurrent mode: one buffered output line per host, flushed in order by Stop
+	lines []*HostLine
+	out   io.Writer
+
+	// mode is the requested display policy configured by callers.
+	mode Mode
+	// liveMode is the effective runtime state after evaluating mode, debug, TTY,
+	// and any live startup fallback (for example singleton contention).
+	liveMode bool
+
+	// isTTY is detected once at construction time and does not change.
+	isTTY bool
+	// debug indicates whether --debug is enabled. Debug has priority and disables live mode.
+	debug bool
+	// concurrent enables ordered buffering when live mode is off.
+	concurrent bool
+
+	// pendingLines holds one rendered final line per host in concurrent non-live mode.
+	pendingLines []string
 }
 
-// New creates a LiveDisplay. If debug=true or stdout is not a TTY, falls back to verbose mode.
+// New creates a LiveDisplay. TTY detection is performed at construction time,
+// and the result is independent of the debug flag. Whether live mode is actually
+// enabled depends on both TTY capability and the display mode (which respects the
+// debug flag via applyMode).
 func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
-	liveMode := false
-	if !debug {
-		if f, ok := out.(*os.File); ok {
-			liveMode = term.IsTerminal(int(f.Fd()))
-		}
+	isTTY := false
+	if f, ok := out.(*os.File); ok {
+		isTTY = term.IsTerminal(int(f.Fd()))
 	}
 	hostnameWidth := computeHostnameWidth(hosts)
 
 	d := &LiveDisplay{
-		lines:        make([]*HostLine, len(hosts)),
-		liveMode:     liveMode,
-		baseLiveMode: liveMode,
-		mode:         ModeAuto,
-		out:          out,
+		lines: make([]*HostLine, len(hosts)),
+		isTTY: isTTY,
+		debug: debug,
+		mode:  ModeAuto,
+		out:   out,
 	}
 
 	for i, host := range hosts {
@@ -219,11 +222,13 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 			hostname:      host,
 			hostnameWidth: hostnameWidth,
 			overallEmoji:  "⏳",
-			liveMode:      liveMode,
 			index:         i,
 			out:           out,
 		}
 	}
+
+	// Centralize mode setup in one place so constructor and runtime behavior match.
+	d.applyMode()
 
 	return d
 }
@@ -231,7 +236,7 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 // SetMode configures how concurrent output is rendered.
 // Must be called before Start.
 func (d *LiveDisplay) SetMode(mode Mode) {
-	d.mode = NormalizeMode(mode)
+	d.mode = mode
 	d.applyMode()
 }
 
@@ -243,14 +248,26 @@ func (d *LiveDisplay) SetConcurrent(concurrent bool) {
 }
 
 func (d *LiveDisplay) applyMode() {
-	mode := NormalizeMode(d.mode)
-	shouldLive := d.baseLiveMode
+	// Debug flag has priority: if --debug is enabled, always disable live mode
+	// to keep output clean and deterministic for log analysis.
+	if d.debug {
+		d.setLiveMode(false)
+	} else {
+		var shouldLive bool
 
-	if mode == ModeBuffered {
-		shouldLive = false
+		switch d.mode {
+		case ModeBuffered:
+			// Explicitly buffered: never use live updates
+			shouldLive = false
+		case ModeAuto:
+			shouldLive = d.isTTY
+		default:
+			// Unknown/zero values are treated like auto for defensive behavior.
+			shouldLive = d.isTTY
+		}
+
+		d.setLiveMode(shouldLive)
 	}
-
-	d.setLiveMode(shouldLive)
 
 	// Concurrent runs in non-live mode are buffered so Stop can emit
 	// deterministic host-list ordering for non-interactive outputs.

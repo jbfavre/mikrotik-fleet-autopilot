@@ -94,7 +94,7 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 			&cli.StringFlag{
 				Name:        "display-mode",
 				Value:       "auto",
-				Usage:       "Display behavior for host progress (auto = live on TTY + buffered fallback, buffered = deterministic final flush, live = force live updates when supported)",
+				Usage:       "Display behavior for host progress (auto = live on TTY + buffered fallback, buffered = deterministic final flush). Note: --debug flag has priority and always disables live mode for cleaner logs",
 				Destination: &globalConfig.DisplayMode,
 			},
 		},

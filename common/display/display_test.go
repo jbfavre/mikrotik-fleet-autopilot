@@ -17,7 +17,8 @@ func newTestDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
 func newLiveModeDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
 	d := New(out, hosts, true) // starts in fallback
 	d.liveMode = true          // pretend it is live-capable
-	d.baseLiveMode = true
+	d.isTTY = true
+	d.debug = false
 	for _, l := range d.lines {
 		l.liveMode = true
 	}
@@ -62,7 +63,7 @@ func TestParseMode(t *testing.T) {
 		{name: "empty defaults to auto", input: "", want: ModeAuto},
 		{name: "auto", input: "auto", want: ModeAuto},
 		{name: "buffered", input: "buffered", want: ModeBuffered},
-		{name: "live", input: "live", want: ModeLive},
+		{name: "live is now invalid", input: "live", wantErr: true},
 		{name: "invalid", input: "stream", wantErr: true},
 	}
 

@@ -18,6 +18,37 @@ const (
 	maxHostnameWidth = 20
 )
 
+// Mode controls how concurrent output is rendered.
+type Mode string
+
+const (
+	ModeAuto     Mode = "auto"
+	ModeBuffered Mode = "buffered"
+	ModeLive     Mode = "live"
+)
+
+// ParseMode parses a user-provided mode value.
+func ParseMode(value string) (Mode, error) {
+	mode := Mode(strings.ToLower(strings.TrimSpace(value)))
+	if mode == "" {
+		return ModeAuto, nil
+	}
+	switch mode {
+	case ModeAuto, ModeBuffered, ModeLive:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid display mode %q: must be auto, buffered, or live", value)
+	}
+}
+
+// NormalizeMode coerces zero values to ModeAuto.
+func NormalizeMode(mode Mode) Mode {
+	if strings.TrimSpace(string(mode)) == "" {
+		return ModeAuto
+	}
+	return mode
+}
+
 // completedStep records an already-finished step with its emoticon.
 type completedStep struct {
 	emoji string
@@ -158,7 +189,9 @@ var (
 type LiveDisplay struct {
 	lines        []*HostLine
 	liveMode     bool
+	baseLiveMode bool
 	concurrent   bool // when true, non-live Finish buffers; Stop flushes in host-list order
+	mode         Mode
 	out          io.Writer
 	pendingLines []string // non-live concurrent mode: one buffered output line per host, flushed in order by Stop
 }
@@ -174,9 +207,11 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 	hostnameWidth := computeHostnameWidth(hosts)
 
 	d := &LiveDisplay{
-		lines:    make([]*HostLine, len(hosts)),
-		liveMode: liveMode,
-		out:      out,
+		lines:        make([]*HostLine, len(hosts)),
+		liveMode:     liveMode,
+		baseLiveMode: liveMode,
+		mode:         ModeAuto,
+		out:          out,
 	}
 
 	for i, host := range hosts {
@@ -193,31 +228,45 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 	return d
 }
 
+// SetMode configures how concurrent output is rendered.
+// Must be called before Start.
+func (d *LiveDisplay) SetMode(mode Mode) {
+	d.mode = NormalizeMode(mode)
+	d.applyMode()
+}
+
 // SetConcurrent marks the display as serving concurrent host processing.
-// Must be called before Start. In concurrent mode the display always uses
-// non-live buffered output — even on a real TTY — so that goroutines finishing
-// at arbitrary times produce clean, deterministic one-line-per-host output
-// flushed in host-list order by Stop. Using liveterm with concurrent goroutines
-// causes intermediate step renders to appear in the scrollback, which is why
-// this path unconditionally disables live mode.
-// In the default sequential mode, Finish writes each line immediately so the
-// caller sees per-host progress in real time.
+// Must be called before Start.
 func (d *LiveDisplay) SetConcurrent(concurrent bool) {
 	d.concurrent = concurrent
-	if !concurrent {
-		d.clearNonLive()
+	d.applyMode()
+}
+
+func (d *LiveDisplay) applyMode() {
+	mode := NormalizeMode(d.mode)
+	shouldLive := d.baseLiveMode
+
+	if mode == ModeBuffered {
+		shouldLive = false
+	}
+
+	d.setLiveMode(shouldLive)
+
+	// Concurrent runs in non-live mode are buffered so Stop can emit
+	// deterministic host-list ordering for non-interactive outputs.
+	if d.concurrent && !d.liveMode {
+		if d.pendingLines == nil {
+			d.initNonLive()
+		}
 		return
 	}
-	// Concurrent mode always uses non-live buffered output regardless of TTY.
-	// Force liveMode off before Start is called so liveterm is never started.
-	if d.liveMode {
-		d.liveMode = false
-		for _, l := range d.lines {
-			l.liveMode = false
-		}
-	}
-	if d.pendingLines == nil {
-		d.initNonLive()
+	d.clearNonLive()
+}
+
+func (d *LiveDisplay) setLiveMode(enabled bool) {
+	d.liveMode = enabled
+	for _, l := range d.lines {
+		l.liveMode = enabled
 	}
 }
 
@@ -259,10 +308,7 @@ func (d *LiveDisplay) Start() {
 	// liveterm.Start so the refresh goroutine can acquire it if needed.
 	if !d.tryClaim() {
 		// Another display is already running; fall back to plain text.
-		d.liveMode = false
-		for _, l := range d.lines {
-			l.liveMode = false
-		}
+		d.setLiveMode(false)
 		if d.concurrent {
 			d.initNonLive()
 		}
@@ -275,10 +321,7 @@ func (d *LiveDisplay) Start() {
 	if err := liveterm.Start(); err != nil {
 		// If liveterm fails to start (e.g. no real TTY despite fd check), fall back.
 		d.release()
-		d.liveMode = false
-		for _, l := range d.lines {
-			l.liveMode = false
-		}
+		d.setLiveMode(false)
 		if d.concurrent {
 			d.initNonLive()
 		}

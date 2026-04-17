@@ -91,6 +91,12 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Usage:       "Maximum number of hosts to process in parallel (0 = auto-detect, 1 = sequential, >=2 = parallel with that cap)",
 				Destination: &globalConfig.MaxConcurrentHosts,
 			},
+			&cli.StringFlag{
+				Name:        "display-mode",
+				Value:       "auto",
+				Usage:       "Display behavior for host progress (auto = live on TTY + buffered fallback, buffered = deterministic final flush, live = force live updates when supported)",
+				Destination: &globalConfig.DisplayMode,
+			},
 		},
 		Commands: append(append(export.Command, updates.Command...), enroll.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {

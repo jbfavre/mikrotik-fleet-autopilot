@@ -56,6 +56,7 @@ func TestBuildCommandFlags(t *testing.T) {
 		"ssh-passphrase":       false,
 		"debug":                false,
 		"max-concurrent-hosts": false,
+		"display-mode":         false,
 		"skip-hostkey-check":   false,
 	}
 
@@ -76,8 +77,8 @@ func TestBuildCommandFlags(t *testing.T) {
 	}
 
 	// Test that we have the right number of flags
-	if len(cmd.Flags) != 7 {
-		t.Errorf("Expected 7 flags, got %d", len(cmd.Flags))
+	if len(cmd.Flags) != 8 {
+		t.Errorf("Expected 8 flags, got %d", len(cmd.Flags))
 	}
 }
 

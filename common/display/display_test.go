@@ -17,10 +17,69 @@ func newTestDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
 func newLiveModeDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
 	d := New(out, hosts, true) // starts in fallback
 	d.liveMode = true          // pretend it is live-capable
+	d.baseLiveMode = true
 	for _, l := range d.lines {
 		l.liveMode = true
 	}
 	return d
+}
+
+func TestSetConcurrentAutoKeepsLiveWhenCapable(t *testing.T) {
+	var buf bytes.Buffer
+	d := newLiveModeDisplay(&buf, []string{"router1"})
+	d.SetMode(ModeAuto)
+	d.SetConcurrent(true)
+
+	if !d.liveMode {
+		t.Fatal("expected live mode to stay enabled in concurrent auto mode on a live-capable terminal")
+	}
+	if d.pendingLines != nil {
+		t.Fatalf("expected no buffered pending lines in concurrent auto live mode, got %#v", d.pendingLines)
+	}
+}
+
+func TestSetModeBufferedForcesConcurrentBuffering(t *testing.T) {
+	var buf bytes.Buffer
+	d := newLiveModeDisplay(&buf, []string{"router1", "router2"})
+	d.SetMode(ModeBuffered)
+	d.SetConcurrent(true)
+
+	if d.liveMode {
+		t.Fatal("expected live mode to be disabled in buffered mode")
+	}
+	if d.pendingLines == nil || len(d.pendingLines) != 2 {
+		t.Fatalf("expected pending lines buffer of size 2, got %#v", d.pendingLines)
+	}
+}
+
+func TestParseMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    Mode
+		wantErr bool
+	}{
+		{name: "empty defaults to auto", input: "", want: ModeAuto},
+		{name: "auto", input: "auto", want: ModeAuto},
+		{name: "buffered", input: "buffered", want: ModeBuffered},
+		{name: "live", input: "live", want: ModeLive},
+		{name: "invalid", input: "stream", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseMode(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseMode(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if got != tt.want {
+				t.Fatalf("ParseMode(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestNewFallbackMode(t *testing.T) {

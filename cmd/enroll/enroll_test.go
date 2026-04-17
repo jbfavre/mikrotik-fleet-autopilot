@@ -15,7 +15,6 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
-	"jb.favre/mikrotik-fleet-autopilot/common/display"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 	"jb.favre/mikrotik-fleet-autopilot/common/sshmocks_test"
 )
@@ -690,7 +689,7 @@ func TestEnrollActionValidation(t *testing.T) {
 			var out bytes.Buffer
 			enrollCfg.Debug = true
 			enrollCfg.MaxConcurrentHosts = 1
-			enrollCfg.DisplayMode = display.ModeAuto
+			enrollCfg.PreferLiveMode = true
 			err = runEnrollForHosts(ctx, cfg.Hosts, enrollCfg, deps, &out)
 
 			// Verify error expectation
@@ -749,7 +748,7 @@ func TestRunEnrollForHosts_Sequential(t *testing.T) {
 		ExportConfigFunc: export.Export,
 	}
 
-	cfg := EnrollConfig{UpdateHostKeyOnly: true, Debug: true, MaxConcurrentHosts: 1, DisplayMode: display.ModeAuto}
+	cfg := EnrollConfig{UpdateHostKeyOnly: true, Debug: true, MaxConcurrentHosts: 1, PreferLiveMode: true}
 
 	var out bytes.Buffer
 	err := runEnrollForHosts(context.Background(), hosts, cfg, deps, &out)
@@ -822,7 +821,7 @@ func TestRunEnrollForHosts_Concurrent(t *testing.T) {
 		ExportConfigFunc: export.Export,
 	}
 
-	cfg := EnrollConfig{UpdateHostKeyOnly: true, Debug: true, MaxConcurrentHosts: len(hosts), DisplayMode: display.ModeAuto}
+	cfg := EnrollConfig{UpdateHostKeyOnly: true, Debug: true, MaxConcurrentHosts: len(hosts), PreferLiveMode: true}
 
 	var out bytes.Buffer
 	err := runEnrollForHosts(context.Background(), hosts, cfg, deps, &out)

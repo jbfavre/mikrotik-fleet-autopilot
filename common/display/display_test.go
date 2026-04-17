@@ -9,14 +9,14 @@ import (
 
 // newTestDisplay creates a LiveDisplay in non-TTY/debug fallback mode for testing.
 func newTestDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
-	return New(out, hosts, InitOptions{Debug: true, Mode: ModeAuto, Concurrent: false})
+	return New(out, hosts, InitOptions{Debug: true, PreferLiveMode: true, Concurrent: false})
 }
 
 // newLiveModeDisplay creates a LiveDisplay that believes it is in live mode,
 // without actually starting liveterm (for singleton guard testing).
 func newLiveModeDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
-	d := New(out, hosts, InitOptions{Debug: true, Mode: ModeAuto, Concurrent: false}) // starts in fallback
-	d.liveMode = true                                                                 // pretend it is live-capable
+	d := New(out, hosts, InitOptions{Debug: true, PreferLiveMode: true, Concurrent: false}) // starts in fallback
+	d.liveMode = true                                                                       // pretend it is live-capable
 	d.isTTY = true
 	d.debug = false
 	for _, l := range d.lines {
@@ -25,11 +25,11 @@ func newLiveModeDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
 	return d
 }
 
-func TestSetConcurrentAutoKeepsLiveWhenCapable(t *testing.T) {
+func TestPreferLiveKeepsLiveWhenCapable(t *testing.T) {
 	var buf bytes.Buffer
-	d := New(&buf, []string{"router1"}, InitOptions{Debug: false, Mode: ModeAuto, Concurrent: true})
+	d := New(&buf, []string{"router1"}, InitOptions{Debug: false, PreferLiveMode: true, Concurrent: true})
 	d.isTTY = true
-	d.applyMode(ModeAuto)
+	d.applyMode(true)
 
 	if !d.liveMode {
 		t.Fatal("expected live mode to stay enabled in concurrent auto mode on a live-capable terminal")
@@ -39,47 +39,17 @@ func TestSetConcurrentAutoKeepsLiveWhenCapable(t *testing.T) {
 	}
 }
 
-func TestSetModeBufferedForcesConcurrentBuffering(t *testing.T) {
+func TestBufferedPreferenceForcesConcurrentBuffering(t *testing.T) {
 	var buf bytes.Buffer
-	d := New(&buf, []string{"router1", "router2"}, InitOptions{Debug: false, Mode: ModeBuffered, Concurrent: true})
+	d := New(&buf, []string{"router1", "router2"}, InitOptions{Debug: false, PreferLiveMode: false, Concurrent: true})
 	d.isTTY = true
-	d.applyMode(ModeBuffered)
+	d.applyMode(false)
 
 	if d.liveMode {
 		t.Fatal("expected live mode to be disabled in buffered mode")
 	}
 	if d.pendingLines == nil || len(d.pendingLines) != 2 {
 		t.Fatalf("expected pending lines buffer of size 2, got %#v", d.pendingLines)
-	}
-}
-
-func TestParseMode(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		want    Mode
-		wantErr bool
-	}{
-		{name: "empty defaults to auto", input: "", want: ModeAuto},
-		{name: "auto", input: "auto", want: ModeAuto},
-		{name: "buffered", input: "buffered", want: ModeBuffered},
-		{name: "live is now invalid", input: "live", wantErr: true},
-		{name: "invalid", input: "stream", wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseMode(tt.input)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("ParseMode(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
-			}
-			if tt.wantErr {
-				return
-			}
-			if got != tt.want {
-				t.Fatalf("ParseMode(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
 	}
 }
 
@@ -231,7 +201,7 @@ func TestMultipleHosts(t *testing.T) {
 func TestOutputOrder(t *testing.T) {
 	hosts := []string{"host1.example.com", "host2.example.com", "host3.example.com"}
 	var buf bytes.Buffer
-	d := New(&buf, hosts, InitOptions{Debug: false, Mode: ModeBuffered, Concurrent: true})
+	d := New(&buf, hosts, InitOptions{Debug: false, PreferLiveMode: false, Concurrent: true})
 
 	// Finish hosts in reverse order to simulate out-of-order concurrent completion.
 	d.Line(2).Finish("✅", "host3 done")

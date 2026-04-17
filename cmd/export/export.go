@@ -23,7 +23,7 @@ type ExportConfig struct {
 	OutputDir          string
 	Debug              bool
 	MaxConcurrentHosts int
-	DisplayMode        display.Mode
+	PreferLiveMode     bool
 }
 
 // ExportDependencies holds injectable dependencies for testing
@@ -54,18 +54,13 @@ var Command = []*cli.Command{
 				return err
 			}
 
-			displayMode, err := display.ParseMode(coreCfg.DisplayMode)
-			if err != nil {
-				return err
-			}
-
 			// Build export configuration from CLI flags
 			exportCfg := ExportConfig{
 				ShowSensitive:      cmd.Bool("show-sensitive"),
 				OutputDir:          cmd.String("output-dir"),
 				Debug:              coreCfg.Debug,
 				MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent,
-				DisplayMode:        displayMode,
+				PreferLiveMode:     coreCfg.PreferLiveMode,
 			}
 
 			deps := ExportDependencies{
@@ -79,9 +74,9 @@ var Command = []*cli.Command{
 
 func runExportForHosts(ctx context.Context, hosts []string, cfg ExportConfig, deps ExportDependencies, out io.Writer) error {
 	disp := display.New(out, hosts, display.InitOptions{
-		Debug:      cfg.Debug,
-		Mode:       cfg.DisplayMode,
-		Concurrent: cfg.MaxConcurrentHosts > 1,
+		Debug:          cfg.Debug,
+		PreferLiveMode: cfg.PreferLiveMode,
+		Concurrent:     cfg.MaxConcurrentHosts > 1,
 	})
 	defer disp.Stop()
 

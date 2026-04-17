@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
-	"jb.favre/mikrotik-fleet-autopilot/common/display"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 	"jb.favre/mikrotik-fleet-autopilot/common/sshmocks_test"
 )
@@ -1425,7 +1424,7 @@ func TestRunUpdatesForHosts_Sequential(t *testing.T) {
 		ReconnectDelay: 10 * time.Millisecond,
 	}
 
-	cfg := UpdatesConfig{UpdatesApply: true, Debug: true, MaxConcurrentHosts: 1, DisplayMode: display.ModeAuto}
+	cfg := UpdatesConfig{UpdatesApply: true, Debug: true, MaxConcurrentHosts: 1, PreferLiveMode: true}
 
 	var out bytes.Buffer
 	err := runUpdatesForHosts(context.Background(), hosts, cfg, deps, &out)
@@ -1515,7 +1514,7 @@ func TestRunUpdatesForHosts_Concurrent(t *testing.T) {
 		ReconnectDelay:       10 * time.Millisecond,
 	}
 
-	cfg := UpdatesConfig{UpdatesApply: true, Debug: true, MaxConcurrentHosts: len(hosts), DisplayMode: display.ModeAuto}
+	cfg := UpdatesConfig{UpdatesApply: true, Debug: true, MaxConcurrentHosts: len(hosts), PreferLiveMode: true}
 
 	var out bytes.Buffer
 	err := runUpdatesForHosts(context.Background(), hosts, cfg, deps, &out)

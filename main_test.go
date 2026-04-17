@@ -56,7 +56,7 @@ func TestBuildCommandFlags(t *testing.T) {
 		"ssh-passphrase":       false,
 		"debug":                false,
 		"max-concurrent-hosts": false,
-		"display-mode":         false,
+		"buffered-output":      false,
 		"skip-hostkey-check":   false,
 	}
 
@@ -592,5 +592,61 @@ func TestBuildCommandMaxConcurrentHostsSequential(t *testing.T) {
 	}
 	if globalConfig.EffectiveMaxConcurrent != 1 {
 		t.Errorf("EffectiveMaxConcurrent = %d, want 1", globalConfig.EffectiveMaxConcurrent)
+	}
+}
+
+func TestBuildCommandBufferedOutputFlagDefault(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "updates"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cmd.Run() error = %v, want context.Canceled", err)
+	}
+	if globalConfig.BufferedOutput {
+		t.Error("BufferedOutput = true, want false by default")
+	}
+	if !globalConfig.PreferLiveMode {
+		t.Error("PreferLiveMode = false, want true when --buffered-output is not set")
+	}
+}
+
+func TestBuildCommandBufferedOutputFlagEnabled(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "--buffered-output", "updates"})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cmd.Run() error = %v, want context.Canceled", err)
+	}
+	if !globalConfig.BufferedOutput {
+		t.Error("BufferedOutput = false, want true when --buffered-output is set")
+	}
+	if globalConfig.PreferLiveMode {
+		t.Error("PreferLiveMode = true, want false when --buffered-output is set")
+	}
+}
+
+func TestBuildCommandDisplayModeFlagRemoved(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--display-mode", "buffered", "updates"})
+	if err == nil {
+		t.Fatal("cmd.Run() expected an error for removed --display-mode flag")
+	}
+	if !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Errorf("unexpected error for removed flag: %v", err)
 	}
 }

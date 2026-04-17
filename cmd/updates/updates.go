@@ -22,7 +22,7 @@ type UpdatesConfig struct {
 	UpdatesApply       bool
 	Debug              bool
 	MaxConcurrentHosts int
-	DisplayMode        display.Mode
+	PreferLiveMode     bool
 }
 
 // ErrCannotCheckUpdates is returned when the update status cannot be determined,
@@ -54,17 +54,12 @@ var Command = []*cli.Command{
 				return err
 			}
 
-			displayMode, err := display.ParseMode(coreCfg.DisplayMode)
-			if err != nil {
-				return err
-			}
-
 			// Build updates configuration from CLI flags
 			updatesCfg := UpdatesConfig{
 				UpdatesApply:       cmd.Bool("updates-apply"),
 				Debug:              coreCfg.Debug,
 				MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent,
-				DisplayMode:        displayMode,
+				PreferLiveMode:     coreCfg.PreferLiveMode,
 			}
 
 			// Build dependencies
@@ -80,9 +75,9 @@ var Command = []*cli.Command{
 
 func runUpdatesForHosts(ctx context.Context, hosts []string, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
 	disp := display.New(out, hosts, display.InitOptions{
-		Debug:      cfg.Debug,
-		Mode:       cfg.DisplayMode,
-		Concurrent: cfg.MaxConcurrentHosts > 1,
+		Debug:          cfg.Debug,
+		PreferLiveMode: cfg.PreferLiveMode,
+		Concurrent:     cfg.MaxConcurrentHosts > 1,
 	})
 	defer disp.Stop()
 

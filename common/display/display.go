@@ -18,36 +18,14 @@ const (
 	maxHostnameWidth = 20
 )
 
-// Mode controls how concurrent output is rendered.
-type Mode string
-
-const (
-	ModeAuto     Mode = "auto"
-	ModeBuffered Mode = "buffered"
-)
-
 // InitOptions configures display initialization parameters.
 type InitOptions struct {
 	// Debug indicates whether --debug is enabled. Debug has priority and disables live mode.
 	Debug bool
-	// Mode controls the display behavior (auto or buffered).
-	Mode Mode
+	// PreferLiveMode indicates whether live rendering is preferred when possible.
+	PreferLiveMode bool
 	// Concurrent enables ordered buffering when live mode is off.
 	Concurrent bool
-}
-
-// ParseMode parses a user-provided mode value.
-func ParseMode(value string) (Mode, error) {
-	mode := Mode(strings.ToLower(strings.TrimSpace(value)))
-	if mode == "" {
-		return ModeAuto, nil
-	}
-	switch mode {
-	case ModeAuto, ModeBuffered:
-		return mode, nil
-	default:
-		return "", fmt.Errorf("invalid display mode %q: must be auto or buffered", value)
-	}
 }
 
 // completedStep records an already-finished step with its emoticon.
@@ -233,9 +211,9 @@ func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 		}
 	}
 
-	// Centralize mode and concurrency setup in one place so constructor and
+	// Centralize live preference and concurrency setup in one place so constructor and
 	// runtime behavior match.
-	d.applyMode(opts.Mode)
+	d.applyMode(opts.PreferLiveMode)
 	d.setConcurrent(opts.Concurrent)
 	d.start()
 
@@ -248,25 +226,14 @@ func (d *LiveDisplay) setConcurrent(concurrent bool) {
 	d.applyConcurrencyBuffering()
 }
 
-func (d *LiveDisplay) applyMode(mode Mode) {
+func (d *LiveDisplay) applyMode(preferLiveMode bool) {
 	// Debug flag has priority: if --debug is enabled, always disable live mode
 	// to keep output clean and deterministic for log analysis.
 	if d.debug {
 		d.setLiveMode(false)
 	} else {
-		var shouldLive bool
-
-		switch mode {
-		case ModeBuffered:
-			// Explicitly buffered: never use live updates
-			shouldLive = false
-		case ModeAuto:
-			shouldLive = d.isTTY
-		default:
-			// Unknown/zero values are treated like auto for defensive behavior.
-			shouldLive = d.isTTY
-		}
-
+		// Live mode is enabled only when preferred and when a TTY is available.
+		shouldLive := preferLiveMode && d.isTTY
 		d.setLiveMode(shouldLive)
 	}
 

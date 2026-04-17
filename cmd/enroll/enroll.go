@@ -31,7 +31,7 @@ type EnrollConfig struct {
 	UpdateHostKeyOnly  bool
 	Debug              bool
 	MaxConcurrentHosts int
-	DisplayMode        display.Mode
+	PreferLiveMode     bool
 }
 
 // EnrollDependencies holds injectable dependencies for testing
@@ -100,11 +100,6 @@ var Command = []*cli.Command{
 				return err
 			}
 
-			displayMode, err := display.ParseMode(coreCfg.DisplayMode)
-			if err != nil {
-				return err
-			}
-
 			// Build enrollment configuration from CLI flags
 			enrollCfg := EnrollConfig{
 				Hostname:           cmd.String("hostname"),
@@ -117,7 +112,7 @@ var Command = []*cli.Command{
 				UpdateHostKeyOnly:  cmd.Bool("update-hostkey-only"),
 				Debug:              coreCfg.Debug,
 				MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent,
-				DisplayMode:        displayMode,
+				PreferLiveMode:     coreCfg.PreferLiveMode,
 			}
 
 			// Build dependencies for all operations
@@ -149,9 +144,9 @@ func runEnrollForHosts(ctx context.Context, hosts []string, cfg EnrollConfig, de
 	}
 
 	disp := display.New(out, hosts, display.InitOptions{
-		Debug:      cfg.Debug,
-		Mode:       cfg.DisplayMode,
-		Concurrent: cfg.MaxConcurrentHosts > 1,
+		Debug:          cfg.Debug,
+		PreferLiveMode: cfg.PreferLiveMode,
+		Concurrent:     cfg.MaxConcurrentHosts > 1,
 	})
 	defer disp.Stop()
 

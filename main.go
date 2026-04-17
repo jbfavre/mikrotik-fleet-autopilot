@@ -91,11 +91,11 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Usage:       "Maximum number of hosts to process in parallel (0 = auto-detect, 1 = sequential, >=2 = parallel with that cap)",
 				Destination: &globalConfig.MaxConcurrentHosts,
 			},
-			&cli.StringFlag{
-				Name:        "display-mode",
-				Value:       "auto",
-				Usage:       "Display behavior for host progress (auto = live on TTY + buffered fallback, buffered = deterministic final flush). Note: --debug flag has priority and always disables live mode for cleaner logs",
-				Destination: &globalConfig.DisplayMode,
+			&cli.BoolFlag{
+				Name:        "buffered-output",
+				Value:       false,
+				Usage:       "Force buffered host progress output (deterministic final flush). By default, live display is preferred on TTY unless --debug is enabled",
+				Destination: &globalConfig.BufferedOutput,
 			},
 		},
 		Commands: append(append(export.Command, updates.Command...), enroll.Command...),
@@ -113,6 +113,7 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 			}
 			slog.Debug("resolved max concurrent hosts", "configured", globalConfig.MaxConcurrentHosts, "effective", effectiveMaxConcurrent)
 			globalConfig.EffectiveMaxConcurrent = effectiveMaxConcurrent
+			globalConfig.PreferLiveMode = !globalConfig.BufferedOutput
 
 			// Check if a subcommand was provided
 			// If not, the help will be shown automatically by urfave/cli

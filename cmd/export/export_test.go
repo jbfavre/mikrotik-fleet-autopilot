@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
-	"jb.favre/mikrotik-fleet-autopilot/common/display"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 	"jb.favre/mikrotik-fleet-autopilot/common/sshmocks_test"
 )
@@ -591,7 +590,7 @@ func TestRunExportForHosts_Sequential(t *testing.T) {
 		},
 	}
 
-	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir, Debug: true, MaxConcurrentHosts: 1, DisplayMode: display.ModeAuto}
+	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir, Debug: true, MaxConcurrentHosts: 1, PreferLiveMode: true}
 
 	var out bytes.Buffer
 	err := runExportForHosts(context.Background(), hosts, cfg, deps, &out)
@@ -652,7 +651,7 @@ func TestRunExportForHosts_Concurrent(t *testing.T) {
 		},
 	}
 
-	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir, Debug: true, MaxConcurrentHosts: len(hosts), DisplayMode: display.ModeAuto}
+	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir, Debug: true, MaxConcurrentHosts: len(hosts), PreferLiveMode: true}
 
 	var out bytes.Buffer
 	err := runExportForHosts(context.Background(), hosts, cfg, deps, &out)
@@ -692,7 +691,7 @@ func TestRunExportForHosts_ConnectionFailureNonFatal(t *testing.T) {
 		},
 	}
 
-	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir, Debug: true, MaxConcurrentHosts: 1, DisplayMode: display.ModeAuto}
+	cfg := ExportConfig{ShowSensitive: false, OutputDir: tmpDir, Debug: true, MaxConcurrentHosts: 1, PreferLiveMode: true}
 
 	var out bytes.Buffer
 	err := runExportForHosts(context.Background(), hosts, cfg, deps, &out)

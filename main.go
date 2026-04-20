@@ -100,11 +100,12 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 		},
 		Commands: append(append(export.Command, updates.Command...), enroll.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			// Set log level
-			core.SetupLogging(slog.LevelWarn)
+			// Set log level once at startup.
+			logLevel := slog.LevelWarn
 			if globalConfig.Debug {
-				core.SetupLogging(slog.LevelDebug)
+				logLevel = slog.LevelDebug
 			}
+			core.SetupLogging(logLevel)
 			slog.Info("Starting global")
 
 			effectiveMaxConcurrent, err := core.ResolveMaxConcurrentHosts(globalConfig.MaxConcurrentHosts)

@@ -79,12 +79,7 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, cfg UpdatesConfig, 
 		PreferLiveMode: cfg.PreferLiveMode,
 		Concurrent:     cfg.MaxConcurrentHosts > 1,
 	})
-
-	logLevel := slog.LevelWarn
-	if cfg.Debug {
-		logLevel = slog.LevelDebug
-	}
-	restoreLogger := core.RedirectDefaultLogger(disp.LogWriter(), logLevel)
+	core.SetLiveLogWriter(disp.LogWriter())
 
 	// errs is indexed by host position so results are collected in host-list
 	// order regardless of goroutine completion order.
@@ -136,7 +131,7 @@ loop:
 	wg.Wait()
 	result := errors.Join(append(errs, ctxErr)...)
 	disp.Stop()
-	restoreLogger()
+	core.SetLiveLogWriter(nil)
 	return result
 }
 

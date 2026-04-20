@@ -160,7 +160,7 @@ func runEnrollForHosts(ctx context.Context, hosts []string, cfg EnrollConfig, de
 		displayStepCallback := display.NewStepCallback(line)
 		if err := enroll(ctx, host, cfg, deps, displayStepCallback); err != nil {
 			line.CompleteStep("❌")
-			line.FinishError(fmt.Sprintf("Enrollment failed: %s", err.Error()))
+			line.Finish("❌", fmt.Sprintf("Enrollment failed: %s", err.Error()))
 			errs[i] = err
 			slog.Error("enrollment failed", "host", host, "hostname", cfg.Hostname, "error", err)
 			return

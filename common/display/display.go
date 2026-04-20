@@ -108,12 +108,6 @@ func (h *HostLine) Finish(overallEmoji, message string) {
 		}
 	}
 }
-
-// FinishError marks the line as done with ❌ and the given error message.
-func (h *HostLine) FinishError(msg string) {
-	h.Finish("❌", msg)
-}
-
 // renderUnlocked renders the line. The caller must hold h.mu.
 func (h *HostLine) renderUnlocked() string {
 	hostname := formatHostname(h.hostname, h.hostnameWidth)

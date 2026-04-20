@@ -95,7 +95,7 @@ func runExportForHosts(ctx context.Context, hosts []string, cfg ExportConfig, de
 			line.Finish("❓", err.Error())
 		case err != nil:
 			line.CompleteStep("❌")
-			line.FinishError(err.Error())
+			line.Finish("❌", err.Error())
 			errs[i] = err
 		default:
 			line.Finish("✅", fmt.Sprintf("Configuration exported to %s", filename))

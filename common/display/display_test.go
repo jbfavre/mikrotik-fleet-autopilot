@@ -136,22 +136,22 @@ func TestFinishFallback(t *testing.T) {
 	}
 }
 
-func TestFinishErrorFallback(t *testing.T) {
+func TestFinishWithErrorFallback(t *testing.T) {
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, []string{"badrouter.example.com"})
 	l := d.Line(0)
 
 	l.UpdateStep("⏳", "connecting…")
 	l.CompleteStep("⏳")
-	l.FinishError("updates failed: ssh: connect: timeout")
+	l.Finish("❌", "updates failed: ssh: connect: timeout")
 
-	// In non-concurrent non-live mode, FinishError writes immediately to out.
+	// In non-concurrent non-live mode, Finish writes immediately to out.
 	output := buf.String()
 	if !strings.Contains(output, "❌") {
-		t.Errorf("FinishError() output = %q, want ❌", output)
+		t.Errorf("Finish(❌, ...) output = %q, want ❌", output)
 	}
 	if !strings.Contains(output, "badrouter.example.c…") {
-		t.Errorf("FinishError() output = %q, want truncated hostname", output)
+		t.Errorf("Finish(❌, ...) output = %q, want truncated hostname", output)
 	}
 	d.Stop() // no-op for sequential non-live mode
 }
@@ -377,7 +377,7 @@ func TestRenderFormatConsistency(t *testing.T) {
 			name: "done error",
 			setup: func(l *HostLine) {
 				l.CompleteStep("❌")
-				l.FinishError("updates failed: timeout")
+				l.Finish("❌", "updates failed: timeout")
 			},
 			wantPrefix:   "❌",
 			wantContains: []string{"router.example.com", "❌", "updates failed: timeout"},

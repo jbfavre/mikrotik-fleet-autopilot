@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hekmon/liveterm/v2"
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
 	"jb.favre/mikrotik-fleet-autopilot/common/display"
@@ -81,19 +80,11 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, cfg UpdatesConfig, 
 		Concurrent:     cfg.MaxConcurrentHosts > 1,
 	})
 
-	var restoreLogger func()
-	if disp.LiveMode() {
-		previousLogger := slog.Default()
-		logLevel := slog.LevelWarn
-		if cfg.Debug {
-			logLevel = slog.LevelDebug
-		}
-		handler := slog.NewTextHandler(liveterm.Bypass(), &slog.HandlerOptions{Level: logLevel})
-		slog.SetDefault(slog.New(handler))
-		restoreLogger = func() {
-			slog.SetDefault(previousLogger)
-		}
+	logLevel := slog.LevelWarn
+	if cfg.Debug {
+		logLevel = slog.LevelDebug
 	}
+	restoreLogger := core.RedirectDefaultLogger(disp.LogWriter(), logLevel)
 
 	// errs is indexed by host position so results are collected in host-list
 	// order regardless of goroutine completion order.
@@ -145,9 +136,7 @@ loop:
 	wg.Wait()
 	result := errors.Join(append(errs, ctxErr)...)
 	disp.Stop()
-	if restoreLogger != nil {
-		restoreLogger()
-	}
+	restoreLogger()
 	return result
 }
 

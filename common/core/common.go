@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -51,6 +52,20 @@ func IsEnrollmentMode(ctx context.Context) bool {
 func SetupLogging(level slog.Level) {
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	slog.SetDefault(slog.New(handler))
+}
+
+// RedirectDefaultLogger temporarily routes the default slog logger to writer.
+// The returned function restores the previous default logger.
+func RedirectDefaultLogger(writer io.Writer, level slog.Level) func() {
+	if writer == nil {
+		return func() {}
+	}
+	previousLogger := slog.Default()
+	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{Level: level})
+	slog.SetDefault(slog.New(handler))
+	return func() {
+		slog.SetDefault(previousLogger)
+	}
 }
 
 // ParseHosts parses a comma-separated list of hosts and returns a slice of trimmed host strings.

@@ -148,7 +148,12 @@ func runEnrollForHosts(ctx context.Context, hosts []string, cfg EnrollConfig, de
 		PreferLiveMode: cfg.PreferLiveMode,
 		Concurrent:     cfg.MaxConcurrentHosts > 1,
 	})
-	defer disp.Stop()
+
+	logLevel := slog.LevelWarn
+	if cfg.Debug {
+		logLevel = slog.LevelDebug
+	}
+	restoreLogger := core.RedirectDefaultLogger(disp.LogWriter(), logLevel)
 
 	// errs is indexed by host position so results are collected in host-list
 	// order regardless of goroutine completion order.
@@ -192,7 +197,10 @@ loop:
 		}
 	}
 	wg.Wait()
-	return errors.Join(append(errs, ctxErr)...)
+	result := errors.Join(append(errs, ctxErr)...)
+	disp.Stop()
+	restoreLogger()
+	return result
 }
 
 // enroll is the entry point for the enrollment command

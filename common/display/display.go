@@ -292,6 +292,15 @@ func (d *LiveDisplay) LiveMode() bool {
 	return d.liveMode
 }
 
+// LogWriter returns a writer safe to use for permanent log output while the
+// live display is active.
+func (d *LiveDisplay) LogWriter() io.Writer {
+	if !d.liveMode {
+		return nil
+	}
+	return liveterm.Bypass()
+}
+
 // start begins live output. In fallback mode this is a no-op.
 // Only one LiveDisplay may be in live mode at a time: if another display is
 // already active, start falls back to plain-text mode so that the existing

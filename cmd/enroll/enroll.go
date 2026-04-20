@@ -165,7 +165,7 @@ func runEnrollForHosts(ctx context.Context, hosts []string, cfg EnrollConfig, de
                         line.Finish("❓", err.Error())
 		case err != nil:
 			line.CompleteStep("❌")
-			line.Finish("❌", fmt.Sprintf("Enrollment failed: %s", err.Error()))
+			line.Finish("❌", fmt.Sprintf("Enrollment failed: %v", err))
 			errs[i] = err
 			slog.Error("enrollment failed", "host", host, "hostname", cfg.Hostname, "error", err)
 		default:

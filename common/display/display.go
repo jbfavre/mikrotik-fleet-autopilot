@@ -18,6 +18,12 @@ const (
 	maxHostnameWidth = 20
 )
 
+// singleton guard: only one LiveDisplay may drive liveterm at a time.
+var (
+	singletonMu    sync.Mutex
+	activeLiveDisp *LiveDisplay
+)
+
 // InitOptions configures display initialization parameters.
 type InitOptions struct {
 	// Debug indicates whether --debug is enabled. Debug has priority and disables live mode.
@@ -108,6 +114,7 @@ func (h *HostLine) Finish(overallEmoji, message string) {
 		}
 	}
 }
+
 // renderUnlocked renders the line. The caller must hold h.mu.
 func (h *HostLine) renderUnlocked() string {
 	hostname := formatHostname(h.hostname, h.hostnameWidth)
@@ -152,32 +159,6 @@ func (h *HostLine) render() string {
 	return h.renderUnlocked()
 }
 
-// singleton guard: only one LiveDisplay may drive liveterm at a time.
-var (
-	singletonMu    sync.Mutex
-	activeLiveDisp *LiveDisplay
-)
-
-// LiveDisplay manages per-host live output lines.
-type LiveDisplay struct {
-	lines []*HostLine
-	out   io.Writer
-
-	// liveMode is the effective runtime state after evaluating display mode,
-	// debug, TTY, and any live startup fallback (for example singleton contention).
-	liveMode bool
-
-	// isTTY is detected once at construction time and does not change.
-	isTTY bool
-	// debug indicates whether --debug is enabled. Debug has priority and disables live mode.
-	debug bool
-	// concurrent enables ordered buffering when live mode is off.
-	concurrent bool
-
-	// pendingLines holds one rendered final line per host in concurrent non-live mode.
-	pendingLines []string
-}
-
 // New creates and initializes a LiveDisplay.
 // It applies display mode policy, configures concurrency behavior, and starts
 // live rendering when applicable.
@@ -214,12 +195,73 @@ func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 	return d
 }
 
+// LiveDisplay manages per-host live output lines.
+type LiveDisplay struct {
+	lines []*HostLine
+	out   io.Writer
+
+	// liveMode is the effective runtime state after evaluating display mode,
+	// debug, TTY, and any live startup fallback (for example singleton contention).
+	liveMode bool
+
+	// isTTY is detected once at construction time and does not change.
+	isTTY bool
+	// debug indicates whether --debug is enabled. Debug has priority and disables live mode.
+	debug bool
+	// concurrent enables ordered buffering when live mode is off.
+	concurrent bool
+
+	// pendingLines holds one rendered final line per host in concurrent non-live mode.
+	pendingLines []string
+}
+
+// Line returns the HostLine for the i-th host (0-indexed).
+func (d *LiveDisplay) Line(i int) *HostLine {
+	return d.lines[i]
+}
+
+// LiveMode reports whether the display is effectively running in live mode.
+func (d *LiveDisplay) LiveMode() bool {
+	return d.liveMode
+}
+
+// LogWriter returns a writer safe to use for permanent log output while the
+// live display is active.
+func (d *LiveDisplay) LogWriter() io.Writer {
+	if !d.liveMode {
+		return nil
+	}
+	return liveterm.Bypass()
+}
+
+// Stop finalises output. In live mode it stops liveterm. In concurrent non-live
+// mode it flushes all buffered host lines to out in host-list order, so that
+// goroutines that finish at different times still produce deterministic output.
+func (d *LiveDisplay) Stop() {
+	if d.liveMode {
+		defer d.release()
+		if err := liveterm.Stop(false); err != nil {
+			slog.Warn("display: failed to stop live terminal", "error", err)
+		}
+		return
+	}
+	for i, line := range d.pendingLines {
+		if line == "" {
+			continue
+		}
+		if _, err := fmt.Fprintf(d.out, "%s\n", line); err != nil {
+			slog.Warn("display: failed to write host line", "error", err, "line_index", i, "hostname", d.lines[i].hostname)
+		}
+	}
+}
+
 // setConcurrent marks the display as serving concurrent host processing.
 func (d *LiveDisplay) setConcurrent(concurrent bool) {
 	d.concurrent = concurrent
 	d.applyConcurrencyBuffering()
 }
 
+// applyMode applies the live mode policy based on the current settings and environment.
 func (d *LiveDisplay) applyMode(preferLiveMode bool) {
 	// Debug flag has priority: if --debug is enabled, always disable live mode
 	// to keep output clean and deterministic for log analysis.
@@ -248,13 +290,6 @@ func (d *LiveDisplay) applyConcurrencyBuffering() {
 	d.clearNonLive()
 }
 
-func (d *LiveDisplay) setLiveMode(enabled bool) {
-	d.liveMode = enabled
-	for _, l := range d.lines {
-		l.liveMode = enabled
-	}
-}
-
 // clearNonLive removes any non-live buffering state so sequential mode writes
 // each line immediately instead of buffering for Stop.
 func (d *LiveDisplay) clearNonLive() {
@@ -275,23 +310,49 @@ func (d *LiveDisplay) initNonLive() {
 	}
 }
 
-// Line returns the HostLine for the i-th host (0-indexed).
-func (d *LiveDisplay) Line(i int) *HostLine {
-	return d.lines[i]
-}
-
-// LiveMode reports whether the display is effectively running in live mode.
-func (d *LiveDisplay) LiveMode() bool {
-	return d.liveMode
-}
-
-// LogWriter returns a writer safe to use for permanent log output while the
-// live display is active.
-func (d *LiveDisplay) LogWriter() io.Writer {
-	if !d.liveMode {
-		return nil
+// release clears the singleton slot if this display holds it.
+func (d *LiveDisplay) release() {
+	singletonMu.Lock()
+	defer singletonMu.Unlock()
+	if activeLiveDisp == d {
+		activeLiveDisp = nil
 	}
-	return liveterm.Bypass()
+}
+
+// renderLines returns all host lines for liveterm to display.
+// This implementation atomically captures the state of all lines to prevent race
+// conditions where intermediate states (e.g., ⏳ Connecting…) are visible alongside
+// final states (e.g., ✅ or ❓). By acquiring all locks in order before rendering,
+// we ensure the snapshot is consistent and matches the moment in time it was taken.
+// WARNING: removing the locks or changing the locking strategy may cause race conditions
+// WARNING: where intermediate states are rendered alongside final states, leading to confusing output.
+// WARNING: Do not modify without careful consideration.
+func (d *LiveDisplay) renderLines() []string {
+	// Acquire all locks in index order to prevent deadlock and capture an atomic snapshot.
+	for _, l := range d.lines {
+		l.mu.Lock()
+	}
+	defer func() {
+		// Release all locks in reverse order to maintain consistency.
+		for i := len(d.lines) - 1; i >= 0; i-- {
+			d.lines[i].mu.Unlock()
+		}
+	}()
+
+	// Now render all lines while holding all locks; no state can change during this render.
+	out := make([]string, len(d.lines))
+	for i, l := range d.lines {
+		out[i] = l.renderUnlocked()
+	}
+	return out
+}
+
+// setLiveMode sets the liveMode flag and updates all HostLines accordingly.
+func (d *LiveDisplay) setLiveMode(enabled bool) {
+	d.liveMode = enabled
+	for _, l := range d.lines {
+		l.liveMode = enabled
+	}
 }
 
 // start begins live output. In fallback mode this is a no-op.
@@ -338,64 +399,7 @@ func (d *LiveDisplay) tryClaim() bool {
 	return true
 }
 
-// release clears the singleton slot if this display holds it.
-func (d *LiveDisplay) release() {
-	singletonMu.Lock()
-	defer singletonMu.Unlock()
-	if activeLiveDisp == d {
-		activeLiveDisp = nil
-	}
-}
-
-// Stop finalises output. In live mode it stops liveterm. In concurrent non-live
-// mode it flushes all buffered host lines to out in host-list order, so that
-// goroutines that finish at different times still produce deterministic output.
-func (d *LiveDisplay) Stop() {
-	if d.liveMode {
-		defer d.release()
-		if err := liveterm.Stop(false); err != nil {
-			slog.Warn("display: failed to stop live terminal", "error", err)
-		}
-		return
-	}
-	for i, line := range d.pendingLines {
-		if line == "" {
-			continue
-		}
-		if _, err := fmt.Fprintf(d.out, "%s\n", line); err != nil {
-			slog.Warn("display: failed to write host line", "error", err, "line_index", i, "hostname", d.lines[i].hostname)
-		}
-	}
-}
-
-// renderLines returns all host lines for liveterm to display.
-// This implementation atomically captures the state of all lines to prevent race
-// conditions where intermediate states (e.g., ⏳ Connecting…) are visible alongside
-// final states (e.g., ✅ or ❓). By acquiring all locks in order before rendering,
-// we ensure the snapshot is consistent and matches the moment in time it was taken.
-// WARNING: removing the locks or changing the locking strategy may cause race conditions
-// WARNING: where intermediate states are rendered alongside final states, leading to confusing output.
-// WARNING: Do not modify without careful consideration.
-func (d *LiveDisplay) renderLines() []string {
-	// Acquire all locks in index order to prevent deadlock and capture an atomic snapshot.
-	for _, l := range d.lines {
-		l.mu.Lock()
-	}
-	defer func() {
-		// Release all locks in reverse order to maintain consistency.
-		for i := len(d.lines) - 1; i >= 0; i-- {
-			d.lines[i].mu.Unlock()
-		}
-	}()
-
-	// Now render all lines while holding all locks; no state can change during this render.
-	out := make([]string, len(d.lines))
-	for i, l := range d.lines {
-		out[i] = l.renderUnlocked()
-	}
-	return out
-}
-
+// Helper to compute hostname column width based on the longest hostname, with min and max bounds.
 func computeHostnameWidth(hosts []string) int {
 	maxLen := 0
 	for _, host := range hosts {
@@ -413,6 +417,7 @@ func computeHostnameWidth(hosts []string) int {
 	return maxLen
 }
 
+// helper to format hostname with fixed width and truncation if needed, to keep display aligned.
 func formatHostname(hostname string, width int) string {
 	if width <= 0 {
 		return hostname

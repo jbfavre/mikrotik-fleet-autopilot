@@ -25,25 +25,21 @@ func newLiveModeDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
 	return d
 }
 
-func TestPreferLiveKeepsLiveWhenCapable(t *testing.T) {
+func TestPreferLiveFallsBackWhenTTYUnavailable(t *testing.T) {
 	var buf bytes.Buffer
 	d := New(&buf, []string{"router1"}, InitOptions{Debug: false, PreferLiveMode: true, Concurrent: true})
-	d.isTTY = true
-	d.applyMode(true)
 
-	if !d.liveMode {
-		t.Fatal("expected live mode to stay enabled in concurrent auto mode on a live-capable terminal")
+	if d.liveMode {
+		t.Fatal("expected live mode to be disabled when output is not a TTY")
 	}
-	if d.pendingLines != nil {
-		t.Fatalf("expected no buffered pending lines in concurrent auto live mode, got %#v", d.pendingLines)
+	if d.pendingLines == nil || len(d.pendingLines) != 1 {
+		t.Fatalf("expected pending lines buffer of size 1 in concurrent non-live mode, got %#v", d.pendingLines)
 	}
 }
 
 func TestBufferedPreferenceForcesConcurrentBuffering(t *testing.T) {
 	var buf bytes.Buffer
 	d := New(&buf, []string{"router1", "router2"}, InitOptions{Debug: false, PreferLiveMode: false, Concurrent: true})
-	d.isTTY = true
-	d.applyMode(false)
 
 	if d.liveMode {
 		t.Fatal("expected live mode to be disabled in buffered mode")

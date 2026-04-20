@@ -187,10 +187,15 @@ func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 		}
 	}
 
-	// Centralize live preference and concurrency setup in one place so constructor and
-	// runtime behavior match.
-	d.applyMode(opts.PreferLiveMode)
-	d.setConcurrent(opts.Concurrent)
+	// Finalize live and concurrency flags first, then reconcile buffering once so
+	// initialization does not perform redundant setup passes.
+	if d.debug {
+		d.setLiveMode(false)
+	} else {
+		d.setLiveMode(opts.PreferLiveMode && d.isTTY)
+	}
+	d.concurrent = opts.Concurrent
+	d.applyConcurrencyBuffering()
 	d.initLiveMode()
 
 	return d
@@ -251,27 +256,6 @@ func (d *LiveDisplay) Stop() {
 	}
 }
 
-// setConcurrent marks the display as serving concurrent host processing.
-func (d *LiveDisplay) setConcurrent(concurrent bool) {
-	d.concurrent = concurrent
-	d.applyConcurrencyBuffering()
-}
-
-// applyMode applies the live mode policy based on the current settings and environment.
-func (d *LiveDisplay) applyMode(preferLiveMode bool) {
-	// Debug flag has priority: if --debug is enabled, always disable live mode
-	// to keep output clean and deterministic for log analysis.
-	if d.debug {
-		d.setLiveMode(false)
-	} else {
-		// Live mode is enabled only when preferred and when a TTY is available.
-		shouldLive := preferLiveMode && d.isTTY
-		d.setLiveMode(shouldLive)
-	}
-
-	d.applyConcurrencyBuffering()
-}
-
 // applyConcurrencyBuffering configures whether host lines are buffered until
 // Stop based on current concurrency + effective live mode.
 func (d *LiveDisplay) applyConcurrencyBuffering() {
@@ -324,7 +308,7 @@ func (d *LiveDisplay) initLiveMode() {
 
 // initNonLive allocates d.pendingLines and wires each HostLine.pending to it.
 // Called during initial construction when the display starts in non-live mode,
-// and whenever a live-mode display transitions to non-live mode via Start's
+// and whenever a live-mode display transitions to non-live mode via initLiveMode's
 // fallback paths (singleton contention or liveterm.Start failure).
 func (d *LiveDisplay) initNonLive() {
 	d.pendingLines = make([]string, len(d.lines))

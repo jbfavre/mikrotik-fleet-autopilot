@@ -509,7 +509,6 @@ func TestConcurrentFailureRenderAtomicity(t *testing.T) {
 	// Create a live-mode display (simulated; not actually running liveterm).
 	d := newLiveModeDisplay(&buf, hosts)
 
-	const numWorkers = 50 // High concurrency to increase chance of hitting race condition
 	var wg sync.WaitGroup
 
 	// Simulate concurrent host processing: some succeed, router32 and router70 fail

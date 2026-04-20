@@ -439,10 +439,10 @@ func TestSingletonFallback(t *testing.T) {
 
 	// A second display in live mode should fall back to plain text.
 	second := newLiveModeDisplay(&buf2, []string{"router2"})
-	second.start() // should detect activeLiveDisp != nil and fall back
+	second.initLiveMode() // should detect activeLiveDisp != nil and fall back
 
 	if second.liveMode {
-		t.Error("second start() should have fallen back to plain text when a display is already active")
+		t.Error("second initLiveMode() should have fallen back to plain text when a display is already active")
 	}
 	for _, l := range second.lines {
 		if l.liveMode {

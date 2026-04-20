@@ -13,6 +13,7 @@ import (
 	"golang.org/x/term"
 )
 
+// Constants for hostname column width limits to keep display aligned and prevent overflow.
 const (
 	minHostnameWidth = 10
 	maxHostnameWidth = 20
@@ -34,11 +35,6 @@ type InitOptions struct {
 	Concurrent bool
 }
 
-// completedStep records an already-finished step with its emoticon.
-type completedStep struct {
-	emoji string
-}
-
 // HostLine tracks the display state for a single host.
 type HostLine struct {
 	mu            sync.Mutex
@@ -54,6 +50,11 @@ type HostLine struct {
 	done          bool
 	finalMessage  string // set by Finish; does not include the hostname or overall emoji
 	liveMode      bool
+}
+
+// completedStep records an already-finished step with its emoticon.
+type completedStep struct {
+	emoji string
 }
 
 // StepCallback is used to update step display for a host.
@@ -190,7 +191,7 @@ func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 	// runtime behavior match.
 	d.applyMode(opts.PreferLiveMode)
 	d.setConcurrent(opts.Concurrent)
-	d.start()
+	d.initLiveMode()
 
 	return d
 }
@@ -218,11 +219,6 @@ type LiveDisplay struct {
 // Line returns the HostLine for the i-th host (0-indexed).
 func (d *LiveDisplay) Line(i int) *HostLine {
 	return d.lines[i]
-}
-
-// LiveMode reports whether the display is effectively running in live mode.
-func (d *LiveDisplay) LiveMode() bool {
-	return d.liveMode
 }
 
 // LogWriter returns a writer safe to use for permanent log output while the
@@ -287,15 +283,42 @@ func (d *LiveDisplay) applyConcurrencyBuffering() {
 		}
 		return
 	}
-	d.clearNonLive()
-}
-
-// clearNonLive removes any non-live buffering state so sequential mode writes
-// each line immediately instead of buffering for Stop.
-func (d *LiveDisplay) clearNonLive() {
 	d.pendingLines = nil
 	for _, l := range d.lines {
 		l.pending = nil
+	}
+}
+
+// initLiveMode begins live output. In fallback mode this is a no-op.
+// Only one LiveDisplay may be in live mode at a time: if another display is
+// already active, initLiveMode falls back to plain-text mode so that the existing
+// liveterm instance is not disturbed.
+func (d *LiveDisplay) initLiveMode() {
+	if !d.liveMode {
+		return
+	}
+
+	// Try to claim the singleton slot. The lock is released before calling
+	// liveterm.Start so the refresh goroutine can acquire it if needed.
+	if !d.tryClaim() {
+		// Another display is already running; fall back to plain text.
+		d.setLiveMode(false)
+		if d.concurrent {
+			d.initNonLive()
+		}
+		return
+	}
+
+	liveterm.RefreshInterval = 100 * time.Millisecond
+	liveterm.Output = d.out
+	liveterm.SetMultiLinesUpdateFx(d.renderLines)
+	if err := liveterm.Start(); err != nil {
+		// If liveterm fails to start (e.g. no real TTY despite fd check), fall back.
+		d.release()
+		d.setLiveMode(false)
+		if d.concurrent {
+			d.initNonLive()
+		}
 	}
 }
 
@@ -352,39 +375,6 @@ func (d *LiveDisplay) setLiveMode(enabled bool) {
 	d.liveMode = enabled
 	for _, l := range d.lines {
 		l.liveMode = enabled
-	}
-}
-
-// start begins live output. In fallback mode this is a no-op.
-// Only one LiveDisplay may be in live mode at a time: if another display is
-// already active, start falls back to plain-text mode so that the existing
-// liveterm instance is not disturbed.
-func (d *LiveDisplay) start() {
-	if !d.liveMode {
-		return
-	}
-
-	// Try to claim the singleton slot. The lock is released before calling
-	// liveterm.Start so the refresh goroutine can acquire it if needed.
-	if !d.tryClaim() {
-		// Another display is already running; fall back to plain text.
-		d.setLiveMode(false)
-		if d.concurrent {
-			d.initNonLive()
-		}
-		return
-	}
-
-	liveterm.RefreshInterval = 100 * time.Millisecond
-	liveterm.Output = d.out
-	liveterm.SetMultiLinesUpdateFx(d.renderLines)
-	if err := liveterm.Start(); err != nil {
-		// If liveterm fails to start (e.g. no real TTY despite fd check), fall back.
-		d.release()
-		d.setLiveMode(false)
-		if d.concurrent {
-			d.initNonLive()
-		}
 	}
 }
 

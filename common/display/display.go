@@ -13,9 +13,16 @@ import (
 	"golang.org/x/term"
 )
 
+// Constants for hostname column width limits to keep display aligned and prevent overflow.
 const (
 	minHostnameWidth = 10
 	maxHostnameWidth = 20
+)
+
+// singleton guard: only one LiveDisplay may drive liveterm at a time.
+var (
+	singletonMu    sync.Mutex
+	activeLiveDisp *LiveDisplay
 )
 
 // InitOptions configures display initialization parameters.
@@ -26,11 +33,6 @@ type InitOptions struct {
 	PreferLiveMode bool
 	// Concurrent enables ordered buffering when live mode is off.
 	Concurrent bool
-}
-
-// completedStep records an already-finished step with its emoticon.
-type completedStep struct {
-	emoji string
 }
 
 // HostLine tracks the display state for a single host.
@@ -48,6 +50,11 @@ type HostLine struct {
 	done          bool
 	finalMessage  string // set by Finish; does not include the hostname or overall emoji
 	liveMode      bool
+}
+
+// completedStep records an already-finished step with its emoticon.
+type completedStep struct {
+	emoji string
 }
 
 // StepCallback is used to update step display for a host.
@@ -109,11 +116,6 @@ func (h *HostLine) Finish(overallEmoji, message string) {
 	}
 }
 
-// FinishError marks the line as done with ❌ and the given error message.
-func (h *HostLine) FinishError(msg string) {
-	h.Finish("❌", msg)
-}
-
 // renderUnlocked renders the line. The caller must hold h.mu.
 func (h *HostLine) renderUnlocked() string {
 	hostname := formatHostname(h.hostname, h.hostnameWidth)
@@ -158,32 +160,6 @@ func (h *HostLine) render() string {
 	return h.renderUnlocked()
 }
 
-// singleton guard: only one LiveDisplay may drive liveterm at a time.
-var (
-	singletonMu    sync.Mutex
-	activeLiveDisp *LiveDisplay
-)
-
-// LiveDisplay manages per-host live output lines.
-type LiveDisplay struct {
-	lines []*HostLine
-	out   io.Writer
-
-	// liveMode is the effective runtime state after evaluating display mode,
-	// debug, TTY, and any live startup fallback (for example singleton contention).
-	liveMode bool
-
-	// isTTY is detected once at construction time and does not change.
-	isTTY bool
-	// debug indicates whether --debug is enabled. Debug has priority and disables live mode.
-	debug bool
-	// concurrent enables ordered buffering when live mode is off.
-	concurrent bool
-
-	// pendingLines holds one rendered final line per host in concurrent non-live mode.
-	pendingLines []string
-}
-
 // New creates and initializes a LiveDisplay.
 // It applies display mode policy, configures concurrency behavior, and starts
 // live rendering when applicable.
@@ -211,33 +187,73 @@ func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 		}
 	}
 
-	// Centralize live preference and concurrency setup in one place so constructor and
-	// runtime behavior match.
-	d.applyMode(opts.PreferLiveMode)
-	d.setConcurrent(opts.Concurrent)
-	d.start()
+	// Finalize live and concurrency flags first, then reconcile buffering once so
+	// initialization does not perform redundant setup passes.
+	if d.debug {
+		d.setLiveMode(false)
+	} else {
+		d.setLiveMode(opts.PreferLiveMode && d.isTTY)
+	}
+	d.concurrent = opts.Concurrent
+	d.applyConcurrencyBuffering()
+	d.initLiveMode()
 
 	return d
 }
 
-// setConcurrent marks the display as serving concurrent host processing.
-func (d *LiveDisplay) setConcurrent(concurrent bool) {
-	d.concurrent = concurrent
-	d.applyConcurrencyBuffering()
+// LiveDisplay manages per-host live output lines.
+type LiveDisplay struct {
+	lines []*HostLine
+	out   io.Writer
+
+	// liveMode is the effective runtime state after evaluating display mode,
+	// debug, TTY, and any live startup fallback (for example singleton contention).
+	liveMode bool
+
+	// isTTY is detected once at construction time and does not change.
+	isTTY bool
+	// debug indicates whether --debug is enabled. Debug has priority and disables live mode.
+	debug bool
+	// concurrent enables ordered buffering when live mode is off.
+	concurrent bool
+
+	// pendingLines holds one rendered final line per host in concurrent non-live mode.
+	pendingLines []string
 }
 
-func (d *LiveDisplay) applyMode(preferLiveMode bool) {
-	// Debug flag has priority: if --debug is enabled, always disable live mode
-	// to keep output clean and deterministic for log analysis.
-	if d.debug {
-		d.setLiveMode(false)
-	} else {
-		// Live mode is enabled only when preferred and when a TTY is available.
-		shouldLive := preferLiveMode && d.isTTY
-		d.setLiveMode(shouldLive)
-	}
+// Line returns the HostLine for the i-th host (0-indexed).
+func (d *LiveDisplay) Line(i int) *HostLine {
+	return d.lines[i]
+}
 
-	d.applyConcurrencyBuffering()
+// LogWriter returns a writer safe to use for permanent log output while the
+// live display is active.
+func (d *LiveDisplay) LogWriter() io.Writer {
+	if !d.liveMode {
+		return nil
+	}
+	return liveterm.Bypass()
+}
+
+// Stop finalises output. In live mode it stops liveterm. In concurrent non-live
+// mode it flushes all buffered host lines to out in host-list order, so that
+// goroutines that finish at different times still produce deterministic output.
+func (d *LiveDisplay) Stop() {
+	if d.liveMode {
+		defer d.release()
+		if err := liveterm.Stop(false); err != nil {
+			slog.Warn("display: failed to stop live terminal", "error", err)
+		}
+		return
+	}
+	for i, line := range d.pendingLines {
+		if line == "" {
+			continue
+		}
+		if _, err := fmt.Fprintf(d.out, "%s\n", line); err != nil {
+			slog.Warn("display: failed to write host line", "error", err, "line_index", i, "hostname", d.lines[i].hostname)
+		}
+	}
 }
 
 // applyConcurrencyBuffering configures whether host lines are buffered until
@@ -251,60 +267,17 @@ func (d *LiveDisplay) applyConcurrencyBuffering() {
 		}
 		return
 	}
-	d.clearNonLive()
-}
-
-func (d *LiveDisplay) setLiveMode(enabled bool) {
-	d.liveMode = enabled
-	for _, l := range d.lines {
-		l.liveMode = enabled
-	}
-}
-
-// clearNonLive removes any non-live buffering state so sequential mode writes
-// each line immediately instead of buffering for Stop.
-func (d *LiveDisplay) clearNonLive() {
 	d.pendingLines = nil
 	for _, l := range d.lines {
 		l.pending = nil
 	}
 }
 
-// initNonLive allocates d.pendingLines and wires each HostLine.pending to it.
-// Called during initial construction when the display starts in non-live mode,
-// and whenever a live-mode display transitions to non-live mode via Start's
-// fallback paths (singleton contention or liveterm.Start failure).
-func (d *LiveDisplay) initNonLive() {
-	d.pendingLines = make([]string, len(d.lines))
-	for _, l := range d.lines {
-		l.pending = &d.pendingLines
-	}
-}
-
-// Line returns the HostLine for the i-th host (0-indexed).
-func (d *LiveDisplay) Line(i int) *HostLine {
-	return d.lines[i]
-}
-
-// LiveMode reports whether the display is effectively running in live mode.
-func (d *LiveDisplay) LiveMode() bool {
-	return d.liveMode
-}
-
-// LogWriter returns a writer safe to use for permanent log output while the
-// live display is active.
-func (d *LiveDisplay) LogWriter() io.Writer {
-	if !d.liveMode {
-		return nil
-	}
-	return liveterm.Bypass()
-}
-
-// start begins live output. In fallback mode this is a no-op.
+// initLiveMode begins live output. In fallback mode this is a no-op.
 // Only one LiveDisplay may be in live mode at a time: if another display is
-// already active, start falls back to plain-text mode so that the existing
+// already active, initLiveMode falls back to plain-text mode so that the existing
 // liveterm instance is not disturbed.
-func (d *LiveDisplay) start() {
+func (d *LiveDisplay) initLiveMode() {
 	if !d.liveMode {
 		return
 	}
@@ -333,15 +306,15 @@ func (d *LiveDisplay) start() {
 	}
 }
 
-// tryClaim atomically claims the singleton slot. Returns true if successful.
-func (d *LiveDisplay) tryClaim() bool {
-	singletonMu.Lock()
-	defer singletonMu.Unlock()
-	if activeLiveDisp != nil {
-		return false
+// initNonLive allocates d.pendingLines and wires each HostLine.pending to it.
+// Called during initial construction when the display starts in non-live mode,
+// and whenever a live-mode display transitions to non-live mode via initLiveMode's
+// fallback paths (singleton contention or liveterm.Start failure).
+func (d *LiveDisplay) initNonLive() {
+	d.pendingLines = make([]string, len(d.lines))
+	for _, l := range d.lines {
+		l.pending = &d.pendingLines
 	}
-	activeLiveDisp = d
-	return true
 }
 
 // release clears the singleton slot if this display holds it.
@@ -350,27 +323,6 @@ func (d *LiveDisplay) release() {
 	defer singletonMu.Unlock()
 	if activeLiveDisp == d {
 		activeLiveDisp = nil
-	}
-}
-
-// Stop finalises output. In live mode it stops liveterm. In concurrent non-live
-// mode it flushes all buffered host lines to out in host-list order, so that
-// goroutines that finish at different times still produce deterministic output.
-func (d *LiveDisplay) Stop() {
-	if d.liveMode {
-		defer d.release()
-		if err := liveterm.Stop(false); err != nil {
-			slog.Warn("display: failed to stop live terminal", "error", err)
-		}
-		return
-	}
-	for i, line := range d.pendingLines {
-		if line == "" {
-			continue
-		}
-		if _, err := fmt.Fprintf(d.out, "%s\n", line); err != nil {
-			slog.Warn("display: failed to write host line", "error", err, "line_index", i, "hostname", d.lines[i].hostname)
-		}
 	}
 }
 
@@ -402,6 +354,26 @@ func (d *LiveDisplay) renderLines() []string {
 	return out
 }
 
+// setLiveMode sets the liveMode flag and updates all HostLines accordingly.
+func (d *LiveDisplay) setLiveMode(enabled bool) {
+	d.liveMode = enabled
+	for _, l := range d.lines {
+		l.liveMode = enabled
+	}
+}
+
+// tryClaim atomically claims the singleton slot. Returns true if successful.
+func (d *LiveDisplay) tryClaim() bool {
+	singletonMu.Lock()
+	defer singletonMu.Unlock()
+	if activeLiveDisp != nil {
+		return false
+	}
+	activeLiveDisp = d
+	return true
+}
+
+// Helper to compute hostname column width based on the longest hostname, with min and max bounds.
 func computeHostnameWidth(hosts []string) int {
 	maxLen := 0
 	for _, host := range hosts {
@@ -419,6 +391,7 @@ func computeHostnameWidth(hosts []string) int {
 	return maxLen
 }
 
+// helper to format hostname with fixed width and truncation if needed, to keep display aligned.
 func formatHostname(hostname string, width int) string {
 	if width <= 0 {
 		return hostname

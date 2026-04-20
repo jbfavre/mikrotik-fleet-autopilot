@@ -96,7 +96,7 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, cfg UpdatesConfig, 
 			line.Finish("❓", err.Error())
 		case err != nil:
 			line.CompleteStep("❌")
-			line.FinishError(err.Error())
+			line.Finish("❌", err.Error())
 			errs[i] = err
 		case osStatus == nil:
 			line.Finish("❓", "update applied, status unverified")

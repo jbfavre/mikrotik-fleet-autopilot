@@ -25,25 +25,38 @@ func newLiveModeDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
 	return d
 }
 
-func TestPreferLiveKeepsLiveWhenCapable(t *testing.T) {
+func TestPreferLiveFallsBackWhenTTYUnavailable(t *testing.T) {
 	var buf bytes.Buffer
 	d := New(&buf, []string{"router1"}, InitOptions{Debug: false, PreferLiveMode: true, Concurrent: true})
-	d.isTTY = true
-	d.applyMode(true)
 
-	if !d.liveMode {
-		t.Fatal("expected live mode to stay enabled in concurrent auto mode on a live-capable terminal")
+	if d.liveMode {
+		t.Fatal("expected live mode to be disabled when output is not a TTY")
 	}
-	if d.pendingLines != nil {
-		t.Fatalf("expected no buffered pending lines in concurrent auto live mode, got %#v", d.pendingLines)
+	if d.pendingLines == nil || len(d.pendingLines) != 1 {
+		t.Fatalf("expected pending lines buffer of size 1 in concurrent non-live mode, got %#v", d.pendingLines)
 	}
 }
 
+func TestPreferLiveEnablesLiveModeWhenTTYAvailable(t *testing.T) {
+	var buf bytes.Buffer
+	d := New(&buf, []string{"router1", "router2"}, InitOptions{Debug: false, PreferLiveMode: true, Concurrent: true})
+
+	d.isTTY = true
+	d.debug = false
+	d.setLiveMode(true)
+
+	if !d.liveMode {
+		t.Fatal("expected live mode to be enabled when PreferLiveMode is true and output is a TTY")
+	}
+	for i, l := range d.lines {
+		if !l.liveMode {
+			t.Fatalf("expected line %d to also be in live mode", i)
+		}
+	}
+}
 func TestBufferedPreferenceForcesConcurrentBuffering(t *testing.T) {
 	var buf bytes.Buffer
 	d := New(&buf, []string{"router1", "router2"}, InitOptions{Debug: false, PreferLiveMode: false, Concurrent: true})
-	d.isTTY = true
-	d.applyMode(false)
 
 	if d.liveMode {
 		t.Fatal("expected live mode to be disabled in buffered mode")
@@ -136,22 +149,22 @@ func TestFinishFallback(t *testing.T) {
 	}
 }
 
-func TestFinishErrorFallback(t *testing.T) {
+func TestFinishWithErrorFallback(t *testing.T) {
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, []string{"badrouter.example.com"})
 	l := d.Line(0)
 
 	l.UpdateStep("⏳", "connecting…")
 	l.CompleteStep("⏳")
-	l.FinishError("updates failed: ssh: connect: timeout")
+	l.Finish("❌", "updates failed: ssh: connect: timeout")
 
-	// In non-concurrent non-live mode, FinishError writes immediately to out.
+	// In non-concurrent non-live mode, Finish writes immediately to out.
 	output := buf.String()
 	if !strings.Contains(output, "❌") {
-		t.Errorf("FinishError() output = %q, want ❌", output)
+		t.Errorf("Finish(❌, ...) output = %q, want ❌", output)
 	}
 	if !strings.Contains(output, "badrouter.example.c…") {
-		t.Errorf("FinishError() output = %q, want truncated hostname", output)
+		t.Errorf("Finish(❌, ...) output = %q, want truncated hostname", output)
 	}
 	d.Stop() // no-op for sequential non-live mode
 }
@@ -377,7 +390,7 @@ func TestRenderFormatConsistency(t *testing.T) {
 			name: "done error",
 			setup: func(l *HostLine) {
 				l.CompleteStep("❌")
-				l.FinishError("updates failed: timeout")
+				l.Finish("❌", "updates failed: timeout")
 			},
 			wantPrefix:   "❌",
 			wantContains: []string{"router.example.com", "❌", "updates failed: timeout"},
@@ -439,10 +452,10 @@ func TestSingletonFallback(t *testing.T) {
 
 	// A second display in live mode should fall back to plain text.
 	second := newLiveModeDisplay(&buf2, []string{"router2"})
-	second.start() // should detect activeLiveDisp != nil and fall back
+	second.initLiveMode() // should detect activeLiveDisp != nil and fall back
 
 	if second.liveMode {
-		t.Error("second start() should have fallen back to plain text when a display is already active")
+		t.Error("second initLiveMode() should have fallen back to plain text when a display is already active")
 	}
 	for _, l := range second.lines {
 		if l.liveMode {

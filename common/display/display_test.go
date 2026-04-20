@@ -37,6 +37,23 @@ func TestPreferLiveFallsBackWhenTTYUnavailable(t *testing.T) {
 	}
 }
 
+func TestPreferLiveEnablesLiveModeWhenTTYAvailable(t *testing.T) {
+	var buf bytes.Buffer
+	d := New(&buf, []string{"router1", "router2"}, InitOptions{Debug: false, PreferLiveMode: true, Concurrent: true})
+
+	d.isTTY = true
+	d.debug = false
+	d.setLiveMode(true)
+
+	if !d.liveMode {
+		t.Fatal("expected live mode to be enabled when PreferLiveMode is true and output is a TTY")
+	}
+	for i, l := range d.lines {
+		if !l.liveMode {
+			t.Fatalf("expected line %d to also be in live mode", i)
+		}
+	}
+}
 func TestBufferedPreferenceForcesConcurrentBuffering(t *testing.T) {
 	var buf bytes.Buffer
 	d := New(&buf, []string{"router1", "router2"}, InitOptions{Debug: false, PreferLiveMode: false, Concurrent: true})

@@ -48,6 +48,7 @@ type HostLine struct {
 	done          bool
 	finalMessage  string // set by Finish; does not include the hostname or overall emoji
 	liveMode      bool
+	renderedLine  string // cached final rendered line after Finish(); prevents state changes from affecting output
 }
 
 // StepCallback is used to update step display for a host.
@@ -361,10 +362,29 @@ func (d *LiveDisplay) Stop() {
 }
 
 // renderLines returns all host lines for liveterm to display.
+// This implementation atomically captures the state of all lines to prevent race
+// conditions where intermediate states (e.g., ⏳ Connecting…) are visible alongside
+// final states (e.g., ✅ or ❓). By acquiring all locks in order before rendering,
+// we ensure the snapshot is consistent and matches the moment in time it was taken.
+// WARNING: removing the locks or changing the locking strategy may cause race conditions
+// WARNING: where intermediate states are rendered alongside final states, leading to confusing output.
+// WARNING: Do not modify without careful consideration.
 func (d *LiveDisplay) renderLines() []string {
+	// Acquire all locks in index order to prevent deadlock and capture an atomic snapshot.
+	for _, l := range d.lines {
+		l.mu.Lock()
+	}
+	defer func() {
+		// Release all locks in reverse order to maintain consistency.
+		for i := len(d.lines) - 1; i >= 0; i-- {
+			d.lines[i].mu.Unlock()
+		}
+	}()
+
+	// Now render all lines while holding all locks; no state can change during this render.
 	out := make([]string, len(d.lines))
 	for i, l := range d.lines {
-		out[i] = l.render()
+		out[i] = l.renderUnlocked()
 	}
 	return out
 }

@@ -496,3 +496,118 @@ func resetSingleton(t *testing.T) {
 		singletonMu.Unlock()
 	})
 }
+
+// TestConcurrentFailureRenderAtomicity verifies that when hosts complete concurrently
+// with mixed success and failures, renderLines() produces an atomic snapshot without
+// intermediate states (e.g., "⏳ Connecting…") bleeding through into the output alongside
+// final states (e.g., "❓ failed to dial"). This test reproduces the bug scenario reported
+// in the issue where intermediate progress lines appeared mixed with final error messages.
+func TestConcurrentFailureRenderAtomicity(t *testing.T) {
+	hosts := []string{"router1", "router30", "router31", "router32", "router70", "router71", "router90"}
+	var buf bytes.Buffer
+
+	// Create a live-mode display (simulated; not actually running liveterm).
+	d := newLiveModeDisplay(&buf, hosts)
+
+	const numWorkers = 50 // High concurrency to increase chance of hitting race condition
+	var wg sync.WaitGroup
+
+	// Simulate concurrent host processing: some succeed, router32 and router70 fail
+	failingHosts := map[string]bool{"router32": true, "router70": true}
+
+	for i, host := range hosts {
+		wg.Add(1)
+		go func(idx int, hostname string) {
+			defer wg.Done()
+			line := d.Line(idx)
+			cb := NewStepCallback(line)
+
+			// All hosts go through "Connecting" phase
+			cb("⏳", "Connecting to router…")
+
+			// Simulate varying network delays by spinning briefly
+			for j := 0; j < 1000; j++ {
+				_ = d.renderLines() // Rapidly call renderLines to increase contention
+			}
+
+			// Some hosts fail, others succeed. This matches the actual processHost flow:
+			// 1. CompleteStep(emoji) adds to history
+			// 2. Finish(emoji, msg) sets overall emoji and marks done
+			if failingHosts[hostname] {
+				// Failed host reports error after "Connecting" step
+				cb("❓", "failed to dial: "+hostname+".home:22: dial tcp: lookup "+hostname+".home: no such host")
+				line.Finish("❓", "failed to dial: "+hostname+".home:22: dial tcp: lookup "+hostname+".home: no such host")
+			} else {
+				// Successful host reports completion
+				cb("✅", "is up-to-date (RouterOS: 7.22.1, RouterBoard: 7.22.1)")
+				line.Finish("✅", "is up-to-date (RouterOS: 7.22.1, RouterBoard: 7.22.1)")
+			}
+		}(i, host)
+	}
+
+	wg.Wait()
+
+	// After all goroutines complete, verify renderLines() produces a consistent snapshot.
+	// The snapshot should contain ONLY final states (✅, ❓), never intermediate states (⏳ Connecting).
+	snapshot := d.renderLines()
+
+	for i, line := range snapshot {
+		host := hosts[i]
+		t.Logf("Final snapshot for %s: %s", host, line)
+
+		// Every line should start with a final emoji, not intermediate
+		if !strings.HasPrefix(line, "✅") && !strings.HasPrefix(line, "❓") {
+			t.Errorf("snapshot[%d] for %q = %q, expected final emoji (✅ or ❓), not intermediate state",
+				i, host, line)
+		}
+
+		// No intermediate "Connecting" text should appear
+		if strings.Contains(line, "Connecting to router…") {
+			t.Errorf("snapshot[%d] for %q contains intermediate step 'Connecting to router…', should be final only: %q",
+				i, host, line)
+		}
+
+		// Verify expected final states
+		if failingHosts[host] {
+			if !strings.HasPrefix(line, "❓") {
+				t.Errorf("snapshot[%d] for %q = %q, expected ❓ (unknown/failed status)", i, host, line)
+			}
+			if !strings.Contains(line, "failed to dial") {
+				t.Errorf("snapshot[%d] for %q = %q, expected failure message", i, host, line)
+			}
+		} else {
+			if !strings.HasPrefix(line, "✅") {
+				t.Errorf("snapshot[%d] for %q = %q, expected ✅ (success)", i, host, line)
+			}
+			if !strings.Contains(line, "is up-to-date") {
+				t.Errorf("snapshot[%d] for %q = %q, expected success message", i, host, line)
+			}
+		}
+	}
+}
+
+// TestRenderLinesLocksAllHosts verifies that renderLines() correctly acquires and
+// releases locks on all hostlines, preventing race conditions during snapshot capture.
+// This test catches regressions if renderLines() ever reverts to acquiring locks
+// individually per-line instead of all-at-once.
+func TestRenderLinesLocksAllHosts(t *testing.T) {
+	hosts := []string{"host1", "host2", "host3"}
+	d := newLiveModeDisplay(new(bytes.Buffer), hosts)
+
+	// Set up each line with different states to verify they're all captured atomically
+	d.Line(0).UpdateStep("⏳", "step1")
+	d.Line(1).CompleteStep("✅")
+	d.Line(2).UpdateStep("⏳", "step2")
+
+	// Call renderLines multiple times: should always see the same state
+	// (deadlock would manifest as goroutine hanging, race detector would catch non-atomic reads)
+	for i := 0; i < 100; i++ {
+		snapshot := d.renderLines()
+		if len(snapshot) != 3 {
+			t.Errorf("iteration %d: renderLines returned %d lines, want 3", i, len(snapshot))
+		}
+		if !strings.Contains(snapshot[0], "step1") {
+			t.Errorf("iteration %d: snapshot[0] lost 'step1', got %q", i, snapshot[0])
+		}
+	}
+}

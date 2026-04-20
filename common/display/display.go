@@ -48,7 +48,6 @@ type HostLine struct {
 	done          bool
 	finalMessage  string // set by Finish; does not include the hostname or overall emoji
 	liveMode      bool
-	renderedLine  string // cached final rendered line after Finish(); prevents state changes from affecting output
 }
 
 // StepCallback is used to update step display for a host.

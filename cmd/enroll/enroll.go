@@ -21,14 +21,17 @@ import (
 
 // EnrollConfig holds all enrollment configuration options
 type EnrollConfig struct {
-	Hostname          string
-	PreEnrollScript   string
-	PostEnrollScript  string
-	SkipUpdates       bool
-	SkipExport        bool
-	OutputDir         string
-	Force             bool
-	UpdateHostKeyOnly bool
+	Hostname           string
+	PreEnrollScript    string
+	PostEnrollScript   string
+	SkipUpdates        bool
+	SkipExport         bool
+	OutputDir          string
+	Force              bool
+	UpdateHostKeyOnly  bool
+	Debug              bool
+	MaxConcurrentHosts int
+	PreferLiveMode     bool
 }
 
 // EnrollDependencies holds injectable dependencies for testing
@@ -99,14 +102,17 @@ var Command = []*cli.Command{
 
 			// Build enrollment configuration from CLI flags
 			enrollCfg := EnrollConfig{
-				Hostname:          cmd.String("hostname"),
-				PreEnrollScript:   cmd.String("pre-enroll-script"),
-				PostEnrollScript:  cmd.String("post-enroll-script"),
-				SkipUpdates:       cmd.Bool("skip-updates"),
-				SkipExport:        cmd.Bool("skip-export"),
-				OutputDir:         cmd.String("output-dir"),
-				Force:             cmd.Bool("force"),
-				UpdateHostKeyOnly: cmd.Bool("update-hostkey-only"),
+				Hostname:           cmd.String("hostname"),
+				PreEnrollScript:    cmd.String("pre-enroll-script"),
+				PostEnrollScript:   cmd.String("post-enroll-script"),
+				SkipUpdates:        cmd.Bool("skip-updates"),
+				SkipExport:         cmd.Bool("skip-export"),
+				OutputDir:          cmd.String("output-dir"),
+				Force:              cmd.Bool("force"),
+				UpdateHostKeyOnly:  cmd.Bool("update-hostkey-only"),
+				Debug:              coreCfg.Debug,
+				MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent,
+				PreferLiveMode:     coreCfg.PreferLiveMode,
 			}
 
 			// Build dependencies for all operations
@@ -116,19 +122,12 @@ var Command = []*cli.Command{
 				ExportConfigFunc:     export.Export,
 			}
 
-			opts := RunEnrollOptions{Debug: coreCfg.Debug, MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent}
-
-			return runEnrollForHosts(ctx, coreCfg.Hosts, opts, enrollCfg, deps, os.Stdout)
+			return runEnrollForHosts(ctx, coreCfg.Hosts, enrollCfg, deps, os.Stdout)
 		},
 	},
 }
 
-type RunEnrollOptions struct {
-	Debug              bool
-	MaxConcurrentHosts int
-}
-
-func runEnrollForHosts(ctx context.Context, hosts []string, opts RunEnrollOptions, cfg EnrollConfig, deps EnrollDependencies, out io.Writer) error {
+func runEnrollForHosts(ctx context.Context, hosts []string, cfg EnrollConfig, deps EnrollDependencies, out io.Writer) error {
 	if cfg.Force && cfg.UpdateHostKeyOnly {
 		return fmt.Errorf("cannot use --force and --update-hostkey-only together")
 	}
@@ -144,10 +143,12 @@ func runEnrollForHosts(ctx context.Context, hosts []string, opts RunEnrollOption
 		}
 	}
 
-	disp := display.New(out, hosts, opts.Debug)
-	disp.SetConcurrent(opts.MaxConcurrentHosts > 1)
-	disp.Start()
-	defer disp.Stop()
+	disp := display.New(out, hosts, display.InitOptions{
+		Debug:          cfg.Debug,
+		PreferLiveMode: cfg.PreferLiveMode,
+		Concurrent:     cfg.MaxConcurrentHosts > 1,
+	})
+	core.SetLiveLogWriter(disp.LogWriter())
 
 	// errs is indexed by host position so results are collected in host-list
 	// order regardless of goroutine completion order.
@@ -168,11 +169,11 @@ func runEnrollForHosts(ctx context.Context, hosts []string, opts RunEnrollOption
 		line.Finish("✅", "Enrollment completed successfully")
 	}
 
-	sem := make(chan struct{}, opts.MaxConcurrentHosts)
+	sem := make(chan struct{}, cfg.MaxConcurrentHosts)
 	var ctxErr error
 loop:
 	for i, host := range hosts {
-		if opts.MaxConcurrentHosts <= 1 {
+		if cfg.MaxConcurrentHosts <= 1 {
 			processHost(i, host)
 		} else {
 			wg.Add(1)
@@ -191,7 +192,10 @@ loop:
 		}
 	}
 	wg.Wait()
-	return errors.Join(append(errs, ctxErr)...)
+	result := errors.Join(append(errs, ctxErr)...)
+	disp.Stop()
+	core.SetLiveLogWriter(nil)
+	return result
 }
 
 // enroll is the entry point for the enrollment command

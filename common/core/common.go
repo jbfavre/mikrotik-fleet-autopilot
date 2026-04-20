@@ -3,11 +3,13 @@ package core
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // ContextKey is a custom type for context keys to avoid collisions
@@ -21,6 +23,31 @@ const (
 	// EnrollmentKey is the context key for storing enrollment mode
 	EnrollmentKey ContextKey = "enrollment"
 )
+
+type slogRouterWriter struct {
+	mu       sync.RWMutex
+	fallback io.Writer
+	live     io.Writer
+}
+
+func (w *slogRouterWriter) Write(p []byte) (int, error) {
+	w.mu.RLock()
+	live := w.live
+	fallback := w.fallback
+	w.mu.RUnlock()
+	if live != nil {
+		return live.Write(p)
+	}
+	return fallback.Write(p)
+}
+
+func (w *slogRouterWriter) SetLiveWriter(writer io.Writer) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.live = writer
+}
+
+var defaultSlogWriter = &slogRouterWriter{fallback: os.Stderr}
 
 // GetConfig extracts *config.Config from context
 func GetConfig(ctx context.Context) (*Config, error) {
@@ -49,8 +76,14 @@ func IsEnrollmentMode(ctx context.Context) bool {
 
 // SetupLogging sets slog default logger to the given level
 func SetupLogging(level slog.Level) {
-	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
+	handler := slog.NewTextHandler(defaultSlogWriter, &slog.HandlerOptions{Level: level})
 	slog.SetDefault(slog.New(handler))
+}
+
+// SetLiveLogWriter routes slog output to writer while live display is active.
+// Pass nil to disable live routing and fall back to stderr.
+func SetLiveLogWriter(writer io.Writer) {
+	defaultSlogWriter.SetLiveWriter(writer)
 }
 
 // ParseHosts parses a comma-separated list of hosts and returns a slice of trimmed host strings.

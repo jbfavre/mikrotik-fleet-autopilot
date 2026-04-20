@@ -21,6 +21,7 @@ Available for all commands:
 - `--ssh-password <password>`, `-p <password>` - MikroTik router SSH password
 - `--ssh-passphrase <passphrase>`, `-P <passphrase>` - User private SSH key passphrase
 - `--debug` - Enable debug logging
+- `--buffered-output` - Force buffered host progress output with deterministic final flush (default prefers live output on TTY)
 
 **Example:**
 ```bash

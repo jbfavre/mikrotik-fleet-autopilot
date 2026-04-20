@@ -91,14 +91,21 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Usage:       "Maximum number of hosts to process in parallel (0 = auto-detect, 1 = sequential, >=2 = parallel with that cap)",
 				Destination: &globalConfig.MaxConcurrentHosts,
 			},
+			&cli.BoolFlag{
+				Name:        "buffered-output",
+				Value:       false,
+				Usage:       "Force buffered host progress output (deterministic final flush). By default, live display is preferred on TTY unless --debug is enabled",
+				Destination: &globalConfig.BufferedOutput,
+			},
 		},
 		Commands: append(append(export.Command, updates.Command...), enroll.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			// Set log level
-			core.SetupLogging(slog.LevelWarn)
+			// Set log level once at startup.
+			logLevel := slog.LevelWarn
 			if globalConfig.Debug {
-				core.SetupLogging(slog.LevelDebug)
+				logLevel = slog.LevelDebug
 			}
+			core.SetupLogging(logLevel)
 			slog.Info("Starting global")
 
 			effectiveMaxConcurrent, err := core.ResolveMaxConcurrentHosts(globalConfig.MaxConcurrentHosts)
@@ -107,6 +114,7 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 			}
 			slog.Debug("resolved max concurrent hosts", "configured", globalConfig.MaxConcurrentHosts, "effective", effectiveMaxConcurrent)
 			globalConfig.EffectiveMaxConcurrent = effectiveMaxConcurrent
+			globalConfig.PreferLiveMode = !globalConfig.BufferedOutput
 
 			// Check if a subcommand was provided
 			// If not, the help will be shown automatically by urfave/cli

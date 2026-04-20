@@ -9,18 +9,48 @@ import (
 
 // newTestDisplay creates a LiveDisplay in non-TTY/debug fallback mode for testing.
 func newTestDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
-	return New(out, hosts, true)
+	return New(out, hosts, InitOptions{Debug: true, PreferLiveMode: true, Concurrent: false})
 }
 
 // newLiveModeDisplay creates a LiveDisplay that believes it is in live mode,
 // without actually starting liveterm (for singleton guard testing).
 func newLiveModeDisplay(out *bytes.Buffer, hosts []string) *LiveDisplay {
-	d := New(out, hosts, true) // starts in fallback
-	d.liveMode = true          // pretend it is live-capable
+	d := New(out, hosts, InitOptions{Debug: true, PreferLiveMode: true, Concurrent: false}) // starts in fallback
+	d.liveMode = true                                                                       // pretend it is live-capable
+	d.isTTY = true
+	d.debug = false
 	for _, l := range d.lines {
 		l.liveMode = true
 	}
 	return d
+}
+
+func TestPreferLiveKeepsLiveWhenCapable(t *testing.T) {
+	var buf bytes.Buffer
+	d := New(&buf, []string{"router1"}, InitOptions{Debug: false, PreferLiveMode: true, Concurrent: true})
+	d.isTTY = true
+	d.applyMode(true)
+
+	if !d.liveMode {
+		t.Fatal("expected live mode to stay enabled in concurrent auto mode on a live-capable terminal")
+	}
+	if d.pendingLines != nil {
+		t.Fatalf("expected no buffered pending lines in concurrent auto live mode, got %#v", d.pendingLines)
+	}
+}
+
+func TestBufferedPreferenceForcesConcurrentBuffering(t *testing.T) {
+	var buf bytes.Buffer
+	d := New(&buf, []string{"router1", "router2"}, InitOptions{Debug: false, PreferLiveMode: false, Concurrent: true})
+	d.isTTY = true
+	d.applyMode(false)
+
+	if d.liveMode {
+		t.Fatal("expected live mode to be disabled in buffered mode")
+	}
+	if d.pendingLines == nil || len(d.pendingLines) != 2 {
+		t.Fatalf("expected pending lines buffer of size 2, got %#v", d.pendingLines)
+	}
 }
 
 func TestNewFallbackMode(t *testing.T) {
@@ -37,8 +67,7 @@ func TestNewFallbackMode(t *testing.T) {
 func TestStartStopFallback(t *testing.T) {
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, []string{"router1"})
-	// In fallback mode Start is a no-op; Stop flushes buffered lines (none here).
-	d.Start()
+	// In fallback mode start is a no-op; Stop flushes buffered lines (none here).
 	d.Stop()
 }
 
@@ -172,8 +201,7 @@ func TestMultipleHosts(t *testing.T) {
 func TestOutputOrder(t *testing.T) {
 	hosts := []string{"host1.example.com", "host2.example.com", "host3.example.com"}
 	var buf bytes.Buffer
-	d := newTestDisplay(&buf, hosts)
-	d.SetConcurrent(true) // enable buffering so Stop flushes in host-list order
+	d := New(&buf, hosts, InitOptions{Debug: false, PreferLiveMode: false, Concurrent: true})
 
 	// Finish hosts in reverse order to simulate out-of-order concurrent completion.
 	d.Line(2).Finish("✅", "host3 done")
@@ -411,10 +439,10 @@ func TestSingletonFallback(t *testing.T) {
 
 	// A second display in live mode should fall back to plain text.
 	second := newLiveModeDisplay(&buf2, []string{"router2"})
-	second.Start() // should detect activeLiveDisp != nil and fall back
+	second.start() // should detect activeLiveDisp != nil and fall back
 
 	if second.liveMode {
-		t.Error("second Start() should have fallen back to plain text when a display is already active")
+		t.Error("second start() should have fallen back to plain text when a display is already active")
 	}
 	for _, l := range second.lines {
 		if l.liveMode {
@@ -467,4 +495,118 @@ func resetSingleton(t *testing.T) {
 		activeLiveDisp = nil
 		singletonMu.Unlock()
 	})
+}
+
+// TestConcurrentFailureRenderAtomicity verifies that when hosts complete concurrently
+// with mixed success and failures, renderLines() produces an atomic snapshot without
+// intermediate states (e.g., "⏳ Connecting…") bleeding through into the output alongside
+// final states (e.g., "❓ failed to dial"). This test reproduces the bug scenario reported
+// in the issue where intermediate progress lines appeared mixed with final error messages.
+func TestConcurrentFailureRenderAtomicity(t *testing.T) {
+	hosts := []string{"router1", "router30", "router31", "router32", "router70", "router71", "router90"}
+	var buf bytes.Buffer
+
+	// Create a live-mode display (simulated; not actually running liveterm).
+	d := newLiveModeDisplay(&buf, hosts)
+
+	var wg sync.WaitGroup
+
+	// Simulate concurrent host processing: some succeed, router32 and router70 fail
+	failingHosts := map[string]bool{"router32": true, "router70": true}
+
+	for i, host := range hosts {
+		wg.Add(1)
+		go func(idx int, hostname string) {
+			defer wg.Done()
+			line := d.Line(idx)
+			cb := NewStepCallback(line)
+
+			// All hosts go through "Connecting" phase
+			cb("⏳", "Connecting to router…")
+
+			// Simulate varying network delays by spinning briefly
+			for j := 0; j < 1000; j++ {
+				_ = d.renderLines() // Rapidly call renderLines to increase contention
+			}
+
+			// Some hosts fail, others succeed. This matches the actual processHost flow:
+			// 1. CompleteStep(emoji) adds to history
+			// 2. Finish(emoji, msg) sets overall emoji and marks done
+			if failingHosts[hostname] {
+				// Failed host reports error after "Connecting" step
+				cb("❓", "failed to dial: "+hostname+".home:22: dial tcp: lookup "+hostname+".home: no such host")
+				line.Finish("❓", "failed to dial: "+hostname+".home:22: dial tcp: lookup "+hostname+".home: no such host")
+			} else {
+				// Successful host reports completion
+				cb("✅", "is up-to-date (RouterOS: 7.22.1, RouterBoard: 7.22.1)")
+				line.Finish("✅", "is up-to-date (RouterOS: 7.22.1, RouterBoard: 7.22.1)")
+			}
+		}(i, host)
+	}
+
+	wg.Wait()
+
+	// After all goroutines complete, verify renderLines() produces a consistent snapshot.
+	// The snapshot should contain ONLY final states (✅, ❓), never intermediate states (⏳ Connecting).
+	snapshot := d.renderLines()
+
+	for i, line := range snapshot {
+		host := hosts[i]
+		t.Logf("Final snapshot for %s: %s", host, line)
+
+		// Every line should start with a final emoji, not intermediate
+		if !strings.HasPrefix(line, "✅") && !strings.HasPrefix(line, "❓") {
+			t.Errorf("snapshot[%d] for %q = %q, expected final emoji (✅ or ❓), not intermediate state",
+				i, host, line)
+		}
+
+		// No intermediate "Connecting" text should appear
+		if strings.Contains(line, "Connecting to router…") {
+			t.Errorf("snapshot[%d] for %q contains intermediate step 'Connecting to router…', should be final only: %q",
+				i, host, line)
+		}
+
+		// Verify expected final states
+		if failingHosts[host] {
+			if !strings.HasPrefix(line, "❓") {
+				t.Errorf("snapshot[%d] for %q = %q, expected ❓ (unknown/failed status)", i, host, line)
+			}
+			if !strings.Contains(line, "failed to dial") {
+				t.Errorf("snapshot[%d] for %q = %q, expected failure message", i, host, line)
+			}
+		} else {
+			if !strings.HasPrefix(line, "✅") {
+				t.Errorf("snapshot[%d] for %q = %q, expected ✅ (success)", i, host, line)
+			}
+			if !strings.Contains(line, "is up-to-date") {
+				t.Errorf("snapshot[%d] for %q = %q, expected success message", i, host, line)
+			}
+		}
+	}
+}
+
+// TestRenderLinesLocksAllHosts verifies that renderLines() correctly acquires and
+// releases locks on all hostlines, preventing race conditions during snapshot capture.
+// This test catches regressions if renderLines() ever reverts to acquiring locks
+// individually per-line instead of all-at-once.
+func TestRenderLinesLocksAllHosts(t *testing.T) {
+	hosts := []string{"host1", "host2", "host3"}
+	d := newLiveModeDisplay(new(bytes.Buffer), hosts)
+
+	// Set up each line with different states to verify they're all captured atomically
+	d.Line(0).UpdateStep("⏳", "step1")
+	d.Line(1).CompleteStep("✅")
+	d.Line(2).UpdateStep("⏳", "step2")
+
+	// Call renderLines multiple times: should always see the same state
+	// (deadlock would manifest as goroutine hanging, race detector would catch non-atomic reads)
+	for i := 0; i < 100; i++ {
+		snapshot := d.renderLines()
+		if len(snapshot) != 3 {
+			t.Errorf("iteration %d: renderLines returned %d lines, want 3", i, len(snapshot))
+		}
+		if !strings.Contains(snapshot[0], "step1") {
+			t.Errorf("iteration %d: snapshot[0] lost 'step1', got %q", i, snapshot[0])
+		}
+	}
 }

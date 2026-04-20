@@ -18,6 +18,16 @@ const (
 	maxHostnameWidth = 20
 )
 
+// InitOptions configures display initialization parameters.
+type InitOptions struct {
+	// Debug indicates whether --debug is enabled. Debug has priority and disables live mode.
+	Debug bool
+	// PreferLiveMode indicates whether live rendering is preferred when possible.
+	PreferLiveMode bool
+	// Concurrent enables ordered buffering when live mode is off.
+	Concurrent bool
+}
+
 // completedStep records an already-finished step with its emoticon.
 type completedStep struct {
 	emoji string
@@ -156,27 +166,39 @@ var (
 
 // LiveDisplay manages per-host live output lines.
 type LiveDisplay struct {
-	lines        []*HostLine
-	liveMode     bool
-	concurrent   bool // when true, non-live Finish buffers; Stop flushes in host-list order
-	out          io.Writer
-	pendingLines []string // non-live concurrent mode: one buffered output line per host, flushed in order by Stop
+	lines []*HostLine
+	out   io.Writer
+
+	// liveMode is the effective runtime state after evaluating display mode,
+	// debug, TTY, and any live startup fallback (for example singleton contention).
+	liveMode bool
+
+	// isTTY is detected once at construction time and does not change.
+	isTTY bool
+	// debug indicates whether --debug is enabled. Debug has priority and disables live mode.
+	debug bool
+	// concurrent enables ordered buffering when live mode is off.
+	concurrent bool
+
+	// pendingLines holds one rendered final line per host in concurrent non-live mode.
+	pendingLines []string
 }
 
-// New creates a LiveDisplay. If debug=true or stdout is not a TTY, falls back to verbose mode.
-func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
-	liveMode := false
-	if !debug {
-		if f, ok := out.(*os.File); ok {
-			liveMode = term.IsTerminal(int(f.Fd()))
-		}
+// New creates and initializes a LiveDisplay.
+// It applies display mode policy, configures concurrency behavior, and starts
+// live rendering when applicable.
+func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
+	isTTY := false
+	if f, ok := out.(*os.File); ok {
+		isTTY = term.IsTerminal(int(f.Fd()))
 	}
 	hostnameWidth := computeHostnameWidth(hosts)
 
 	d := &LiveDisplay{
-		lines:    make([]*HostLine, len(hosts)),
-		liveMode: liveMode,
-		out:      out,
+		lines: make([]*HostLine, len(hosts)),
+		isTTY: isTTY,
+		debug: opts.Debug,
+		out:   out,
 	}
 
 	for i, host := range hosts {
@@ -184,40 +206,58 @@ func New(out io.Writer, hosts []string, debug bool) *LiveDisplay {
 			hostname:      host,
 			hostnameWidth: hostnameWidth,
 			overallEmoji:  "⏳",
-			liveMode:      liveMode,
 			index:         i,
 			out:           out,
 		}
 	}
 
+	// Centralize live preference and concurrency setup in one place so constructor and
+	// runtime behavior match.
+	d.applyMode(opts.PreferLiveMode)
+	d.setConcurrent(opts.Concurrent)
+	d.start()
+
 	return d
 }
 
-// SetConcurrent marks the display as serving concurrent host processing.
-// Must be called before Start. In concurrent mode the display always uses
-// non-live buffered output — even on a real TTY — so that goroutines finishing
-// at arbitrary times produce clean, deterministic one-line-per-host output
-// flushed in host-list order by Stop. Using liveterm with concurrent goroutines
-// causes intermediate step renders to appear in the scrollback, which is why
-// this path unconditionally disables live mode.
-// In the default sequential mode, Finish writes each line immediately so the
-// caller sees per-host progress in real time.
-func (d *LiveDisplay) SetConcurrent(concurrent bool) {
+// setConcurrent marks the display as serving concurrent host processing.
+func (d *LiveDisplay) setConcurrent(concurrent bool) {
 	d.concurrent = concurrent
-	if !concurrent {
-		d.clearNonLive()
+	d.applyConcurrencyBuffering()
+}
+
+func (d *LiveDisplay) applyMode(preferLiveMode bool) {
+	// Debug flag has priority: if --debug is enabled, always disable live mode
+	// to keep output clean and deterministic for log analysis.
+	if d.debug {
+		d.setLiveMode(false)
+	} else {
+		// Live mode is enabled only when preferred and when a TTY is available.
+		shouldLive := preferLiveMode && d.isTTY
+		d.setLiveMode(shouldLive)
+	}
+
+	d.applyConcurrencyBuffering()
+}
+
+// applyConcurrencyBuffering configures whether host lines are buffered until
+// Stop based on current concurrency + effective live mode.
+func (d *LiveDisplay) applyConcurrencyBuffering() {
+	// Concurrent runs in non-live mode are buffered so Stop can emit
+	// deterministic host-list ordering for non-interactive outputs.
+	if d.concurrent && !d.liveMode {
+		if d.pendingLines == nil {
+			d.initNonLive()
+		}
 		return
 	}
-	// Concurrent mode always uses non-live buffered output regardless of TTY.
-	// Force liveMode off before Start is called so liveterm is never started.
-	if d.liveMode {
-		d.liveMode = false
-		for _, l := range d.lines {
-			l.liveMode = false
-		}
-	}
-	if d.pendingLines == nil {
-		d.initNonLive()
+	d.clearNonLive()
+}
+
+func (d *LiveDisplay) setLiveMode(enabled bool) {
+	d.liveMode = enabled
+	for _, l := range d.lines {
+		l.liveMode = enabled
 	}
 }
 
@@ -246,11 +286,25 @@ func (d *LiveDisplay) Line(i int) *HostLine {
 	return d.lines[i]
 }
 
-// Start begins live output. In fallback mode this is a no-op.
+// LiveMode reports whether the display is effectively running in live mode.
+func (d *LiveDisplay) LiveMode() bool {
+	return d.liveMode
+}
+
+// LogWriter returns a writer safe to use for permanent log output while the
+// live display is active.
+func (d *LiveDisplay) LogWriter() io.Writer {
+	if !d.liveMode {
+		return nil
+	}
+	return liveterm.Bypass()
+}
+
+// start begins live output. In fallback mode this is a no-op.
 // Only one LiveDisplay may be in live mode at a time: if another display is
-// already active, Start falls back to plain-text mode so that the existing
+// already active, start falls back to plain-text mode so that the existing
 // liveterm instance is not disturbed.
-func (d *LiveDisplay) Start() {
+func (d *LiveDisplay) start() {
 	if !d.liveMode {
 		return
 	}
@@ -259,10 +313,7 @@ func (d *LiveDisplay) Start() {
 	// liveterm.Start so the refresh goroutine can acquire it if needed.
 	if !d.tryClaim() {
 		// Another display is already running; fall back to plain text.
-		d.liveMode = false
-		for _, l := range d.lines {
-			l.liveMode = false
-		}
+		d.setLiveMode(false)
 		if d.concurrent {
 			d.initNonLive()
 		}
@@ -275,10 +326,7 @@ func (d *LiveDisplay) Start() {
 	if err := liveterm.Start(); err != nil {
 		// If liveterm fails to start (e.g. no real TTY despite fd check), fall back.
 		d.release()
-		d.liveMode = false
-		for _, l := range d.lines {
-			l.liveMode = false
-		}
+		d.setLiveMode(false)
 		if d.concurrent {
 			d.initNonLive()
 		}
@@ -327,10 +375,29 @@ func (d *LiveDisplay) Stop() {
 }
 
 // renderLines returns all host lines for liveterm to display.
+// This implementation atomically captures the state of all lines to prevent race
+// conditions where intermediate states (e.g., ⏳ Connecting…) are visible alongside
+// final states (e.g., ✅ or ❓). By acquiring all locks in order before rendering,
+// we ensure the snapshot is consistent and matches the moment in time it was taken.
+// WARNING: removing the locks or changing the locking strategy may cause race conditions
+// WARNING: where intermediate states are rendered alongside final states, leading to confusing output.
+// WARNING: Do not modify without careful consideration.
 func (d *LiveDisplay) renderLines() []string {
+	// Acquire all locks in index order to prevent deadlock and capture an atomic snapshot.
+	for _, l := range d.lines {
+		l.mu.Lock()
+	}
+	defer func() {
+		// Release all locks in reverse order to maintain consistency.
+		for i := len(d.lines) - 1; i >= 0; i-- {
+			d.lines[i].mu.Unlock()
+		}
+	}()
+
+	// Now render all lines while holding all locks; no state can change during this render.
 	out := make([]string, len(d.lines))
 	for i, l := range d.lines {
-		out[i] = l.render()
+		out[i] = l.renderUnlocked()
 	}
 	return out
 }

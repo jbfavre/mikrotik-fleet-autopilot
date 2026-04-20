@@ -12,6 +12,8 @@ type Config struct {
 	SkipHostKeyCheck       bool
 	MaxConcurrentHosts     int
 	EffectiveMaxConcurrent int
+	BufferedOutput         bool
+	PreferLiveMode         bool
 }
 
 // ResolveMaxConcurrentHosts returns the effective host concurrency cap.

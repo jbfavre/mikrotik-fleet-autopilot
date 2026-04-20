@@ -19,7 +19,10 @@ import (
 
 // UpdatesConfig holds all updates configuration options
 type UpdatesConfig struct {
-	UpdatesApply bool
+	UpdatesApply       bool
+	Debug              bool
+	MaxConcurrentHosts int
+	PreferLiveMode     bool
 }
 
 // ErrCannotCheckUpdates is returned when the update status cannot be determined,
@@ -53,7 +56,10 @@ var Command = []*cli.Command{
 
 			// Build updates configuration from CLI flags
 			updatesCfg := UpdatesConfig{
-				UpdatesApply: cmd.Bool("updates-apply"),
+				UpdatesApply:       cmd.Bool("updates-apply"),
+				Debug:              coreCfg.Debug,
+				MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent,
+				PreferLiveMode:     coreCfg.PreferLiveMode,
 			}
 
 			// Build dependencies
@@ -61,25 +67,19 @@ var Command = []*cli.Command{
 				SSHConnectionFactory: ssh.CreateConnection,
 				ReconnectDelay:       10 * time.Second,
 			}
-			opts := RunUpdatesOptions{Debug: coreCfg.Debug, MaxConcurrentHosts: coreCfg.EffectiveMaxConcurrent}
 
-			return runUpdatesForHosts(ctx, coreCfg.Hosts, opts, updatesCfg, deps, os.Stdout)
+			return runUpdatesForHosts(ctx, coreCfg.Hosts, updatesCfg, deps, os.Stdout)
 		},
 	},
 }
 
-// RunUpdatesOptions groups execution flags for runUpdatesForHosts so call sites
-// remain self-describing and can be extended safely in the future.
-type RunUpdatesOptions struct {
-	Debug              bool
-	MaxConcurrentHosts int
-}
-
-func runUpdatesForHosts(ctx context.Context, hosts []string, opts RunUpdatesOptions, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
-	disp := display.New(out, hosts, opts.Debug)
-	disp.SetConcurrent(opts.MaxConcurrentHosts > 1)
-	disp.Start()
-	defer disp.Stop()
+func runUpdatesForHosts(ctx context.Context, hosts []string, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
+	disp := display.New(out, hosts, display.InitOptions{
+		Debug:          cfg.Debug,
+		PreferLiveMode: cfg.PreferLiveMode,
+		Concurrent:     cfg.MaxConcurrentHosts > 1,
+	})
+	core.SetLiveLogWriter(disp.LogWriter())
 
 	// errs is indexed by host position so results are collected in host-list
 	// order regardless of goroutine completion order.
@@ -106,11 +106,11 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, opts RunUpdatesOpti
 		}
 	}
 
-	sem := make(chan struct{}, opts.MaxConcurrentHosts)
+	sem := make(chan struct{}, cfg.MaxConcurrentHosts)
 	var ctxErr error
 loop:
 	for i, host := range hosts {
-		if opts.MaxConcurrentHosts <= 1 {
+		if cfg.MaxConcurrentHosts <= 1 {
 			processHost(i, host)
 		} else {
 			wg.Add(1)
@@ -129,7 +129,10 @@ loop:
 		}
 	}
 	wg.Wait()
-	return errors.Join(append(errs, ctxErr)...)
+	result := errors.Join(append(errs, ctxErr)...)
+	disp.Stop()
+	core.SetLiveLogWriter(nil)
+	return result
 }
 
 type UpdateStatus struct {

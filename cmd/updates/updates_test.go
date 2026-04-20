@@ -1424,11 +1424,10 @@ func TestRunUpdatesForHosts_Sequential(t *testing.T) {
 		ReconnectDelay: 10 * time.Millisecond,
 	}
 
-	cfg := UpdatesConfig{UpdatesApply: true}
-	opts := RunUpdatesOptions{Debug: true, MaxConcurrentHosts: 1}
+	cfg := UpdatesConfig{UpdatesApply: true, Debug: true, MaxConcurrentHosts: 1, PreferLiveMode: true}
 
 	var out bytes.Buffer
-	err := runUpdatesForHosts(context.Background(), hosts, opts, cfg, deps, &out)
+	err := runUpdatesForHosts(context.Background(), hosts, cfg, deps, &out)
 	if err == nil {
 		t.Fatal("runUpdatesForHosts() expected a non-nil error for router-apply-fail, got nil")
 	}
@@ -1515,11 +1514,10 @@ func TestRunUpdatesForHosts_Concurrent(t *testing.T) {
 		ReconnectDelay:       10 * time.Millisecond,
 	}
 
-	cfg := UpdatesConfig{UpdatesApply: true}
-	opts := RunUpdatesOptions{Debug: true, MaxConcurrentHosts: len(hosts)}
+	cfg := UpdatesConfig{UpdatesApply: true, Debug: true, MaxConcurrentHosts: len(hosts), PreferLiveMode: true}
 
 	var out bytes.Buffer
-	err := runUpdatesForHosts(context.Background(), hosts, opts, cfg, deps, &out)
+	err := runUpdatesForHosts(context.Background(), hosts, cfg, deps, &out)
 	if err == nil {
 		t.Fatal("runUpdatesForHosts() expected a non-nil error for router-apply-fail, got nil")
 	}

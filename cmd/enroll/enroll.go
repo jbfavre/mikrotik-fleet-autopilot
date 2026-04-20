@@ -158,15 +158,20 @@ func runEnrollForHosts(ctx context.Context, hosts []string, cfg EnrollConfig, de
 	processHost := func(i int, host string) {
 		line := disp.Line(i)
 		displayStepCallback := display.NewStepCallback(line)
-		if err := enroll(ctx, host, cfg, deps, displayStepCallback); err != nil {
+		err := enroll(ctx, host, cfg, deps, displayStepCallback)
+		switch {
+		case errors.Is(err, ssh.ErrConnectionFailed):
+                        line.CompleteStep("❓")
+                        line.Finish("❓", err.Error())
+		case err != nil:
 			line.CompleteStep("❌")
 			line.Finish("❌", fmt.Sprintf("Enrollment failed: %s", err.Error()))
 			errs[i] = err
 			slog.Error("enrollment failed", "host", host, "hostname", cfg.Hostname, "error", err)
-			return
+		default:
+			slog.Info("enrollment completed successfully", "host", host, "hostname", cfg.Hostname)
+			line.Finish("✅", "Enrollment completed successfully")
 		}
-		slog.Info("enrollment completed successfully", "host", host, "hostname", cfg.Hostname)
-		line.Finish("✅", "Enrollment completed successfully")
 	}
 
 	sem := make(chan struct{}, cfg.MaxConcurrentHosts)

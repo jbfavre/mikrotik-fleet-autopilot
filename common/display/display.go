@@ -287,6 +287,11 @@ func (d *LiveDisplay) Line(i int) *HostLine {
 	return d.lines[i]
 }
 
+// LiveMode reports whether the display is effectively running in live mode.
+func (d *LiveDisplay) LiveMode() bool {
+	return d.liveMode
+}
+
 // start begins live output. In fallback mode this is a no-op.
 // Only one LiveDisplay may be in live mode at a time: if another display is
 // already active, start falls back to plain-text mode so that the existing

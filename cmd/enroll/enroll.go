@@ -161,8 +161,8 @@ func runEnrollForHosts(ctx context.Context, hosts []string, cfg EnrollConfig, de
 		err := enroll(ctx, host, cfg, deps, displayStepCallback)
 		switch {
 		case errors.Is(err, ssh.ErrConnectionFailed):
-                        line.CompleteStep("❓")
-                        line.Finish("❓", err.Error())
+			line.CompleteStep("❓")
+			line.Finish("❓", err.Error())
 		case err != nil:
 			line.CompleteStep("❌")
 			line.Finish("❌", fmt.Sprintf("Enrollment failed: %v", err))

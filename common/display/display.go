@@ -23,6 +23,7 @@ const (
 var (
 	singletonMu    sync.Mutex
 	activeLiveDisp *LiveDisplay
+	startLiveTerm  = liveterm.Start
 )
 
 // InitOptions configures display initialization parameters.
@@ -344,7 +345,7 @@ func (d *LiveDisplay) initLiveMode() {
 	liveterm.RefreshInterval = 100 * time.Millisecond
 	liveterm.Output = d.out
 	liveterm.SetMultiLinesUpdateFx(d.renderLines)
-	if err := liveterm.Start(); err != nil {
+	if err := startLiveTerm(); err != nil {
 		// If liveterm fails to start (e.g. no real TTY despite fd check), fall back.
 		d.release()
 		d.setLiveMode(false)

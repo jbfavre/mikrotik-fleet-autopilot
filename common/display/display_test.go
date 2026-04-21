@@ -2,6 +2,7 @@ package display
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -824,6 +825,141 @@ func TestTermWidth(t *testing.T) {
 	}
 }
 
+func TestFormatHostnameWidthOneReturnsEllipsis(t *testing.T) {
+	got := formatHostname("router-very-long-name", 1)
+	if got != "…" {
+		t.Fatalf("formatHostname(width=1) = %q, want %q", got, "…")
+	}
+}
+
+func TestLogWriterReturnsNilWhenNotLiveMode(t *testing.T) {
+	var buf bytes.Buffer
+	d := newTestDisplay(&buf, []string{"router1"})
+
+	w := d.LogWriter()
+	if w != nil {
+		t.Fatalf("LogWriter() = %#v, want nil when live mode is disabled", w)
+	}
+	if d.logWriter != nil {
+		t.Fatal("d.logWriter should remain nil when live mode is disabled")
+	}
+}
+
+func TestStopConcurrentSkipsEmptyPendingLines(t *testing.T) {
+	var buf bytes.Buffer
+	d := New(&buf, []string{"host1", "host2", "host3"}, InitOptions{Debug: false, PreferLiveMode: false, Concurrent: true})
+
+	d.pendingLines[0] = "✅ host1 done"
+	d.pendingLines[1] = ""
+	d.pendingLines[2] = "❌ host3 failed"
+
+	d.Stop()
+
+	got := strings.TrimSpace(buf.String())
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 output lines, got %d: %q", len(lines), got)
+	}
+	if lines[0] != "✅ host1 done" {
+		t.Fatalf("first line = %q, want %q", lines[0], "✅ host1 done")
+	}
+	if lines[1] != "❌ host3 failed" {
+		t.Fatalf("second line = %q, want %q", lines[1], "❌ host3 failed")
+	}
+}
+
+func TestRenderUnlockedInProgressNoSummaryNoCurrent(t *testing.T) {
+	h := &HostLine{
+		hostname:      "router1",
+		hostnameWidth: 10,
+		overallEmoji:  "⏳",
+		done:          false,
+	}
+
+	got := h.renderUnlocked()
+	if got != "⏳ router1   " {
+		t.Fatalf("renderUnlocked() = %q, want %q", got, "⏳ router1   ")
+	}
+}
+
+func TestRenderUnlockedInProgressSummaryOnly(t *testing.T) {
+	h := &HostLine{
+		hostname:      "router1",
+		hostnameWidth: 10,
+		overallEmoji:  "⏳",
+		history:       []completedStep{{emoji: "✅"}},
+		done:          false,
+	}
+
+	got := h.renderUnlocked()
+	if got != "⏳ router1    ✅" {
+		t.Fatalf("renderUnlocked() = %q, want %q", got, "⏳ router1    ✅")
+	}
+}
+
+func TestInitLiveModeFallbackOnStartError(t *testing.T) {
+	resetSingleton(t)
+
+	var buf bytes.Buffer
+	d := newLiveModeDisplay(&buf, []string{"router1", "router2"})
+	d.concurrent = true
+	d.pendingLines = nil
+
+	originalStart := startLiveTerm
+	startLiveTerm = func() error {
+		return errors.New("start failed")
+	}
+	t.Cleanup(func() {
+		startLiveTerm = originalStart
+	})
+
+	d.initLiveMode()
+
+	if d.liveMode {
+		t.Fatal("initLiveMode() should disable live mode when start fails")
+	}
+	if d.pendingLines == nil || len(d.pendingLines) != 2 {
+		t.Fatalf("expected pendingLines buffer of size 2 after fallback, got %#v", d.pendingLines)
+	}
+	for i, l := range d.lines {
+		if l.liveMode {
+			t.Fatalf("line %d should have liveMode=false after fallback", i)
+		}
+		if l.pending == nil {
+			t.Fatalf("line %d should be wired to pendingLines after fallback", i)
+		}
+	}
+
+	singletonMu.Lock()
+	current := activeLiveDisp
+	singletonMu.Unlock()
+	if current != nil {
+		t.Fatal("activeLiveDisp should be released on start failure")
+	}
+}
+
+func TestFinishSequentialWriteErrorStillUpdatesState(t *testing.T) {
+	h := &HostLine{
+		hostname:      "router1",
+		hostnameWidth: 10,
+		overallEmoji:  "⏳",
+		out:           failWriter{},
+		liveMode:      false,
+	}
+
+	h.Finish("❌", "write failed")
+
+	if !h.done {
+		t.Fatal("Finish() should set done=true even when write fails")
+	}
+	if h.overallEmoji != "❌" {
+		t.Fatalf("overallEmoji = %q, want %q", h.overallEmoji, "❌")
+	}
+	if h.finalMessage != "write failed" {
+		t.Fatalf("finalMessage = %q, want %q", h.finalMessage, "write failed")
+	}
+}
+
 // lockedWriter is a helper that serialises writes to an underlying writer using an external mutex.
 type lockedWriter struct {
 	mu *sync.Mutex
@@ -834,4 +970,10 @@ func (lw *lockedWriter) Write(p []byte) (int, error) {
 	lw.mu.Lock()
 	defer lw.mu.Unlock()
 	return lw.w.Write(p)
+}
+
+type failWriter struct{}
+
+func (failWriter) Write(p []byte) (int, error) {
+	return 0, errors.New("write failed")
 }

@@ -784,7 +784,7 @@ func TestSeparatorLine(t *testing.T) {
 		wantLen      int // expected rune length of output
 	}{
 		{label: "LOGS", width: 80, wantContains: "LOGS", wantLen: 80},
-		{label: "HOST STATUS", width: 80, wantContains: "HOST STATUS", wantLen: 80},
+		{label: "HOSTS STATUS", width: 80, wantContains: "HOSTS STATUS", wantLen: 80},
 		{label: "LOGS", width: 40, wantContains: "LOGS", wantLen: 40},
 		// Width too small: trailing dashes are omitted, label still present.
 		{label: "LOGS", width: 5, wantContains: "LOGS", wantLen: 7}, // "── LOGS" = 7 runes

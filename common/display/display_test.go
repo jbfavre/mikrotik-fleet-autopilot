@@ -817,8 +817,8 @@ func TestTermWidth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Pipe() error: %v", err)
 	}
-	defer r.Close()
-	defer w.Close()
+	defer r.Close() //nolint:errcheck
+	defer w.Close() //nolint:errcheck
 	if got := termWidth(int(r.Fd())); got != 80 {
 		t.Errorf("termWidth(pipe fd) = %d, want 80 (pipe is not a TTY)", got)
 	}

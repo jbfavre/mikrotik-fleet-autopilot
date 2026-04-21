@@ -58,7 +58,7 @@ type completedStep struct {
 }
 
 // logWriterWithSeparator wraps a writer and tracks whether any write has occurred.
-// On the first write it emits a LOGS header line at the current terminal width so
+// On the first write it emits a LOGS header line so
 // the log stream is visually labelled. renderLines uses HasWritten to decide
 // whether to add a blank separator line between the log stream and the host status block.
 type logWriterWithSeparator struct {

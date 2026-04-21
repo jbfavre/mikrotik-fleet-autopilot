@@ -277,7 +277,9 @@ func (d *LiveDisplay) LogWriter() io.Writer {
 	if !d.liveMode {
 		return nil
 	}
-	d.logWriter = &logWriterWithSeparator{base: liveterm.Bypass(), outFd: d.outFd}
+	if d.logWriter == nil {
+		d.logWriter = &logWriterWithSeparator{base: liveterm.Bypass(), outFd: d.outFd}
+	}
 	return d.logWriter
 }
 

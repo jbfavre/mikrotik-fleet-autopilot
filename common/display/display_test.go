@@ -639,7 +639,7 @@ func TestRenderLinesLocksAllHosts(t *testing.T) {
 	}
 }
 
-// TestRenderLinesDelimiterAlwaysPresent verifies the HOST STATUS delimiter is always
+// TestRenderLinesDelimiterAlwaysPresent verifies the HOSTS STATUS delimiter is always
 // the first output line, regardless of whether any logs have been written.
 func TestRenderLinesDelimiterAlwaysPresent(t *testing.T) {
 	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})

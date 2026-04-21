@@ -389,7 +389,7 @@ func (d *LiveDisplay) renderLines() []string {
 	if d.logWriter != nil && d.logWriter.HasWritten() {
 		out = append(out, "")
 	}
-	out = append(out, "── HOST STATUS ──────────────────────────")
+	out = append(out, "── HOSTS STATUS ─────────────────────────")
 	for _, l := range d.lines {
 		out = append(out, l.renderUnlocked())
 	}

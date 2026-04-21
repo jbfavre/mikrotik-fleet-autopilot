@@ -628,7 +628,7 @@ func TestRenderLinesLocksAllHosts(t *testing.T) {
 		if len(snapshot) != 4 {
 			t.Errorf("iteration %d: renderLines returned %d lines, want 4 (delimiter + 3 hosts)", i, len(snapshot))
 		}
-		if !strings.Contains(snapshot[0], "HOST STATUS") {
+		if !strings.Contains(snapshot[0], "HOSTS STATUS") {
 			t.Errorf("iteration %d: snapshot[0] should be delimiter, got %q", i, snapshot[0])
 		}
 		if !strings.Contains(snapshot[1], "step1") {
@@ -637,7 +637,7 @@ func TestRenderLinesLocksAllHosts(t *testing.T) {
 	}
 }
 
-// TestRenderLinesDelimiterAlwaysPresent verifies the HOST STATUS delimiter is always
+// TestRenderLinesDelimiterAlwaysPresent verifies the HOSTS STATUS delimiter is always
 // the first output line, regardless of whether any logs have been written.
 func TestRenderLinesDelimiterAlwaysPresent(t *testing.T) {
 	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})
@@ -647,13 +647,13 @@ func TestRenderLinesDelimiterAlwaysPresent(t *testing.T) {
 	if len(snapshot) < 1 {
 		t.Fatalf("expected at least 1 line, got 0")
 	}
-	if !strings.Contains(snapshot[0], "HOST STATUS") {
+	if !strings.Contains(snapshot[0], "HOSTS STATUS") {
 		t.Errorf("delimiter should be first when no logs written, got: %q", snapshot[0])
 	}
 }
 
 // TestRenderLinesBlankLineWhenLogsWritten verifies that a blank separator line is
-// prepended before the HOST STATUS delimiter when logs have been written.
+// prepended before the HOSTS STATUS delimiter when logs have been written.
 func TestRenderLinesBlankLineWhenLogsWritten(t *testing.T) {
 	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})
 	d.Line(0).UpdateStep("⏳", "working")
@@ -670,7 +670,7 @@ func TestRenderLinesBlankLineWhenLogsWritten(t *testing.T) {
 	if snapshot[0] != "" {
 		t.Errorf("with logs: first line should be blank, got: %q", snapshot[0])
 	}
-	if !strings.Contains(snapshot[1], "HOST STATUS") {
+	if !strings.Contains(snapshot[1], "HOSTS STATUS") {
 		t.Errorf("with logs: second line should be delimiter, got: %q", snapshot[1])
 	}
 	if !strings.Contains(snapshot[2], "host1") {
@@ -679,7 +679,7 @@ func TestRenderLinesBlankLineWhenLogsWritten(t *testing.T) {
 }
 
 // TestRenderLinesNoBlankLineWithoutLogs verifies that no blank line is added
-// before the HOST STATUS delimiter when no logs have been written.
+// before the HOSTS STATUS delimiter when no logs have been written.
 func TestRenderLinesNoBlankLineWithoutLogs(t *testing.T) {
 	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})
 	d.Line(0).UpdateStep("⏳", "working")
@@ -694,7 +694,7 @@ func TestRenderLinesNoBlankLineWithoutLogs(t *testing.T) {
 	if snapshot[0] == "" {
 		t.Errorf("without logs: first line should NOT be blank")
 	}
-	if !strings.Contains(snapshot[0], "HOST STATUS") {
+	if !strings.Contains(snapshot[0], "HOSTS STATUS") {
 		t.Errorf("without logs: first line should be delimiter, got: %q", snapshot[0])
 	}
 	if !strings.Contains(snapshot[1], "host1") {

@@ -2,6 +2,7 @@ package display
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -560,39 +561,47 @@ func TestConcurrentFailureRenderAtomicity(t *testing.T) {
 	wg.Wait()
 
 	// After all goroutines complete, verify renderLines() produces a consistent snapshot.
-	// The snapshot should contain ONLY final states (✅, ❓), never intermediate states (⏳ Connecting).
+	// The snapshot contains: optional blank line, delimiter, then one line per host.
+	// We only inspect host lines (starting at offset 1 for delimiter, no blank line since no logs).
 	snapshot := d.renderLines()
 
-	for i, line := range snapshot {
-		host := hosts[i]
+	// Without logs, snapshot = [delimiter, host0, host1, ...]
+	offset := 1 // skip delimiter
+	if len(snapshot) != len(hosts)+offset {
+		t.Fatalf("expected %d snapshot lines (delimiter + %d hosts), got %d: %v",
+			len(hosts)+offset, len(hosts), len(snapshot), snapshot)
+	}
+
+	for i, host := range hosts {
+		line := snapshot[i+offset]
 		t.Logf("Final snapshot for %s: %s", host, line)
 
 		// Every line should start with a final emoji, not intermediate
 		if !strings.HasPrefix(line, "✅") && !strings.HasPrefix(line, "❓") {
 			t.Errorf("snapshot[%d] for %q = %q, expected final emoji (✅ or ❓), not intermediate state",
-				i, host, line)
+				i+offset, host, line)
 		}
 
 		// No intermediate "Connecting" text should appear
 		if strings.Contains(line, "Connecting to router…") {
 			t.Errorf("snapshot[%d] for %q contains intermediate step 'Connecting to router…', should be final only: %q",
-				i, host, line)
+				i+offset, host, line)
 		}
 
 		// Verify expected final states
 		if failingHosts[host] {
 			if !strings.HasPrefix(line, "❓") {
-				t.Errorf("snapshot[%d] for %q = %q, expected ❓ (unknown/failed status)", i, host, line)
+				t.Errorf("snapshot[%d] for %q = %q, expected ❓ (unknown/failed status)", i+offset, host, line)
 			}
 			if !strings.Contains(line, "failed to dial") {
-				t.Errorf("snapshot[%d] for %q = %q, expected failure message", i, host, line)
+				t.Errorf("snapshot[%d] for %q = %q, expected failure message", i+offset, host, line)
 			}
 		} else {
 			if !strings.HasPrefix(line, "✅") {
-				t.Errorf("snapshot[%d] for %q = %q, expected ✅ (success)", i, host, line)
+				t.Errorf("snapshot[%d] for %q = %q, expected ✅ (success)", i+offset, host, line)
 			}
 			if !strings.Contains(line, "is up-to-date") {
-				t.Errorf("snapshot[%d] for %q = %q, expected success message", i, host, line)
+				t.Errorf("snapshot[%d] for %q = %q, expected success message", i+offset, host, line)
 			}
 		}
 	}
@@ -611,15 +620,163 @@ func TestRenderLinesLocksAllHosts(t *testing.T) {
 	d.Line(1).CompleteStep("✅")
 	d.Line(2).UpdateStep("⏳", "step2")
 
+	// Without logs: delimiter + 3 hosts = 4 lines.
 	// Call renderLines multiple times: should always see the same state
 	// (deadlock would manifest as goroutine hanging, race detector would catch non-atomic reads)
 	for i := 0; i < 100; i++ {
 		snapshot := d.renderLines()
-		if len(snapshot) != 3 {
-			t.Errorf("iteration %d: renderLines returned %d lines, want 3", i, len(snapshot))
+		if len(snapshot) != 4 {
+			t.Errorf("iteration %d: renderLines returned %d lines, want 4 (delimiter + 3 hosts)", i, len(snapshot))
 		}
-		if !strings.Contains(snapshot[0], "step1") {
-			t.Errorf("iteration %d: snapshot[0] lost 'step1', got %q", i, snapshot[0])
+		if !strings.Contains(snapshot[0], "HOST STATUS") {
+			t.Errorf("iteration %d: snapshot[0] should be delimiter, got %q", i, snapshot[0])
+		}
+		if !strings.Contains(snapshot[1], "step1") {
+			t.Errorf("iteration %d: snapshot[1] lost 'step1', got %q", i, snapshot[1])
 		}
 	}
+}
+
+// TestRenderLinesDelimiterAlwaysPresent verifies the HOST STATUS delimiter is always
+// the first output line, regardless of whether any logs have been written.
+func TestRenderLinesDelimiterAlwaysPresent(t *testing.T) {
+	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})
+
+	snapshot := d.renderLines()
+
+	if len(snapshot) < 1 {
+		t.Fatalf("expected at least 1 line, got 0")
+	}
+	if !strings.Contains(snapshot[0], "HOST STATUS") {
+		t.Errorf("delimiter should be first when no logs written, got: %q", snapshot[0])
+	}
+}
+
+// TestRenderLinesBlankLineWhenLogsWritten verifies that a blank separator line is
+// prepended before the HOST STATUS delimiter when logs have been written.
+func TestRenderLinesBlankLineWhenLogsWritten(t *testing.T) {
+	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})
+	d.Line(0).UpdateStep("⏳", "working")
+
+	// Simulate log writes by wiring a logWriter that has already written.
+	d.logWriter = &logWriterWithSeparator{base: io.Discard, hasWritten: true}
+
+	snapshot := d.renderLines()
+
+	// blank + delimiter + 2 host lines = 4 lines
+	if len(snapshot) != 4 {
+		t.Fatalf("with logs: expected 4 lines, got %d: %v", len(snapshot), snapshot)
+	}
+	if snapshot[0] != "" {
+		t.Errorf("with logs: first line should be blank, got: %q", snapshot[0])
+	}
+	if !strings.Contains(snapshot[1], "HOST STATUS") {
+		t.Errorf("with logs: second line should be delimiter, got: %q", snapshot[1])
+	}
+	if !strings.Contains(snapshot[2], "host1") {
+		t.Errorf("with logs: host1 should be at index 2, got: %q", snapshot[2])
+	}
+}
+
+// TestRenderLinesNoBlankLineWithoutLogs verifies that no blank line is added
+// before the HOST STATUS delimiter when no logs have been written.
+func TestRenderLinesNoBlankLineWithoutLogs(t *testing.T) {
+	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})
+	d.Line(0).UpdateStep("⏳", "working")
+
+	// No logWriter set — simulates a run with no log output.
+	snapshot := d.renderLines()
+
+	// delimiter + 2 host lines = 3 lines
+	if len(snapshot) != 3 {
+		t.Fatalf("without logs: expected 3 lines, got %d: %v", len(snapshot), snapshot)
+	}
+	if snapshot[0] == "" {
+		t.Errorf("without logs: first line should NOT be blank")
+	}
+	if !strings.Contains(snapshot[0], "HOST STATUS") {
+		t.Errorf("without logs: first line should be delimiter, got: %q", snapshot[0])
+	}
+	if !strings.Contains(snapshot[1], "host1") {
+		t.Errorf("without logs: host1 should be at index 1, got: %q", snapshot[1])
+	}
+}
+
+// TestLogWriterWithSeparatorTracksWrites verifies HasWritten reflects write state
+// and that the LOGS header is emitted exactly once before the first log line.
+func TestLogWriterWithSeparatorTracksWrites(t *testing.T) {
+	var buf bytes.Buffer
+	w := &logWriterWithSeparator{base: &buf}
+
+	if w.HasWritten() {
+		t.Errorf("expected HasWritten=false initially, got true")
+	}
+
+	if _, err := w.Write([]byte("test log")); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	if !w.HasWritten() {
+		t.Errorf("expected HasWritten=true after Write(), got false")
+	}
+
+	// The LOGS header must appear before the log content.
+	want := logsHeader + "test log"
+	if buf.String() != want {
+		t.Errorf("expected buffer %q, got: %q", want, buf.String())
+	}
+
+	// A second write must not repeat the header.
+	if _, err := w.Write([]byte(" second")); err != nil {
+		t.Fatalf("second Write() error: %v", err)
+	}
+	if buf.String() != want+" second" {
+		t.Errorf("header should appear only once, got: %q", buf.String())
+	}
+}
+
+// TestLogWriterWithSeparatorThreadSafe verifies concurrent writes are tracked safely
+// and that the LOGS header appears exactly once regardless of concurrency.
+func TestLogWriterWithSeparatorThreadSafe(t *testing.T) {
+	var buf bytes.Buffer
+	var bufMu sync.Mutex
+	w := &logWriterWithSeparator{base: &lockedWriter{mu: &bufMu, w: &buf}}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			w.Write([]byte("log\n")) //nolint:errcheck
+		}(i)
+	}
+	wg.Wait()
+
+	if !w.HasWritten() {
+		t.Errorf("expected HasWritten=true after concurrent writes")
+	}
+
+	got := buf.String()
+	if got == "" {
+		t.Errorf("expected data in buffer after concurrent writes")
+	}
+	// Header must appear exactly once at the very beginning.
+	if !strings.HasPrefix(got, logsHeader) {
+		t.Errorf("expected buffer to start with LOGS header, got: %q", got[:min(len(got), 60)])
+	}
+	if strings.Count(got, logsHeader) != 1 {
+		t.Errorf("LOGS header should appear exactly once, got %d occurrences", strings.Count(got, logsHeader))
+	}
+}
+
+// lockedWriter is a helper that serialises writes to an underlying writer using an external mutex.
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  *bytes.Buffer
+}
+
+func (lw *lockedWriter) Write(p []byte) (int, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.w.Write(p)
 }

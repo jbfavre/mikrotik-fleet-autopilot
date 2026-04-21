@@ -57,6 +57,35 @@ type completedStep struct {
 	emoji string
 }
 
+// logWriterWithSeparator wraps a writer and tracks whether any write has occurred.
+// On the first write it emits a LOGS header line so the log stream is visually
+// labelled. renderLines uses HasWritten to decide whether to add a blank separator
+// line between the log stream and the host status block.
+type logWriterWithSeparator struct {
+	once       sync.Once
+	mu         sync.Mutex
+	base       io.Writer
+	hasWritten bool
+}
+
+const logsHeader = "── LOGS ───────────────────────────────────\n"
+
+func (w *logWriterWithSeparator) Write(p []byte) (int, error) {
+	w.once.Do(func() {
+		w.mu.Lock()
+		w.hasWritten = true
+		w.mu.Unlock()
+		w.base.Write([]byte(logsHeader)) //nolint:errcheck
+	})
+	return w.base.Write(p)
+}
+
+func (w *logWriterWithSeparator) HasWritten() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.hasWritten
+}
+
 // StepCallback is used to update step display for a host.
 type StepCallback func(emoji string, message string)
 
@@ -206,6 +235,10 @@ type LiveDisplay struct {
 	lines []*HostLine
 	out   io.Writer
 
+	// logWriter tracks whether any log output has been written via LogWriter.
+	// Used by renderLines to decide whether to prepend a blank separator line.
+	logWriter *logWriterWithSeparator
+
 	// liveMode is the effective runtime state after evaluating display mode,
 	// debug, TTY, and any live startup fallback (for example singleton contention).
 	liveMode bool
@@ -227,12 +260,15 @@ func (d *LiveDisplay) Line(i int) *HostLine {
 }
 
 // LogWriter returns a writer safe to use for permanent log output while the
-// live display is active.
+// live display is active. The returned writer tracks whether anything has been
+// written so that renderLines can insert a blank separator line between the log
+// stream and the host status block.
 func (d *LiveDisplay) LogWriter() io.Writer {
 	if !d.liveMode {
 		return nil
 	}
-	return liveterm.Bypass()
+	d.logWriter = &logWriterWithSeparator{base: liveterm.Bypass()}
+	return d.logWriter
 }
 
 // Stop finalises output. In live mode it stops liveterm. In concurrent non-live
@@ -347,9 +383,15 @@ func (d *LiveDisplay) renderLines() []string {
 	}()
 
 	// Now render all lines while holding all locks; no state can change during this render.
-	out := make([]string, len(d.lines))
-	for i, l := range d.lines {
-		out[i] = l.renderUnlocked()
+	// Prepend a blank separator line when logs have been written, so the host status
+	// block is visually distinct from the bypass log stream above it.
+	var out []string
+	if d.logWriter != nil && d.logWriter.HasWritten() {
+		out = append(out, "")
+	}
+	out = append(out, "── HOST STATUS ──────────────────────────")
+	for _, l := range d.lines {
+		out = append(out, l.renderUnlocked())
 	}
 	return out
 }

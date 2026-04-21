@@ -723,8 +723,8 @@ func TestLogWriterWithSeparatorTracksWrites(t *testing.T) {
 		t.Errorf("expected HasWritten=true after Write(), got false")
 	}
 
-	// The LOGS header must appear before the log content at the fallback width.
-	wantHeader := separatorLine("LOGS", 80) + "\n"
+	// The LOGS header must appear before the log content.
+	wantHeader := "── LOGS\n"
 	want := wantHeader + "test log"
 	if buf.String() != want {
 		t.Errorf("expected buffer %q, got: %q", want, buf.String())
@@ -766,7 +766,7 @@ func TestLogWriterWithSeparatorThreadSafe(t *testing.T) {
 		t.Errorf("expected data in buffer after concurrent writes")
 	}
 	// Header must appear exactly once at the very beginning.
-	wantHeader := separatorLine("LOGS", 80) + "\n"
+	wantHeader := "── LOGS\n"
 	if !strings.HasPrefix(got, wantHeader) {
 		t.Errorf("expected buffer to start with LOGS header, got: %q", got[:min(len(got), 60)])
 	}

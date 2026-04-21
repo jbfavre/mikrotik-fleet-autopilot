@@ -74,7 +74,7 @@ func (w *logWriterWithSeparator) Write(p []byte) (int, error) {
 		w.mu.Lock()
 		w.hasWritten = true
 		w.mu.Unlock()
-		header := separatorLine("LOGS", termWidth(w.outFd)) + "\n"
+		header := "── LOGS\n"
 		w.base.Write([]byte(header)) //nolint:errcheck
 	})
 	return w.base.Write(p)

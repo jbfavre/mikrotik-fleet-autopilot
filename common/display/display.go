@@ -58,24 +58,24 @@ type completedStep struct {
 }
 
 // logWriterWithSeparator wraps a writer and tracks whether any write has occurred.
-// On the first write it emits a LOGS header line so the log stream is visually
-// labelled. renderLines uses HasWritten to decide whether to add a blank separator
-// line between the log stream and the host status block.
+// On the first write it emits a LOGS header line at the current terminal width so
+// the log stream is visually labelled. renderLines uses HasWritten to decide
+// whether to add a blank separator line between the log stream and the host status block.
 type logWriterWithSeparator struct {
 	once       sync.Once
 	mu         sync.Mutex
 	base       io.Writer
+	outFd      int // file descriptor for terminal width queries; -1 for no TTY
 	hasWritten bool
 }
-
-const logsHeader = "── LOGS ───────────────────────────────────\n"
 
 func (w *logWriterWithSeparator) Write(p []byte) (int, error) {
 	w.once.Do(func() {
 		w.mu.Lock()
 		w.hasWritten = true
 		w.mu.Unlock()
-		w.base.Write([]byte(logsHeader)) //nolint:errcheck
+		header := separatorLine("LOGS", termWidth(w.outFd)) + "\n"
+		w.base.Write([]byte(header)) //nolint:errcheck
 	})
 	return w.base.Write(p)
 }
@@ -194,14 +194,20 @@ func (h *HostLine) render() string {
 // live rendering when applicable.
 func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 	isTTY := false
+	outFd := -1
 	if f, ok := out.(*os.File); ok {
-		isTTY = term.IsTerminal(int(f.Fd()))
+		fd := int(f.Fd())
+		if term.IsTerminal(fd) {
+			isTTY = true
+			outFd = fd
+		}
 	}
 	hostnameWidth := computeHostnameWidth(hosts)
 
 	d := &LiveDisplay{
 		lines: make([]*HostLine, len(hosts)),
 		isTTY: isTTY,
+		outFd: outFd,
 		debug: opts.Debug,
 		out:   out,
 	}
@@ -235,6 +241,10 @@ type LiveDisplay struct {
 	lines []*HostLine
 	out   io.Writer
 
+	// outFd is the file descriptor of out when it is a queryable TTY; -1 otherwise.
+	// Used to query terminal width dynamically for separator lines.
+	outFd int
+
 	// logWriter tracks whether any log output has been written via LogWriter.
 	// Used by renderLines to decide whether to prepend a blank separator line.
 	logWriter *logWriterWithSeparator
@@ -267,7 +277,7 @@ func (d *LiveDisplay) LogWriter() io.Writer {
 	if !d.liveMode {
 		return nil
 	}
-	d.logWriter = &logWriterWithSeparator{base: liveterm.Bypass()}
+	d.logWriter = &logWriterWithSeparator{base: liveterm.Bypass(), outFd: d.outFd}
 	return d.logWriter
 }
 
@@ -389,7 +399,7 @@ func (d *LiveDisplay) renderLines() []string {
 	if d.logWriter != nil && d.logWriter.HasWritten() {
 		out = append(out, "")
 	}
-	out = append(out, "── HOSTS STATUS ─────────────────────────")
+	out = append(out, separatorLine("HOSTS STATUS", termWidth(d.outFd)))
 	for _, l := range d.lines {
 		out = append(out, l.renderUnlocked())
 	}
@@ -413,6 +423,33 @@ func (d *LiveDisplay) tryClaim() bool {
 	}
 	activeLiveDisp = d
 	return true
+}
+
+// termWidth returns the current terminal width for the given file descriptor.
+// Returns 80 if fd is negative or the terminal size cannot be determined.
+func termWidth(fd int) int {
+	if fd < 0 {
+		return 80
+	}
+	width, _, err := term.GetSize(fd)
+	if err != nil || width <= 0 {
+		return 80
+	}
+	return width
+}
+
+// separatorLine builds a full-width separator of the form "── LABEL ──────...".
+// The line is exactly width terminal columns wide. If width is too small to
+// accommodate the label, trailing dashes are omitted.
+func separatorLine(label string, width int) string {
+	// prefix = "── " (3 cols) + label + " " (1 col)
+	prefix := "── " + label + " "
+	prefixCols := 3 + len([]rune(label)) + 1
+	trailing := width - prefixCols
+	if trailing <= 0 {
+		return "── " + label
+	}
+	return prefix + strings.Repeat("─", trailing)
 }
 
 // Helper to compute hostname column width based on the longest hostname, with min and max bounds.

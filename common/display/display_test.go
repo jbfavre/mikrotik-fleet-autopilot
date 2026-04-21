@@ -2,7 +2,9 @@ package display
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -637,7 +639,7 @@ func TestRenderLinesLocksAllHosts(t *testing.T) {
 	}
 }
 
-// TestRenderLinesDelimiterAlwaysPresent verifies the HOSTS STATUS delimiter is always
+// TestRenderLinesDelimiterAlwaysPresent verifies the HOST STATUS delimiter is always
 // the first output line, regardless of whether any logs have been written.
 func TestRenderLinesDelimiterAlwaysPresent(t *testing.T) {
 	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})
@@ -706,7 +708,8 @@ func TestRenderLinesNoBlankLineWithoutLogs(t *testing.T) {
 // and that the LOGS header is emitted exactly once before the first log line.
 func TestLogWriterWithSeparatorTracksWrites(t *testing.T) {
 	var buf bytes.Buffer
-	w := &logWriterWithSeparator{base: &buf}
+	// outFd: -1 → termWidth returns 80 (no TTY fallback)
+	w := &logWriterWithSeparator{base: &buf, outFd: -1}
 
 	if w.HasWritten() {
 		t.Errorf("expected HasWritten=false initially, got true")
@@ -720,8 +723,9 @@ func TestLogWriterWithSeparatorTracksWrites(t *testing.T) {
 		t.Errorf("expected HasWritten=true after Write(), got false")
 	}
 
-	// The LOGS header must appear before the log content.
-	want := logsHeader + "test log"
+	// The LOGS header must appear before the log content at the fallback width.
+	wantHeader := separatorLine("LOGS", 80) + "\n"
+	want := wantHeader + "test log"
 	if buf.String() != want {
 		t.Errorf("expected buffer %q, got: %q", want, buf.String())
 	}
@@ -740,7 +744,8 @@ func TestLogWriterWithSeparatorTracksWrites(t *testing.T) {
 func TestLogWriterWithSeparatorThreadSafe(t *testing.T) {
 	var buf bytes.Buffer
 	var bufMu sync.Mutex
-	w := &logWriterWithSeparator{base: &lockedWriter{mu: &bufMu, w: &buf}}
+	// outFd: -1 → termWidth returns 80 (no TTY fallback)
+	w := &logWriterWithSeparator{base: &lockedWriter{mu: &bufMu, w: &buf}, outFd: -1}
 
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
@@ -761,11 +766,61 @@ func TestLogWriterWithSeparatorThreadSafe(t *testing.T) {
 		t.Errorf("expected data in buffer after concurrent writes")
 	}
 	// Header must appear exactly once at the very beginning.
-	if !strings.HasPrefix(got, logsHeader) {
+	wantHeader := separatorLine("LOGS", 80) + "\n"
+	if !strings.HasPrefix(got, wantHeader) {
 		t.Errorf("expected buffer to start with LOGS header, got: %q", got[:min(len(got), 60)])
 	}
-	if strings.Count(got, logsHeader) != 1 {
-		t.Errorf("LOGS header should appear exactly once, got %d occurrences", strings.Count(got, logsHeader))
+	if strings.Count(got, wantHeader) != 1 {
+		t.Errorf("LOGS header should appear exactly once, got %d occurrences", strings.Count(got, wantHeader))
+	}
+}
+
+// TestSeparatorLine verifies separatorLine builds correctly-sized strings.
+func TestSeparatorLine(t *testing.T) {
+	tests := []struct {
+		label        string
+		width        int
+		wantContains string
+		wantLen      int // expected rune length of output
+	}{
+		{label: "LOGS", width: 80, wantContains: "LOGS", wantLen: 80},
+		{label: "HOST STATUS", width: 80, wantContains: "HOST STATUS", wantLen: 80},
+		{label: "LOGS", width: 40, wantContains: "LOGS", wantLen: 40},
+		// Width too small: trailing dashes are omitted, label still present.
+		{label: "LOGS", width: 5, wantContains: "LOGS", wantLen: 7}, // "── LOGS" = 7 runes
+		{label: "LOGS", width: 0, wantContains: "LOGS", wantLen: 7},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s/w=%d", tt.label, tt.width), func(t *testing.T) {
+			got := separatorLine(tt.label, tt.width)
+			if !strings.Contains(got, tt.label) {
+				t.Errorf("separatorLine(%q, %d) = %q: label missing", tt.label, tt.width, got)
+			}
+			if gotLen := len([]rune(got)); gotLen != tt.wantLen {
+				t.Errorf("separatorLine(%q, %d) rune length = %d, want %d: %q",
+					tt.label, tt.width, gotLen, tt.wantLen, got)
+			}
+		})
+	}
+}
+
+// TestTermWidth verifies termWidth returns 80 for non-TTY file descriptors.
+func TestTermWidth(t *testing.T) {
+	// fd=-1 is the explicit no-TTY sentinel.
+	if got := termWidth(-1); got != 80 {
+		t.Errorf("termWidth(-1) = %d, want 80", got)
+	}
+
+	// A pipe read-end is never a TTY; GetSize will fail → fallback to 80.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error: %v", err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if got := termWidth(int(r.Fd())); got != 80 {
+		t.Errorf("termWidth(pipe fd) = %d, want 80 (pipe is not a TTY)", got)
 	}
 }
 

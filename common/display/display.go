@@ -58,11 +58,11 @@ type completedStep struct {
 	emoji string
 }
 
-// logWriterWithSeparator wraps a writer and tracks whether any write has occurred.
+// logWriter wraps a writer and tracks whether any write has occurred.
 // On the first write it emits a LOGS header line so
 // the log stream is visually labelled. renderLines uses HasWritten to decide
 // whether to add a blank separator line between the log stream and the host status block.
-type logWriterWithSeparator struct {
+type logWriter struct {
 	once       sync.Once
 	mu         sync.Mutex
 	base       io.Writer
@@ -70,7 +70,7 @@ type logWriterWithSeparator struct {
 	hasWritten bool
 }
 
-func (w *logWriterWithSeparator) Write(p []byte) (int, error) {
+func (w *logWriter) Write(p []byte) (int, error) {
 	w.once.Do(func() {
 		w.mu.Lock()
 		w.hasWritten = true
@@ -81,7 +81,7 @@ func (w *logWriterWithSeparator) Write(p []byte) (int, error) {
 	return w.base.Write(p)
 }
 
-func (w *logWriterWithSeparator) HasWritten() bool {
+func (w *logWriter) HasWritten() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.hasWritten
@@ -248,7 +248,7 @@ type LiveDisplay struct {
 
 	// logWriter tracks whether any log output has been written via LogWriter.
 	// Used by renderLines to decide whether to prepend a blank separator line.
-	logWriter *logWriterWithSeparator
+	logWriter *logWriter
 
 	// liveMode is the effective runtime state after evaluating display mode,
 	// debug, TTY, and any live startup fallback (for example singleton contention).
@@ -279,7 +279,7 @@ func (d *LiveDisplay) LogWriter() io.Writer {
 		return nil
 	}
 	if d.logWriter == nil {
-		d.logWriter = &logWriterWithSeparator{base: liveterm.Bypass(), outFd: d.outFd}
+		d.logWriter = &logWriter{base: liveterm.Bypass(), outFd: d.outFd}
 	}
 	return d.logWriter
 }

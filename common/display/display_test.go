@@ -662,7 +662,7 @@ func TestRenderLinesBlankLineWhenLogsWritten(t *testing.T) {
 	d.Line(0).UpdateStep("⏳", "working")
 
 	// Simulate log writes by wiring a logWriter that has already written.
-	d.logWriter = &logWriterWithSeparator{base: io.Discard, hasWritten: true}
+	d.logWriter = &logWriter{base: io.Discard, hasWritten: true}
 
 	snapshot := d.renderLines()
 
@@ -710,7 +710,7 @@ func TestRenderLinesNoBlankLineWithoutLogs(t *testing.T) {
 func TestLogWriterWithSeparatorTracksWrites(t *testing.T) {
 	var buf bytes.Buffer
 	// outFd: -1 → termWidth returns 80 (no TTY fallback)
-	w := &logWriterWithSeparator{base: &buf, outFd: -1}
+	w := &logWriter{base: &buf, outFd: -1}
 
 	if w.HasWritten() {
 		t.Errorf("expected HasWritten=false initially, got true")
@@ -746,7 +746,7 @@ func TestLogWriterWithSeparatorThreadSafe(t *testing.T) {
 	var buf bytes.Buffer
 	var bufMu sync.Mutex
 	// outFd: -1 → termWidth returns 80 (no TTY fallback)
-	w := &logWriterWithSeparator{base: &lockedWriter{mu: &bufMu, w: &buf}, outFd: -1}
+	w := &logWriter{base: &lockedWriter{mu: &bufMu, w: &buf}, outFd: -1}
 
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {

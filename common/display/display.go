@@ -458,7 +458,7 @@ func separatorLine(label string, width int) string {
 	prefix := "── " + label + " "
 	prefixCols := 3 + len([]rune(label)) + 1
 	trailing := width - prefixCols
-	if trailing <= 0 {
+	if trailing < 0 {
 		return "── " + label
 	}
 	return prefix + strings.Repeat("─", trailing)

@@ -2,6 +2,10 @@ package display
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -560,39 +564,47 @@ func TestConcurrentFailureRenderAtomicity(t *testing.T) {
 	wg.Wait()
 
 	// After all goroutines complete, verify renderLines() produces a consistent snapshot.
-	// The snapshot should contain ONLY final states (✅, ❓), never intermediate states (⏳ Connecting).
+	// The snapshot contains: optional blank line, delimiter, then one line per host.
+	// We only inspect host lines (starting at offset 1 for delimiter, no blank line since no logs).
 	snapshot := d.renderLines()
 
-	for i, line := range snapshot {
-		host := hosts[i]
+	// Without logs, snapshot = [delimiter, host0, host1, ...]
+	offset := 1 // skip delimiter
+	if len(snapshot) != len(hosts)+offset {
+		t.Fatalf("expected %d snapshot lines (delimiter + %d hosts), got %d: %v",
+			len(hosts)+offset, len(hosts), len(snapshot), snapshot)
+	}
+
+	for i, host := range hosts {
+		line := snapshot[i+offset]
 		t.Logf("Final snapshot for %s: %s", host, line)
 
 		// Every line should start with a final emoji, not intermediate
 		if !strings.HasPrefix(line, "✅") && !strings.HasPrefix(line, "❓") {
 			t.Errorf("snapshot[%d] for %q = %q, expected final emoji (✅ or ❓), not intermediate state",
-				i, host, line)
+				i+offset, host, line)
 		}
 
 		// No intermediate "Connecting" text should appear
 		if strings.Contains(line, "Connecting to router…") {
 			t.Errorf("snapshot[%d] for %q contains intermediate step 'Connecting to router…', should be final only: %q",
-				i, host, line)
+				i+offset, host, line)
 		}
 
 		// Verify expected final states
 		if failingHosts[host] {
 			if !strings.HasPrefix(line, "❓") {
-				t.Errorf("snapshot[%d] for %q = %q, expected ❓ (unknown/failed status)", i, host, line)
+				t.Errorf("snapshot[%d] for %q = %q, expected ❓ (unknown/failed status)", i+offset, host, line)
 			}
 			if !strings.Contains(line, "failed to dial") {
-				t.Errorf("snapshot[%d] for %q = %q, expected failure message", i, host, line)
+				t.Errorf("snapshot[%d] for %q = %q, expected failure message", i+offset, host, line)
 			}
 		} else {
 			if !strings.HasPrefix(line, "✅") {
-				t.Errorf("snapshot[%d] for %q = %q, expected ✅ (success)", i, host, line)
+				t.Errorf("snapshot[%d] for %q = %q, expected ✅ (success)", i+offset, host, line)
 			}
 			if !strings.Contains(line, "is up-to-date") {
-				t.Errorf("snapshot[%d] for %q = %q, expected success message", i, host, line)
+				t.Errorf("snapshot[%d] for %q = %q, expected success message", i+offset, host, line)
 			}
 		}
 	}
@@ -611,15 +623,479 @@ func TestRenderLinesLocksAllHosts(t *testing.T) {
 	d.Line(1).CompleteStep("✅")
 	d.Line(2).UpdateStep("⏳", "step2")
 
+	// Without logs: delimiter + 3 hosts = 4 lines.
 	// Call renderLines multiple times: should always see the same state
 	// (deadlock would manifest as goroutine hanging, race detector would catch non-atomic reads)
 	for i := 0; i < 100; i++ {
 		snapshot := d.renderLines()
-		if len(snapshot) != 3 {
-			t.Errorf("iteration %d: renderLines returned %d lines, want 3", i, len(snapshot))
+		if len(snapshot) != 4 {
+			t.Errorf("iteration %d: renderLines returned %d lines, want 4 (delimiter + 3 hosts)", i, len(snapshot))
 		}
-		if !strings.Contains(snapshot[0], "step1") {
-			t.Errorf("iteration %d: snapshot[0] lost 'step1', got %q", i, snapshot[0])
+		if !strings.Contains(snapshot[0], "HOSTS STATUS") {
+			t.Errorf("iteration %d: snapshot[0] should be delimiter, got %q", i, snapshot[0])
+		}
+		if !strings.Contains(snapshot[1], "step1") {
+			t.Errorf("iteration %d: snapshot[1] lost 'step1', got %q", i, snapshot[1])
 		}
 	}
+}
+
+// TestRenderLinesDelimiterAlwaysPresent verifies the HOSTS STATUS delimiter is always
+// present in the output: it is the first line when no logs have been written, and
+// is preceded by a blank separator line when logs have been written.
+func TestRenderLinesDelimiterAlwaysPresent(t *testing.T) {
+	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})
+
+	snapshot := d.renderLines()
+
+	if len(snapshot) < 1 {
+		t.Fatalf("expected at least 1 line, got 0")
+	}
+	if !strings.Contains(snapshot[0], "HOSTS STATUS") {
+		t.Errorf("delimiter should be first when no logs written, got: %q", snapshot[0])
+	}
+}
+
+// TestRenderLinesBlankLineWhenLogsWritten verifies that a blank separator line is
+// prepended before the HOSTS STATUS delimiter when logs have been written.
+func TestRenderLinesBlankLineWhenLogsWritten(t *testing.T) {
+	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})
+	d.Line(0).UpdateStep("⏳", "working")
+
+	// Simulate log writes by wiring a logWriter that has already written.
+	d.logWriter = &logWriter{base: io.Discard, hasWritten: true}
+
+	snapshot := d.renderLines()
+
+	// blank + delimiter + 2 host lines = 4 lines
+	if len(snapshot) != 4 {
+		t.Fatalf("with logs: expected 4 lines, got %d: %v", len(snapshot), snapshot)
+	}
+	if snapshot[0] != "" {
+		t.Errorf("with logs: first line should be blank, got: %q", snapshot[0])
+	}
+	if !strings.Contains(snapshot[1], "HOSTS STATUS") {
+		t.Errorf("with logs: second line should be delimiter, got: %q", snapshot[1])
+	}
+	if !strings.Contains(snapshot[2], "host1") {
+		t.Errorf("with logs: host1 should be at index 2, got: %q", snapshot[2])
+	}
+}
+
+// TestRenderLinesNoBlankLineWithoutLogs verifies that no blank line is added
+// before the HOSTS STATUS delimiter when no logs have been written.
+func TestRenderLinesNoBlankLineWithoutLogs(t *testing.T) {
+	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})
+	d.Line(0).UpdateStep("⏳", "working")
+
+	// No logWriter set — simulates a run with no log output.
+	snapshot := d.renderLines()
+
+	// delimiter + 2 host lines = 3 lines
+	if len(snapshot) != 3 {
+		t.Fatalf("without logs: expected 3 lines, got %d: %v", len(snapshot), snapshot)
+	}
+	if snapshot[0] == "" {
+		t.Errorf("without logs: first line should NOT be blank")
+	}
+	if !strings.Contains(snapshot[0], "HOSTS STATUS") {
+		t.Errorf("without logs: first line should be delimiter, got: %q", snapshot[0])
+	}
+	if !strings.Contains(snapshot[1], "host1") {
+		t.Errorf("without logs: host1 should be at index 1, got: %q", snapshot[1])
+	}
+}
+
+// TestLogWriterWithSeparatorTracksWrites verifies HasWritten reflects write state
+// and that the LOGS header is emitted exactly once before the first log line.
+func TestLogWriterWithSeparatorTracksWrites(t *testing.T) {
+	var buf bytes.Buffer
+	// Only the output buffer matters for this behavior under test.
+	w := &logWriter{base: &buf}
+
+	if w.HasWritten() {
+		t.Errorf("expected HasWritten=false initially, got true")
+	}
+
+	if _, err := w.Write([]byte("test log")); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	if !w.HasWritten() {
+		t.Errorf("expected HasWritten=true after Write(), got false")
+	}
+
+	// The LOGS header must appear before the log content.
+	wantHeader := "── LOGS\n"
+	want := wantHeader + "test log"
+	if buf.String() != want {
+		t.Errorf("expected buffer %q, got: %q", want, buf.String())
+	}
+
+	// A second write must not repeat the header.
+	if _, err := w.Write([]byte(" second")); err != nil {
+		t.Fatalf("second Write() error: %v", err)
+	}
+	if buf.String() != want+" second" {
+		t.Errorf("header should appear only once, got: %q", buf.String())
+	}
+}
+
+// TestLogWriterWithSeparatorThreadSafe verifies concurrent writes are tracked safely
+// and that the LOGS header appears exactly once regardless of concurrency.
+func TestLogWriterWithSeparatorThreadSafe(t *testing.T) {
+	var buf bytes.Buffer
+	var bufMu sync.Mutex
+	// outFd: -1 → termWidth returns 80 (no TTY fallback)
+	w := &logWriter{base: &lockedWriter{mu: &bufMu, w: &buf}, outFd: -1}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			w.Write([]byte("log\n")) //nolint:errcheck
+		}(i)
+	}
+	wg.Wait()
+
+	if !w.HasWritten() {
+		t.Errorf("expected HasWritten=true after concurrent writes")
+	}
+
+	got := buf.String()
+	if got == "" {
+		t.Errorf("expected data in buffer after concurrent writes")
+	}
+	// Header must appear exactly once at the very beginning.
+	wantHeader := "── LOGS\n"
+	if !strings.HasPrefix(got, wantHeader) {
+		t.Errorf("expected buffer to start with LOGS header, got: %q", got[:min(len(got), 60)])
+	}
+	if strings.Count(got, wantHeader) != 1 {
+		t.Errorf("LOGS header should appear exactly once, got %d occurrences", strings.Count(got, wantHeader))
+	}
+}
+
+func TestLogWriterHeaderWriteFailureReturnsError(t *testing.T) {
+	w := &logWriter{base: failWriter{}, outFd: -1}
+
+	n, err := w.Write([]byte("test log"))
+
+	if err == nil {
+		t.Fatal("Write() should return an error when header write fails")
+	}
+	if n != 0 {
+		t.Fatalf("Write() bytes written = %d, want 0 on header failure", n)
+	}
+	if w.HasWritten() {
+		t.Fatal("HasWritten() should remain false when header write fails")
+	}
+}
+
+func TestLogWriterHeaderWriteFailureIsRetryable(t *testing.T) {
+	base := &failOnceWriter{}
+	w := &logWriter{base: base, outFd: -1}
+
+	if _, err := w.Write([]byte("first log")); err == nil {
+		t.Fatal("first Write() should fail when header write fails")
+	}
+	if w.HasWritten() {
+		t.Fatal("HasWritten() should remain false after transient header failure")
+	}
+
+	if n, err := w.Write([]byte("second log")); err != nil {
+		t.Fatalf("second Write() error = %v, want success", err)
+	} else if n != len("second log") {
+		t.Fatalf("second Write() bytes written = %d, want %d", n, len("second log"))
+	}
+	if !w.HasWritten() {
+		t.Fatal("HasWritten() should be true after successful retry")
+	}
+
+	got := base.buf.String()
+	want := "── LOGS\nsecond log"
+	if got != want {
+		t.Fatalf("buffer = %q, want %q", got, want)
+	}
+}
+
+func TestLogWriterHeaderShortWriteReturnsError(t *testing.T) {
+	w := &logWriter{base: shortWriteWriter{}, outFd: -1}
+
+	n, err := w.Write([]byte("test log"))
+
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("Write() error = %v, want io.ErrShortWrite", err)
+	}
+	if n != 0 {
+		t.Fatalf("Write() bytes written = %d, want 0 on short header write", n)
+	}
+	if w.HasWritten() {
+		t.Fatal("HasWritten() should remain false when header write is short")
+	}
+}
+
+// TestSeparatorLine verifies separatorLine builds correctly-sized strings.
+func TestSeparatorLine(t *testing.T) {
+	tests := []struct {
+		label        string
+		width        int
+		wantContains string
+		wantLen      int // expected rune length of output
+	}{
+		{label: "LOGS", width: 80, wantContains: "LOGS", wantLen: 80},
+		{label: "HOSTS STATUS", width: 80, wantContains: "HOSTS STATUS", wantLen: 80},
+		{label: "LOGS", width: 40, wantContains: "LOGS", wantLen: 40},
+		// Width too small: trailing dashes are omitted, label still present.
+		{label: "LOGS", width: 5, wantContains: "LOGS", wantLen: 7}, // "── LOGS" = 7 runes
+		{label: "LOGS", width: 0, wantContains: "LOGS", wantLen: 7},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s/w=%d", tt.label, tt.width), func(t *testing.T) {
+			got := separatorLine(tt.label, tt.width)
+			if !strings.Contains(got, tt.label) {
+				t.Errorf("separatorLine(%q, %d) = %q: label missing", tt.label, tt.width, got)
+			}
+			if gotLen := len([]rune(got)); gotLen != tt.wantLen {
+				t.Errorf("separatorLine(%q, %d) rune length = %d, want %d: %q",
+					tt.label, tt.width, gotLen, tt.wantLen, got)
+			}
+		})
+	}
+}
+
+// TestTermWidth verifies termWidth returns 80 for non-TTY file descriptors.
+func TestTermWidth(t *testing.T) {
+	// fd=-1 is the explicit no-TTY sentinel.
+	if got := termWidth(-1); got != 80 {
+		t.Errorf("termWidth(-1) = %d, want 80", got)
+	}
+
+	// A pipe read-end is never a TTY; GetSize will fail → fallback to 80.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error: %v", err)
+	}
+	defer r.Close() //nolint:errcheck
+	defer w.Close() //nolint:errcheck
+	if got := termWidth(int(r.Fd())); got != 80 {
+		t.Errorf("termWidth(pipe fd) = %d, want 80 (pipe is not a TTY)", got)
+	}
+}
+
+func TestFormatHostnameWidthOneReturnsEllipsis(t *testing.T) {
+	got := formatHostname("router-very-long-name", 1)
+	if got != "…" {
+		t.Fatalf("formatHostname(width=1) = %q, want %q", got, "…")
+	}
+}
+
+func TestInitLiveLogWriterInitializesInLiveMode(t *testing.T) {
+	d := &LiveDisplay{liveMode: true, outFd: -1}
+
+	d.initLiveLogWriter()
+
+	if d.logWriter == nil {
+		t.Fatal("initLiveLogWriter() should initialize logWriter when live mode is enabled")
+	}
+	if d.logWriter.outFd != -1 {
+		t.Fatalf("logWriter.outFd = %d, want -1", d.logWriter.outFd)
+	}
+	if got := d.LogWriter(); got != d.logWriter {
+		t.Fatal("LogWriter() should return the eagerly initialized logWriter instance")
+	}
+}
+
+func TestInitLiveLogWriterNoOpWhenNotLiveMode(t *testing.T) {
+	d := &LiveDisplay{liveMode: false, outFd: -1}
+
+	d.initLiveLogWriter()
+
+	if d.logWriter != nil {
+		t.Fatal("initLiveLogWriter() should not initialize logWriter when live mode is disabled")
+	}
+}
+
+func TestLogWriterReturnsPreinitializedWriterInLiveMode(t *testing.T) {
+	want := &logWriter{base: io.Discard, outFd: -1}
+	d := &LiveDisplay{liveMode: true, logWriter: want}
+
+	got := d.LogWriter()
+
+	if got != want {
+		t.Fatalf("LogWriter() = %#v, want %#v", got, want)
+	}
+	if d.logWriter != want {
+		t.Fatal("LogWriter() should not replace the existing logWriter instance")
+	}
+}
+
+func TestLogWriterReturnsNilWhenNotLiveMode(t *testing.T) {
+	var buf bytes.Buffer
+	d := newTestDisplay(&buf, []string{"router1"})
+
+	w := d.LogWriter()
+	if w != nil {
+		t.Fatalf("LogWriter() = %#v, want nil when live mode is disabled", w)
+	}
+	if d.logWriter != nil {
+		t.Fatal("d.logWriter should remain nil when live mode is disabled")
+	}
+}
+
+func TestStopConcurrentSkipsEmptyPendingLines(t *testing.T) {
+	var buf bytes.Buffer
+	d := New(&buf, []string{"host1", "host2", "host3"}, InitOptions{Debug: false, PreferLiveMode: false, Concurrent: true})
+
+	d.pendingLines[0] = "✅ host1 done"
+	d.pendingLines[1] = ""
+	d.pendingLines[2] = "❌ host3 failed"
+
+	d.Stop()
+
+	got := strings.TrimSpace(buf.String())
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 output lines, got %d: %q", len(lines), got)
+	}
+	if lines[0] != "✅ host1 done" {
+		t.Fatalf("first line = %q, want %q", lines[0], "✅ host1 done")
+	}
+	if lines[1] != "❌ host3 failed" {
+		t.Fatalf("second line = %q, want %q", lines[1], "❌ host3 failed")
+	}
+}
+
+func TestRenderUnlockedInProgressNoSummaryNoCurrent(t *testing.T) {
+	h := &HostLine{
+		hostname:      "router1",
+		hostnameWidth: 10,
+		overallEmoji:  "⏳",
+		done:          false,
+	}
+
+	got := h.renderUnlocked()
+	if got != "⏳ router1   " {
+		t.Fatalf("renderUnlocked() = %q, want %q", got, "⏳ router1   ")
+	}
+}
+
+func TestRenderUnlockedInProgressSummaryOnly(t *testing.T) {
+	h := &HostLine{
+		hostname:      "router1",
+		hostnameWidth: 10,
+		overallEmoji:  "⏳",
+		history:       []completedStep{{emoji: "✅"}},
+		done:          false,
+	}
+
+	got := h.renderUnlocked()
+	if got != "⏳ router1    ✅" {
+		t.Fatalf("renderUnlocked() = %q, want %q", got, "⏳ router1    ✅")
+	}
+}
+
+func TestInitLiveModeFallbackOnStartError(t *testing.T) {
+	resetSingleton(t)
+
+	var buf bytes.Buffer
+	d := newLiveModeDisplay(&buf, []string{"router1", "router2"})
+	d.concurrent = true
+	d.pendingLines = nil
+
+	originalStart := startLiveTerm
+	startLiveTerm = func() error {
+		return errors.New("start failed")
+	}
+	t.Cleanup(func() {
+		startLiveTerm = originalStart
+	})
+
+	d.initLiveMode()
+
+	if d.liveMode {
+		t.Fatal("initLiveMode() should disable live mode when start fails")
+	}
+	if d.pendingLines == nil || len(d.pendingLines) != 2 {
+		t.Fatalf("expected pendingLines buffer of size 2 after fallback, got %#v", d.pendingLines)
+	}
+	for i, l := range d.lines {
+		if l.liveMode {
+			t.Fatalf("line %d should have liveMode=false after fallback", i)
+		}
+		if l.pending == nil {
+			t.Fatalf("line %d should be wired to pendingLines after fallback", i)
+		}
+	}
+
+	singletonMu.Lock()
+	current := activeLiveDisp
+	singletonMu.Unlock()
+	if current != nil {
+		t.Fatal("activeLiveDisp should be released on start failure")
+	}
+}
+
+func TestFinishSequentialWriteErrorStillUpdatesState(t *testing.T) {
+	h := &HostLine{
+		hostname:      "router1",
+		hostnameWidth: 10,
+		overallEmoji:  "⏳",
+		out:           failWriter{},
+		liveMode:      false,
+	}
+
+	h.Finish("❌", "write failed")
+
+	if !h.done {
+		t.Fatal("Finish() should set done=true even when write fails")
+	}
+	if h.overallEmoji != "❌" {
+		t.Fatalf("overallEmoji = %q, want %q", h.overallEmoji, "❌")
+	}
+	if h.finalMessage != "write failed" {
+		t.Fatalf("finalMessage = %q, want %q", h.finalMessage, "write failed")
+	}
+}
+
+// lockedWriter is a helper that serialises writes to an underlying writer using an external mutex.
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  *bytes.Buffer
+}
+
+func (lw *lockedWriter) Write(p []byte) (int, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.w.Write(p)
+}
+
+type failOnceWriter struct {
+	buf    bytes.Buffer
+	failed bool
+}
+
+func (w *failOnceWriter) Write(p []byte) (int, error) {
+	if !w.failed {
+		w.failed = true
+		return 0, errors.New("write failed once")
+	}
+	return w.buf.Write(p)
+}
+
+type shortWriteWriter struct{}
+
+func (shortWriteWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	return len(p) - 1, nil
+}
+
+type failWriter struct{}
+
+func (failWriter) Write(p []byte) (int, error) {
+	return 0, errors.New("write failed")
 }

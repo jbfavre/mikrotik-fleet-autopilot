@@ -23,6 +23,7 @@ const (
 var (
 	singletonMu    sync.Mutex
 	activeLiveDisp *LiveDisplay
+	startLiveTerm  = liveterm.Start
 )
 
 // InitOptions configures display initialization parameters.
@@ -55,6 +56,42 @@ type HostLine struct {
 // completedStep records an already-finished step with its emoticon.
 type completedStep struct {
 	emoji string
+}
+
+// logWriter wraps a writer and tracks whether any write has occurred.
+// On the first write it emits a LOGS header line so
+// the log stream is visually labelled. renderLines uses HasWritten to decide
+// whether to add a blank separator line between the log stream and the host status block.
+type logWriter struct {
+	mu         sync.Mutex
+	base       io.Writer
+	outFd      int // file descriptor for terminal width queries; -1 for no TTY
+	hasWritten bool
+}
+
+func (w *logWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.hasWritten {
+		header := []byte("── LOGS\n")
+		n, err := w.base.Write(header)
+		if err != nil {
+			return n, err
+		}
+		if n != len(header) {
+			return 0, io.ErrShortWrite
+		}
+		w.hasWritten = true
+	}
+
+	return w.base.Write(p)
+}
+
+func (w *logWriter) HasWritten() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.hasWritten
 }
 
 // StepCallback is used to update step display for a host.
@@ -165,14 +202,20 @@ func (h *HostLine) render() string {
 // live rendering when applicable.
 func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 	isTTY := false
+	outFd := -1
 	if f, ok := out.(*os.File); ok {
-		isTTY = term.IsTerminal(int(f.Fd()))
+		fd := int(f.Fd())
+		if term.IsTerminal(fd) {
+			isTTY = true
+			outFd = fd
+		}
 	}
 	hostnameWidth := computeHostnameWidth(hosts)
 
 	d := &LiveDisplay{
 		lines: make([]*HostLine, len(hosts)),
 		isTTY: isTTY,
+		outFd: outFd,
 		debug: opts.Debug,
 		out:   out,
 	}
@@ -197,6 +240,7 @@ func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 	d.concurrent = opts.Concurrent
 	d.applyConcurrencyBuffering()
 	d.initLiveMode()
+	d.initLiveLogWriter()
 
 	return d
 }
@@ -205,6 +249,14 @@ func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 type LiveDisplay struct {
 	lines []*HostLine
 	out   io.Writer
+
+	// outFd is the file descriptor of out when it is a queryable TTY; -1 otherwise.
+	// Used to query terminal width dynamically for separator lines.
+	outFd int
+
+	// logWriter tracks whether any log output has been written via LogWriter.
+	// Used by renderLines to decide whether to prepend a blank separator line.
+	logWriter *logWriter
 
 	// liveMode is the effective runtime state after evaluating display mode,
 	// debug, TTY, and any live startup fallback (for example singleton contention).
@@ -227,12 +279,14 @@ func (d *LiveDisplay) Line(i int) *HostLine {
 }
 
 // LogWriter returns a writer safe to use for permanent log output while the
-// live display is active.
+// live display is active. The returned writer tracks whether anything has been
+// written so that renderLines can insert a blank separator line between the log
+// stream and the host status block.
 func (d *LiveDisplay) LogWriter() io.Writer {
 	if !d.liveMode {
 		return nil
 	}
-	return liveterm.Bypass()
+	return d.logWriter
 }
 
 // Stop finalises output. In live mode it stops liveterm. In concurrent non-live
@@ -296,13 +350,24 @@ func (d *LiveDisplay) initLiveMode() {
 	liveterm.RefreshInterval = 100 * time.Millisecond
 	liveterm.Output = d.out
 	liveterm.SetMultiLinesUpdateFx(d.renderLines)
-	if err := liveterm.Start(); err != nil {
+	if err := startLiveTerm(); err != nil {
 		// If liveterm fails to start (e.g. no real TTY despite fd check), fall back.
 		d.release()
 		d.setLiveMode(false)
 		if d.concurrent {
 			d.initNonLive()
 		}
+	}
+}
+
+// initLiveLogWriter eagerly initializes the live log writer.
+// It is a no-op when live mode is disabled.
+func (d *LiveDisplay) initLiveLogWriter() {
+	if !d.liveMode {
+		return
+	}
+	if d.logWriter == nil {
+		d.logWriter = &logWriter{base: liveterm.Bypass(), outFd: d.outFd}
 	}
 }
 
@@ -347,9 +412,17 @@ func (d *LiveDisplay) renderLines() []string {
 	}()
 
 	// Now render all lines while holding all locks; no state can change during this render.
-	out := make([]string, len(d.lines))
-	for i, l := range d.lines {
-		out[i] = l.renderUnlocked()
+	// Prepend a blank separator line when logs have been written, so the host status
+	// block is visually distinct from the bypass log stream above it.
+	// Allocate enough capacity for all lines plus the optional separator up front
+	// to reduce append reallocations and avoid extra allocations in this hot refresh path.
+	var out = make([]string, 0, len(d.lines)+2)
+	if d.logWriter != nil && d.logWriter.HasWritten() {
+		out = append(out, "")
+	}
+	out = append(out, separatorLine("HOSTS STATUS", termWidth(d.outFd)))
+	for _, l := range d.lines {
+		out = append(out, l.renderUnlocked())
 	}
 	return out
 }
@@ -371,6 +444,33 @@ func (d *LiveDisplay) tryClaim() bool {
 	}
 	activeLiveDisp = d
 	return true
+}
+
+// termWidth returns the current terminal width for the given file descriptor.
+// Returns 80 if fd is negative or the terminal size cannot be determined.
+func termWidth(fd int) int {
+	if fd < 0 {
+		return 80
+	}
+	width, _, err := term.GetSize(fd)
+	if err != nil || width <= 0 {
+		return 80
+	}
+	return width
+}
+
+// separatorLine builds a separator of the form "── LABEL ──────...".
+// When width is large enough, the returned line is exactly width terminal
+// columns wide. If width is too small to accommodate the label section, it
+// returns the minimal "── LABEL" form and may therefore exceed width.
+func separatorLine(label string, width int) string {
+	base := "── " + label
+	baseCols := 3 + len([]rune(label))
+	trailing := width - baseCols - 1 // account for the space before trailing dashes
+	if trailing <= 0 {
+		return base
+	}
+	return base + " " + strings.Repeat("─", trailing)
 }
 
 // Helper to compute hostname column width based on the longest hostname, with min and max bounds.

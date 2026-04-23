@@ -77,10 +77,10 @@ func (w *logWriter) Write(p []byte) (int, error) {
 		header := []byte("── LOGS\n")
 		n, err := w.base.Write(header)
 		if err != nil {
-			return 0, err
+			return n, err
 		}
 		if n != len(header) {
-			return 0, io.ErrShortWrite
+			return n, io.ErrShortWrite
 		}
 		w.hasWritten = true
 	}

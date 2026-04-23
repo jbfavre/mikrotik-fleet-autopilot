@@ -641,7 +641,8 @@ func TestRenderLinesLocksAllHosts(t *testing.T) {
 }
 
 // TestRenderLinesDelimiterAlwaysPresent verifies the HOSTS STATUS delimiter is always
-// the first output line, regardless of whether any logs have been written.
+// present in the output: it is the first line when no logs have been written, and
+// is preceded by a blank separator line when logs have been written.
 func TestRenderLinesDelimiterAlwaysPresent(t *testing.T) {
 	d := newLiveModeDisplay(new(bytes.Buffer), []string{"host1", "host2"})
 

@@ -414,7 +414,9 @@ func (d *LiveDisplay) renderLines() []string {
 	// Now render all lines while holding all locks; no state can change during this render.
 	// Prepend a blank separator line when logs have been written, so the host status
 	// block is visually distinct from the bypass log stream above it.
-	var out []string
+	// We need to allocate the output slice with enough capacity for all lines plus the optional separator,
+	// to avoid reallocations during appends which could cause inconsistent snapshots if the underlying array is shared.
+	var out = make([]string, 0, len(d.lines)+2)
 	if d.logWriter != nil && d.logWriter.HasWritten() {
 		out = append(out, "")
 	}

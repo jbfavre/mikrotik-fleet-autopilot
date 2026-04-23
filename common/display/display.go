@@ -80,7 +80,7 @@ func (w *logWriter) Write(p []byte) (int, error) {
 			return n, err
 		}
 		if n != len(header) {
-			return n, io.ErrShortWrite
+			return 0, io.ErrShortWrite
 		}
 		w.hasWritten = true
 	}

@@ -63,7 +63,6 @@ type completedStep struct {
 // the log stream is visually labelled. renderLines uses HasWritten to decide
 // whether to add a blank separator line between the log stream and the host status block.
 type logWriter struct {
-	once       sync.Once
 	mu         sync.Mutex
 	base       io.Writer
 	outFd      int // file descriptor for terminal width queries; -1 for no TTY
@@ -71,13 +70,21 @@ type logWriter struct {
 }
 
 func (w *logWriter) Write(p []byte) (int, error) {
-	w.once.Do(func() {
-		w.mu.Lock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.hasWritten {
+		header := []byte("── LOGS\n")
+		n, err := w.base.Write(header)
+		if err != nil {
+			return 0, err
+		}
+		if n != len(header) {
+			return 0, io.ErrShortWrite
+		}
 		w.hasWritten = true
-		w.mu.Unlock()
-		header := "── LOGS\n"
-		w.base.Write([]byte(header)) //nolint:errcheck
-	})
+	}
+
 	return w.base.Write(p)
 }
 

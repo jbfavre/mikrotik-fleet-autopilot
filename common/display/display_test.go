@@ -776,6 +776,65 @@ func TestLogWriterWithSeparatorThreadSafe(t *testing.T) {
 	}
 }
 
+func TestLogWriterHeaderWriteFailureReturnsError(t *testing.T) {
+	w := &logWriter{base: failWriter{}, outFd: -1}
+
+	n, err := w.Write([]byte("test log"))
+
+	if err == nil {
+		t.Fatal("Write() should return an error when header write fails")
+	}
+	if n != 0 {
+		t.Fatalf("Write() bytes written = %d, want 0 on header failure", n)
+	}
+	if w.HasWritten() {
+		t.Fatal("HasWritten() should remain false when header write fails")
+	}
+}
+
+func TestLogWriterHeaderWriteFailureIsRetryable(t *testing.T) {
+	base := &failOnceWriter{}
+	w := &logWriter{base: base, outFd: -1}
+
+	if _, err := w.Write([]byte("first log")); err == nil {
+		t.Fatal("first Write() should fail when header write fails")
+	}
+	if w.HasWritten() {
+		t.Fatal("HasWritten() should remain false after transient header failure")
+	}
+
+	if n, err := w.Write([]byte("second log")); err != nil {
+		t.Fatalf("second Write() error = %v, want success", err)
+	} else if n != len("second log") {
+		t.Fatalf("second Write() bytes written = %d, want %d", n, len("second log"))
+	}
+	if !w.HasWritten() {
+		t.Fatal("HasWritten() should be true after successful retry")
+	}
+
+	got := base.buf.String()
+	want := "── LOGS\nsecond log"
+	if got != want {
+		t.Fatalf("buffer = %q, want %q", got, want)
+	}
+}
+
+func TestLogWriterHeaderShortWriteReturnsError(t *testing.T) {
+	w := &logWriter{base: shortWriteWriter{}, outFd: -1}
+
+	n, err := w.Write([]byte("test log"))
+
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("Write() error = %v, want io.ErrShortWrite", err)
+	}
+	if n != 0 {
+		t.Fatalf("Write() bytes written = %d, want 0 on short header write", n)
+	}
+	if w.HasWritten() {
+		t.Fatal("HasWritten() should remain false when header write is short")
+	}
+}
+
 // TestSeparatorLine verifies separatorLine builds correctly-sized strings.
 func TestSeparatorLine(t *testing.T) {
 	tests := []struct {
@@ -1010,6 +1069,28 @@ func (lw *lockedWriter) Write(p []byte) (int, error) {
 	lw.mu.Lock()
 	defer lw.mu.Unlock()
 	return lw.w.Write(p)
+}
+
+type failOnceWriter struct {
+	buf    bytes.Buffer
+	failed bool
+}
+
+func (w *failOnceWriter) Write(p []byte) (int, error) {
+	if !w.failed {
+		w.failed = true
+		return 0, errors.New("write failed once")
+	}
+	return w.buf.Write(p)
+}
+
+type shortWriteWriter struct{}
+
+func (shortWriteWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	return len(p) - 1, nil
 }
 
 type failWriter struct{}

@@ -710,8 +710,8 @@ func TestRenderLinesNoBlankLineWithoutLogs(t *testing.T) {
 // and that the LOGS header is emitted exactly once before the first log line.
 func TestLogWriterWithSeparatorTracksWrites(t *testing.T) {
 	var buf bytes.Buffer
-	// outFd: -1 → termWidth returns 80 (no TTY fallback)
-	w := &logWriter{base: &buf, outFd: -1}
+	// Only the output buffer matters for this behavior under test.
+	w := &logWriter{base: &buf}
 
 	if w.HasWritten() {
 		t.Errorf("expected HasWritten=false initially, got true")

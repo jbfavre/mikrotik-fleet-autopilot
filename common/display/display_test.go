@@ -832,6 +832,46 @@ func TestFormatHostnameWidthOneReturnsEllipsis(t *testing.T) {
 	}
 }
 
+func TestInitLiveLogWriterInitializesInLiveMode(t *testing.T) {
+	d := &LiveDisplay{liveMode: true, outFd: -1}
+
+	d.initLiveLogWriter()
+
+	if d.logWriter == nil {
+		t.Fatal("initLiveLogWriter() should initialize logWriter when live mode is enabled")
+	}
+	if d.logWriter.outFd != -1 {
+		t.Fatalf("logWriter.outFd = %d, want -1", d.logWriter.outFd)
+	}
+	if got := d.LogWriter(); got != d.logWriter {
+		t.Fatal("LogWriter() should return the eagerly initialized logWriter instance")
+	}
+}
+
+func TestInitLiveLogWriterNoOpWhenNotLiveMode(t *testing.T) {
+	d := &LiveDisplay{liveMode: false, outFd: -1}
+
+	d.initLiveLogWriter()
+
+	if d.logWriter != nil {
+		t.Fatal("initLiveLogWriter() should not initialize logWriter when live mode is disabled")
+	}
+}
+
+func TestLogWriterReturnsPreinitializedWriterInLiveMode(t *testing.T) {
+	want := &logWriter{base: io.Discard, outFd: -1}
+	d := &LiveDisplay{liveMode: true, logWriter: want}
+
+	got := d.LogWriter()
+
+	if got != want {
+		t.Fatalf("LogWriter() = %#v, want %#v", got, want)
+	}
+	if d.logWriter != want {
+		t.Fatal("LogWriter() should not replace the existing logWriter instance")
+	}
+}
+
 func TestLogWriterReturnsNilWhenNotLiveMode(t *testing.T) {
 	var buf bytes.Buffer
 	d := newTestDisplay(&buf, []string{"router1"})

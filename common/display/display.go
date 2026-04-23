@@ -232,6 +232,7 @@ func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 	}
 	d.concurrent = opts.Concurrent
 	d.applyConcurrencyBuffering()
+	d.initLiveLogWriter()
 	d.initLiveMode()
 
 	return d
@@ -277,9 +278,6 @@ func (d *LiveDisplay) Line(i int) *HostLine {
 func (d *LiveDisplay) LogWriter() io.Writer {
 	if !d.liveMode {
 		return nil
-	}
-	if d.logWriter == nil {
-		d.logWriter = &logWriter{base: liveterm.Bypass(), outFd: d.outFd}
 	}
 	return d.logWriter
 }
@@ -352,6 +350,17 @@ func (d *LiveDisplay) initLiveMode() {
 		if d.concurrent {
 			d.initNonLive()
 		}
+	}
+}
+
+// initLiveLogWriter eagerly initializes the live log writer.
+// It is a no-op when live mode is disabled.
+func (d *LiveDisplay) initLiveLogWriter() {
+	if !d.liveMode {
+		return
+	}
+	if d.logWriter == nil {
+		d.logWriter = &logWriter{base: liveterm.Bypass(), outFd: d.outFd}
 	}
 }
 

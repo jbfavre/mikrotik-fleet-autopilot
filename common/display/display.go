@@ -459,9 +459,10 @@ func termWidth(fd int) int {
 	return width
 }
 
-// separatorLine builds a full-width separator of the form "── LABEL ──────...".
-// The line is exactly width terminal columns wide. If width is too small to
-// accommodate the label, trailing dashes are omitted.
+// separatorLine builds a separator of the form "── LABEL ──────...".
+// When width is large enough, the returned line is exactly width terminal
+// columns wide. If width is too small to accommodate the label section, it
+// returns the minimal "── LABEL" form and may therefore exceed width.
 func separatorLine(label string, width int) string {
 	// prefix = "── " (3 cols) + label + " " (1 col)
 	prefix := "── " + label + " "

@@ -464,14 +464,13 @@ func termWidth(fd int) int {
 // columns wide. If width is too small to accommodate the label section, it
 // returns the minimal "── LABEL" form and may therefore exceed width.
 func separatorLine(label string, width int) string {
-	// prefix = "── " (3 cols) + label + " " (1 col)
-	prefix := "── " + label + " "
-	prefixCols := 3 + len([]rune(label)) + 1
-	trailing := width - prefixCols
-	if trailing < 0 {
-		return "── " + label
+	base := "── " + label
+	baseCols := 3 + len([]rune(label))
+	trailing := width - baseCols - 1 // account for the space before trailing dashes
+	if trailing <= 0 {
+		return base
 	}
-	return prefix + strings.Repeat("─", trailing)
+	return base + " " + strings.Repeat("─", trailing)
 }
 
 // Helper to compute hostname column width based on the longest hostname, with min and max bounds.

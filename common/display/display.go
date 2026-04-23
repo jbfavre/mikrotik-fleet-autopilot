@@ -239,8 +239,8 @@ func New(out io.Writer, hosts []string, opts InitOptions) *LiveDisplay {
 	}
 	d.concurrent = opts.Concurrent
 	d.applyConcurrencyBuffering()
-	d.initLiveLogWriter()
 	d.initLiveMode()
+	d.initLiveLogWriter()
 
 	return d
 }

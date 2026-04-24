@@ -12,8 +12,7 @@ import (
 )
 
 type topologyNode struct {
-	canonical   string
-	displayName string
+	name        string
 	isSource    bool
 	sourceOrder int
 	firstSeen   int
@@ -32,11 +31,8 @@ type topologyGraph struct {
 	g             *simple.UndirectedGraph
 	nodes         map[string]*topologyNode
 	idToName      map[int64]string
-	aliases       map[string]string
-	ambiguous     map[string]bool
 	outgoing      map[string]map[string][]*linkDetail
 	undirected    map[string][]*linkDetail
-	nextNodeID    int64
 	nextFirstSeen int
 }
 
@@ -57,11 +53,7 @@ func outputTopology(topo *topology) error {
 	}
 
 	graph := buildTopologyGraph(topo.results, topo.orderedHosts)
-	slog.Info("topology graph built",
-		"vertices", len(graph.nodes),
-		"resolved_aliases", len(graph.aliases),
-		"ambiguous_aliases", len(graph.ambiguous),
-	)
+	slog.Info("topology graph built", "vertices", len(graph.nodes))
 
 	fmt.Fprintf(out, "LLDP Topology Graph\n")
 	fmt.Fprintf(out, "%s\n\n", strings.Repeat("═", 63))
@@ -75,32 +67,29 @@ func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []str
 		g:          simple.NewUndirectedGraph(),
 		nodes:      make(map[string]*topologyNode),
 		idToName:   make(map[int64]string),
-		aliases:    make(map[string]string),
-		ambiguous:  make(map[string]bool),
 		outgoing:   make(map[string]map[string][]*linkDetail),
 		undirected: make(map[string][]*linkDetail),
-		nextNodeID: 1,
 	}
 
 	for idx, host := range orderedHosts {
-		result := results[host]
-		node := graph.getOrCreateNode(host, host, true, idx)
-		graph.addAlias(host, node.canonical)
-		graph.addAlias(shortName(host), node.canonical)
-		if result != nil {
-			graph.addAlias(result.SourceIdentity, node.canonical)
-			graph.addAlias(shortName(result.SourceIdentity), node.canonical)
-		}
+		graph.getOrCreateNode(host, true, idx)
 	}
 
-	for sourceHost, result := range results {
-		sourceNode := graph.getOrCreateNode(sourceHost, sourceHost, true, graph.sourceOrderOf(sourceHost, orderedHosts))
+	for _, sourceHost := range orderedHosts {
+		result := results[sourceHost]
+		if result == nil {
+			continue
+		}
+		sourceNode := graph.getOrCreateNode(sourceHost, true, graph.sourceOrderOf(sourceHost, orderedHosts))
 		for _, neighbor := range result.Neighbors {
-			dstCanonical, dstDisplay, resolved := graph.resolveIdentity(neighbor.Identity)
-			destination := graph.getOrCreateNode(dstCanonical, dstDisplay, resolved, -1)
-			graph.addLink(sourceNode.canonical, destination.canonical, &linkDetail{
-				from:           sourceNode.canonical,
-				to:             destination.canonical,
+			identity := neighbor.Identity
+			if identity == "" {
+				identity = "unknown"
+			}
+			destination := graph.getOrCreateNode(identity, false, -1)
+			graph.addLink(sourceNode.name, destination.name, &linkDetail{
+				from:           sourceNode.name,
+				to:             destination.name,
 				localInterface: neighbor.LocalInterface,
 				remoteIface:    neighbor.RemoteInterface,
 				protocols:      neighbor.DiscoveredBy,
@@ -120,15 +109,14 @@ func (g *topologyGraph) sourceOrderOf(host string, orderedHosts []string) int {
 	return -1
 }
 
-func (g *topologyGraph) getOrCreateNode(canonical, display string, isSource bool, sourceOrder int) *topologyNode {
-	node, ok := g.nodes[canonical]
+func (g *topologyGraph) getOrCreateNode(name string, isSource bool, sourceOrder int) *topologyNode {
+	node, ok := g.nodes[name]
 	if ok {
 		if isSource {
 			node.isSource = true
 			if sourceOrder >= 0 && (node.sourceOrder < 0 || sourceOrder < node.sourceOrder) {
 				node.sourceOrder = sourceOrder
 			}
-			node.displayName = canonical
 		}
 		return node
 	}
@@ -136,49 +124,19 @@ func (g *topologyGraph) getOrCreateNode(canonical, display string, isSource bool
 	n := g.g.NewNode()
 	g.g.AddNode(n)
 	node = &topologyNode{
-		canonical:   canonical,
-		displayName: display,
+		name:        name,
 		isSource:    isSource,
 		sourceOrder: sourceOrder,
 		firstSeen:   g.nextFirstSeen,
 		graphID:     n.ID(),
 	}
 	g.nextFirstSeen++
-	g.nodes[canonical] = node
-	g.idToName[n.ID()] = canonical
-	if _, ok := g.outgoing[canonical]; !ok {
-		g.outgoing[canonical] = make(map[string][]*linkDetail)
+	g.nodes[name] = node
+	g.idToName[n.ID()] = name
+	if _, ok := g.outgoing[name]; !ok {
+		g.outgoing[name] = make(map[string][]*linkDetail)
 	}
 	return node
-}
-
-func (g *topologyGraph) addAlias(alias, canonical string) {
-	if alias == "" {
-		return
-	}
-	if g.ambiguous[alias] {
-		return
-	}
-	if existing, ok := g.aliases[alias]; ok && existing != canonical {
-		delete(g.aliases, alias)
-		g.ambiguous[alias] = true
-		return
-	}
-	g.aliases[alias] = canonical
-}
-
-func (g *topologyGraph) resolveIdentity(identity string) (canonical string, display string, resolved bool) {
-	if identity == "" {
-		return "unknown", "unknown", false
-	}
-	if c, ok := g.aliases[identity]; ok {
-		return c, c, true
-	}
-	short := shortName(identity)
-	if c, ok := g.aliases[short]; ok {
-		return c, c, true
-	}
-	return identity, identity, false
 }
 
 func (g *topologyGraph) addLink(from, to string, detail *linkDetail) {
@@ -373,7 +331,7 @@ func renderComponent(out *os.File, graph *topologyGraph, component []string, roo
 		treeEdges[pairKey(p, child)] = true
 	}
 
-	fmt.Fprintf(out, "[%s]\n", graph.nodes[root].displayName)
+	fmt.Fprintf(out, "[%s]\n", graph.nodes[root].name)
 	renderChildren(out, graph, root, children, "")
 
 	crossLinks := make([]string, 0)
@@ -415,7 +373,7 @@ func renderChildren(out *os.File, graph *topologyGraph, parent string, children 
 			redundant = fmt.Sprintf(" [%dx]", len(edges))
 		}
 
-		fmt.Fprintf(out, "%s%s[%s]%s\n", indent, branch, graph.nodes[child].displayName, redundant)
+		fmt.Fprintf(out, "%s%s[%s]%s\n", indent, branch, graph.nodes[child].name, redundant)
 
 		for j, edge := range edges {
 			if j >= 2 {
@@ -460,10 +418,10 @@ func formatCrossLink(graph *topologyGraph, left, right string, count int) string
 	leftLabel := left
 	rightLabel := right
 	if node := graph.nodes[left]; node != nil {
-		leftLabel = node.displayName
+		leftLabel = node.name
 	}
 	if node := graph.nodes[right]; node != nil {
-		rightLabel = node.displayName
+		rightLabel = node.name
 	}
 	extra := ""
 	if count > 1 {

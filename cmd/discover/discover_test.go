@@ -9,7 +9,6 @@ import (
 func TestBuildTopologyGraph_Basic(t *testing.T) {
 	results := map[string]*lldp.ParseResult{
 		"device1": {
-			SourceIdentity: "device1",
 			Neighbors: []*lldp.Neighbor{
 				{
 					LocalInterface:  "sfp1",
@@ -20,8 +19,7 @@ func TestBuildTopologyGraph_Basic(t *testing.T) {
 			},
 		},
 		"device2": {
-			SourceIdentity: "device2",
-			Neighbors:      []*lldp.Neighbor{},
+			Neighbors: []*lldp.Neighbor{},
 		},
 	}
 
@@ -42,7 +40,6 @@ func TestBuildTopologyGraph_Basic(t *testing.T) {
 func TestBuildTopologyGraph_RedundantLinksMultiplicity(t *testing.T) {
 	results := map[string]*lldp.ParseResult{
 		"source": {
-			SourceIdentity: "source",
 			Neighbors: []*lldp.Neighbor{
 				{
 					LocalInterface:  "ether9",
@@ -68,14 +65,13 @@ func TestBuildTopologyGraph_RedundantLinksMultiplicity(t *testing.T) {
 func TestSelectRoots_PrefersHigherDegree(t *testing.T) {
 	results := map[string]*lldp.ParseResult{
 		"a": {
-			SourceIdentity: "a",
 			Neighbors: []*lldp.Neighbor{
 				{Identity: "b"},
 				{Identity: "c"},
 			},
 		},
-		"b": {SourceIdentity: "b", Neighbors: []*lldp.Neighbor{}},
-		"c": {SourceIdentity: "c", Neighbors: []*lldp.Neighbor{}},
+		"b": {Neighbors: []*lldp.Neighbor{}},
+		"c": {Neighbors: []*lldp.Neighbor{}},
 	}
 
 	graph := buildTopologyGraph(results, []string{"a", "b", "c"})
@@ -86,31 +82,6 @@ func TestSelectRoots_PrefersHigherDegree(t *testing.T) {
 	}
 	if roots[0] != "a" {
 		t.Errorf("expected root a (highest degree), got %s", roots[0])
-	}
-}
-
-func TestBuildTopologyGraph_ReconcileIdentityToHostname(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
-		"router1.example.com": {
-			SourceIdentity: "core",
-			Neighbors:      []*lldp.Neighbor{},
-		},
-		"router70.example.com": {
-			SourceIdentity: "router70",
-			Neighbors: []*lldp.Neighbor{
-				{
-					LocalInterface:  "sfp1",
-					Identity:        "core.example.com",
-					RemoteInterface: "sfp7",
-				},
-			},
-		},
-	}
-
-	graph := buildTopologyGraph(results, []string{"router1.example.com", "router70.example.com"})
-	edges := graph.outgoing["router70.example.com"]["router1.example.com"]
-	if len(edges) != 1 {
-		t.Fatalf("expected 1 reconciled edge, got %d", len(edges))
 	}
 }
 

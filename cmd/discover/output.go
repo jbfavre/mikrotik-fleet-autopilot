@@ -356,39 +356,67 @@ func renderComponent(out *os.File, graph *topologyGraph, component []string, roo
 	return treeEdges
 }
 
+func padRight(s string, width int) string {
+	if len(s) >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-len(s))
+}
+
 func renderChildren(out *os.File, graph *topologyGraph, parent string, children map[string][]string, indent string) {
 	kids := children[parent]
 	for i, child := range kids {
 		isLast := i == len(kids)-1
 		branch := "├─ "
-		nextIndent := indent + "│  "
+		vertBar := "│"
 		if isLast {
 			branch = "└─ "
-			nextIndent = indent + "   "
+			vertBar = " "
 		}
 
+		childName := graph.nodes[child].name
 		edges := edgeDetailsBetween(graph, parent, child)
-		redundant := ""
-		if len(edges) > 1 {
-			redundant = fmt.Sprintf(" [%dx]", len(edges))
+
+		if len(edges) == 0 {
+			// No edge details (edge came from peer side only) — print node label only
+			fmt.Fprintf(out, "%s%s[%s]\n", indent, branch, childName)
+			renderChildren(out, graph, child, children, indent+vertBar+"   ")
+			continue
 		}
 
-		fmt.Fprintf(out, "%s%s[%s]%s\n", indent, branch, graph.nodes[child].name, redundant)
-
-		for j, edge := range edges {
-			if j >= 2 {
-				if len(edges) > 2 {
-					fmt.Fprintf(out, "%s└─ (+%d more)\n", nextIndent, len(edges)-2)
-				}
-				break
+		maxLocalLen := 0
+		for _, e := range edges {
+			if len(e.localInterface) > maxLocalLen {
+				maxLocalLen = len(e.localInterface)
 			}
-			detailPrefix := "├─"
-			if j == len(edges)-1 || (j == 1 && len(edges) > 2) {
-				detailPrefix = "└─"
-			}
-			fmt.Fprintf(out, "%s%s %s → %s\n", nextIndent, detailPrefix, edge.localInterface, edge.remoteIface)
 		}
 
+		// First edge: branch + localIface → [child] ← remoteIface
+		fmt.Fprintf(out, "%s%s%s → [%s] ← %s\n",
+			indent, branch,
+			padRight(edges[0].localInterface, maxLocalLen),
+			childName,
+			edges[0].remoteIface,
+		)
+
+		// Additional parallel edges: aligned continuation lines
+		// "←" must be at the same column as on the first edge line.
+		// First-line "←" col  = len(indent) + 3 + maxLocalLen + 4 + len(childName) + 2
+		// Continuation prefix = len(indent) + 1(vertBar) + 2("  ") + maxLocalLen
+		// Fill to align       = len(childName) + 6
+		for _, edge := range edges[1:] {
+			fmt.Fprintf(out, "%s%s  %s%s← %s\n",
+				indent, vertBar,
+				padRight(edge.localInterface, maxLocalLen),
+				strings.Repeat(" ", len(childName)+6),
+				edge.remoteIface,
+			)
+		}
+
+		// nextIndent positions grandchildren's branch char under "[" of [child]
+		// "[" col = len(indent) + 3(branch) + maxLocalLen + 3(" → ") = len(indent) + maxLocalLen + 6
+		// nextIndent = indent + vertBar(1) + spaces(maxLocalLen+5)  →  branch lands at col maxLocalLen+6 ✓
+		nextIndent := indent + vertBar + strings.Repeat(" ", maxLocalLen+5)
 		renderChildren(out, graph, child, children, nextIndent)
 	}
 }

@@ -1,0 +1,19 @@
+ 0 interface=sfp-sfpplus3,br-lan address=fe80::a55:31ff:fe5a:abc6 
+   address6=fe80::a55:31ff:fe5a:abc6 mac-address=08:55:31:5A:AB:D0 
+   identity="router30-rb4011.jbfav.re" platform="MikroTik" 
+   version="7.22.2 (stable) 2026-04-22 08:03:57" unpack=none age=3s 
+   board="RB4011iGS+" ipv6=yes interface-name="br-lan/sfp-sfpplus1" 
+   system-description="MikroTik RouterOS 7.22.2 (stable) 2026-04-22 08:03:57 
+                   RB4011iGS+" 
+   system-caps=bridge,router system-caps-enabled=bridge,router 
+   discovered-by=lldp 
+
+ 1 interface=sfp-sfpplus7,br-lan address=fe80::de2c:6eff:fe68:63cf 
+   address6=fe80::de2c:6eff:fe68:63cf mac-address=DC:2C:6E:68:63:CF 
+   identity="router70-rb4011.jbfav.re" platform="MikroTik" 
+   version="7.22.2 (stable) 2026-04-22 08:03:57" unpack=none age=0s 
+   board="RB4011iGS+" ipv6=yes interface-name="br-lan/sfp-sfpplus1" 
+   system-description="MikroTik RouterOS 7.22.2 (stable) 2026-04-22 08:03:57 
+                   RB4011iGS+" 
+   system-caps=bridge,router system-caps-enabled=bridge,router 
+   discovered-by=lldp 

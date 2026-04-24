@@ -1,0 +1,29 @@
+ 0 interface=ether9,bond0,br-lan address=fe80::a55:31ff:fe4f:4c84 
+   address6=fe80::a55:31ff:fe4f:4c84 mac-address=08:55:31:4F:4C:85 
+   identity="router71-capac.jbfav.re" platform="MikroTik" 
+   version="7.22.2 (stable) 2026-04-22 08:03:57" unpack=none age=1s 
+   board="RBcAPGi-5acD2nD" ipv6=yes interface-name="br-lan/bond0/ether2" 
+   system-description="MikroTik RouterOS 7.22.2 (stable) 2026-04-22 08:03:57 
+                   RBcAPGi-5acD2nD" 
+   system-caps=bridge,router system-caps-enabled=bridge,router 
+   discovered-by=lldp 
+
+ 1 interface=ether10,bond0,br-lan address=fe80::a55:31ff:fe4f:4c84 
+   address6=fe80::a55:31ff:fe4f:4c84 mac-address=08:55:31:4F:4C:84 
+   identity="router71-capac.jbfav.re" platform="MikroTik" 
+   version="7.22.2 (stable) 2026-04-22 08:03:57" unpack=none age=1s 
+   board="RBcAPGi-5acD2nD" ipv6=yes interface-name="br-lan/bond0/ether1" 
+   system-description="MikroTik RouterOS 7.22.2 (stable) 2026-04-22 08:03:57 
+                   RBcAPGi-5acD2nD" 
+   system-caps=bridge,router system-caps-enabled=bridge,router 
+   discovered-by=lldp 
+
+ 2 interface=sfp-sfpplus1,br-lan address=fe80::2ec8:1bff:fe39:74b6 
+   address6=fe80::2ec8:1bff:fe39:74b6 mac-address=2C:C8:1B:39:74:BD 
+   identity="core.jbfav.re" platform="MikroTik" 
+   version="7.22.2 (stable) 2026-04-22 08:03:57" unpack=none age=2s 
+   board="CCR2004-1G-12S+2XS" ipv6=yes interface-name="br-lan/sfp-sfpplus7" 
+   system-description="MikroTik RouterOS 7.22.2 (stable) 2026-04-22 08:03:57 
+                   CCR2004-1G-12S+2XS" 
+   system-caps=bridge,router system-caps-enabled=bridge,router 
+   discovered-by=lldp 

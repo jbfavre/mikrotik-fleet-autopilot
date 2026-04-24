@@ -1,0 +1,19 @@
+ 0 interface=ether1,bond0,br-lan address=fe80::a55:31ff:fe5a:abc6 
+   address6=fe80::a55:31ff:fe5a:abc6 mac-address=08:55:31:5A:AB:CF 
+   identity="router30-rb4011.jbfav.re" platform="MikroTik" 
+   version="7.22.2 (stable) 2026-04-22 08:03:57" unpack=none age=2s 
+   board="RB4011iGS+" ipv6=yes interface-name="br-lan/bond0/ether10" 
+   system-description="MikroTik RouterOS 7.22.2 (stable) 2026-04-22 08:03:57 
+                   RB4011iGS+" 
+   system-caps=bridge,router system-caps-enabled=bridge,router 
+   discovered-by=lldp 
+
+ 1 interface=ether2,bond0,br-lan address=fe80::a55:31ff:fe5a:abc6 
+   address6=fe80::a55:31ff:fe5a:abc6 mac-address=08:55:31:5A:AB:CE 
+   identity="router30-rb4011.jbfav.re" platform="MikroTik" 
+   version="7.22.2 (stable) 2026-04-22 08:03:57" unpack=none age=2s 
+   board="RB4011iGS+" ipv6=yes interface-name="br-lan/bond0/ether9" 
+   system-description="MikroTik RouterOS 7.22.2 (stable) 2026-04-22 08:03:57 
+                   RB4011iGS+" 
+   system-caps=bridge,router system-caps-enabled=bridge,router 
+   discovered-by=lldp 

@@ -220,7 +220,7 @@ func TestParseNeighbors_EmptyInput(t *testing.T) {
 		t.Fatalf("ParseNeighbors failed: %v", err)
 	}
 	if result == nil {
-		t.Error("ParseNeighbors returned nil")
+		t.Fatal("ParseNeighbors returned nil")
 	}
 	if len(result.Neighbors) != 0 {
 		t.Errorf("expected 0 neighbors, got %d", len(result.Neighbors))

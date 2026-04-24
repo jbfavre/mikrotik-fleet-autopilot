@@ -40,23 +40,35 @@ func outputTopology(topo *topology) error {
 	out := os.Stdout
 
 	if len(topo.errors) > 0 {
-		fmt.Fprintf(out, "Discovery Errors:\n")
-		for host, err := range topo.errors {
-			fmt.Fprintf(out, "  %s: %v\n", host, err)
+		if _, werr := fmt.Fprintf(out, "Discovery Errors:\n"); werr != nil {
+			return werr
 		}
-		fmt.Fprintf(out, "\n")
+		for host, err := range topo.errors {
+			if _, werr := fmt.Fprintf(out, "  %s: %v\n", host, err); werr != nil {
+				return werr
+			}
+		}
+		if _, werr := fmt.Fprintf(out, "\n"); werr != nil {
+			return werr
+		}
 	}
 
 	if len(topo.results) == 0 {
-		fmt.Fprintf(out, "No neighbors discovered.\n")
+		if _, werr := fmt.Fprintf(out, "No neighbors discovered.\n"); werr != nil {
+			return werr
+		}
 		return nil
 	}
 
 	graph := buildTopologyGraph(topo.results, topo.orderedHosts)
 	slog.Info("topology graph built", "vertices", len(graph.nodes))
 
-	fmt.Fprintf(out, "LLDP Topology Graph\n")
-	fmt.Fprintf(out, "%s\n\n", strings.Repeat("═", 63))
+	if _, werr := fmt.Fprintf(out, "LLDP Topology Graph\n"); werr != nil {
+		return werr
+	}
+	if _, werr := fmt.Fprintf(out, "%s\n\n", strings.Repeat("═", 63)); werr != nil {
+		return werr
+	}
 
 	renderTopologyGraph(out, graph, topo.orderedHosts)
 	return nil
@@ -168,7 +180,7 @@ func renderTopologyGraph(out *os.File, graph *topologyGraph, orderedHosts []stri
 	totalTreeEdges := 0
 	for i, root := range roots {
 		if i > 0 {
-			fmt.Fprintf(out, "\n")
+			_, _ = fmt.Fprintf(out, "\n")
 		}
 		treeEdges := renderComponent(out, graph, components[i], root)
 		totalTreeEdges += len(treeEdges)
@@ -331,7 +343,7 @@ func renderComponent(out *os.File, graph *topologyGraph, component []string, roo
 		treeEdges[pairKey(p, child)] = true
 	}
 
-	fmt.Fprintf(out, "[%s]\n", graph.nodes[root].name)
+	_, _ = fmt.Fprintf(out, "[%s]\n", graph.nodes[root].name)
 	renderChildren(out, graph, root, children, "")
 
 	crossLinks := make([]string, 0)
@@ -347,9 +359,9 @@ func renderComponent(out *os.File, graph *topologyGraph, component []string, roo
 	}
 
 	if len(crossLinks) > 0 {
-		fmt.Fprintf(out, "  Cross-links:\n")
+		_, _ = fmt.Fprintf(out, "  Cross-links:\n")
 		for _, line := range crossLinks {
-			fmt.Fprintf(out, "    %s\n", line)
+			_, _ = fmt.Fprintf(out, "    %s\n", line)
 		}
 	}
 
@@ -379,7 +391,7 @@ func renderChildren(out *os.File, graph *topologyGraph, parent string, children 
 
 		if len(edges) == 0 {
 			// No edge details (edge came from peer side only) — print node label only
-			fmt.Fprintf(out, "%s%s[%s]\n", indent, branch, childName)
+			_, _ = fmt.Fprintf(out, "%s%s[%s]\n", indent, branch, childName)
 			renderChildren(out, graph, child, children, indent+vertBar+"   ")
 			continue
 		}
@@ -392,7 +404,7 @@ func renderChildren(out *os.File, graph *topologyGraph, parent string, children 
 		}
 
 		// First edge: branch + localIface → [child] ← remoteIface
-		fmt.Fprintf(out, "%s%s%s → [%s] ← %s\n",
+		_, _ = fmt.Fprintf(out, "%s%s%s → [%s] ← %s\n",
 			indent, branch,
 			padRight(edges[0].localInterface, maxLocalLen),
 			childName,
@@ -405,7 +417,7 @@ func renderChildren(out *os.File, graph *topologyGraph, parent string, children 
 		// Continuation prefix = len(indent) + 1(vertBar) + 2("  ") + maxLocalLen
 		// Fill to align       = len(childName) + 6
 		for _, edge := range edges[1:] {
-			fmt.Fprintf(out, "%s%s  %s%s← %s\n",
+			_, _ = fmt.Fprintf(out, "%s%s  %s%s← %s\n",
 				indent, vertBar,
 				padRight(edge.localInterface, maxLocalLen),
 				strings.Repeat(" ", len(childName)+6),
@@ -487,10 +499,10 @@ func printSummary(out *os.File, graph *topologyGraph, treeEdgeCount int) {
 		totalLinks += len(edges)
 	}
 
-	fmt.Fprintf(out, "\n%s\n", strings.Repeat("─", 63))
-	fmt.Fprintf(out, "Summary:\n")
-	fmt.Fprintf(out, "  Devices: %d\n", len(graph.nodes))
-	fmt.Fprintf(out, "  Total links: %d\n", totalLinks)
-	fmt.Fprintf(out, "  Tree links: %d\n", treeEdgeCount)
-	fmt.Fprintf(out, "  Cross-links: %d\n", len(graph.undirected)-treeEdgeCount)
+	_, _ = fmt.Fprintf(out, "\n%s\n", strings.Repeat("─", 63))
+	_, _ = fmt.Fprintf(out, "Summary:\n")
+	_, _ = fmt.Fprintf(out, "  Devices: %d\n", len(graph.nodes))
+	_, _ = fmt.Fprintf(out, "  Total links: %d\n", totalLinks)
+	_, _ = fmt.Fprintf(out, "  Tree links: %d\n", treeEdgeCount)
+	_, _ = fmt.Fprintf(out, "  Cross-links: %d\n", len(graph.undirected)-treeEdgeCount)
 }

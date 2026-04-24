@@ -87,7 +87,7 @@ func discoverTopology(ctx context.Context, hosts []string) (*topology, error) {
 		if err != nil {
 			slog.Warn("command failed", "host", host, "error", err)
 			topo.errors[host] = fmt.Errorf("command failed: %w", err)
-			conn.Close()
+			_ = conn.Close()
 			continue
 		}
 
@@ -96,7 +96,7 @@ func discoverTopology(ctx context.Context, hosts []string) (*topology, error) {
 		if err != nil {
 			slog.Warn("parse failed", "host", host, "error", err)
 			topo.errors[host] = fmt.Errorf("parse failed: %w", err)
-			conn.Close()
+			_ = conn.Close()
 			continue
 		}
 
@@ -109,7 +109,7 @@ func discoverTopology(ctx context.Context, hosts []string) (*topology, error) {
 		topo.results[host] = result
 		slog.Info("discovered neighbors", "host", host, "count", len(result.Neighbors))
 
-		conn.Close()
+		_ = conn.Close()
 	}
 
 	return topo, nil

@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+// Globally define regexp to avoid compiling them on every call
+
+// isRecordStart checks if a line begins with whitespace and a number
+var isRecordStart = regexp.MustCompile(`^\s*\d+\s+`)
+// extractRecordRemainder removes the leading number and whitespace from a record start line
+var extractRecordRemainder = regexp.MustCompile(`^\s*\d+\s+`)
+// checks key=value pattern
+var checkKeyValue = regexp.MustCompile(`^\s+(\S+?)=`)
+
 // ParseNeighbors parses LLDP neighbor output into a structured ParseResult
 func ParseNeighbors(raw string) (*ParseResult, error) {
 	result := &ParseResult{
@@ -63,13 +72,13 @@ func splitRecords(raw string) []string {
 
 	for _, line := range lines {
 		// Check if this line starts a new record (begins with number)
-		if isRecordStart(line) {
+		if isRecordStart.MatchString(line) {
 			// Save previous record if exists
 			if current != nil {
 				records = append(records, current.String())
 			}
 			// Start new record: extract number and remainder
-			remainder := extractRecordRemainder(line)
+			remainder := extractRecordRemainder.ReplaceAllString(line, "")
 			current = &strings.Builder{}
 			current.WriteString(remainder)
 		} else if current != nil {
@@ -88,18 +97,6 @@ func splitRecords(raw string) []string {
 	}
 
 	return records
-}
-
-// isRecordStart checks if a line begins with whitespace and a number
-func isRecordStart(line string) bool {
-	re := regexp.MustCompile(`^\s*\d+\s+`)
-	return re.MatchString(line)
-}
-
-// extractRecordRemainder removes the leading number and whitespace from a record start line
-func extractRecordRemainder(line string) string {
-	re := regexp.MustCompile(`^\s*\d+\s+`)
-	return re.ReplaceAllString(line, "")
 }
 
 // tokenizeKeyValue parses a single record string into key-value pairs
@@ -162,7 +159,7 @@ func tokenizeKeyValue(record string) (map[string]string, error) {
 				if isSpace(record[j]) {
 					// Check if followed by a key=
 					rest := record[j:]
-					if match := regexp.MustCompile(`^\s+(\S+?)=`).FindStringIndex(rest); match != nil {
+					if match := checkKeyValue.FindStringIndex(rest); match != nil {
 						valEnd = j
 						break
 					}

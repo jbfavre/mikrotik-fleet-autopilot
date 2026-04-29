@@ -19,8 +19,8 @@ type Neighbor struct {
 	Board    string // hardware model (RB4011iGS+, CCR2004-1G-12S+2XS, etc.)
 
 	// Network addressing
-	Address    string // IPv4 address (fe80:: prefix for link-local)
-	Address6   string // IPv6 address
+	Address    string // IPv4 address
+	Address6   string // IPv6 address (fe80:: prefix for link-local)
 	MacAddress string // hardware MAC address
 
 	// Device capabilities and protocols

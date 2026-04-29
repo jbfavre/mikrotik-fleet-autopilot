@@ -94,7 +94,9 @@ func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []str
 		}
 		sourceNode := graph.getOrCreateNode(sourceHost, true, graph.sourceOrderOf(sourceHost, orderedHosts))
 		for _, neighbor := range result.Neighbors {
-			identity := neighbor.Identity
+			identity := strings.TrimSpace(neighbor.Identity)
+			// Ensure we have a default value for identity
+			// to avoid empty brackets when displaying topology
 			if identity == "" {
 				identity = "unknown"
 			}

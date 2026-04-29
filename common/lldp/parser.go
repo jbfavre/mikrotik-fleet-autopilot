@@ -10,8 +10,10 @@ import (
 
 // isRecordStart checks if a line begins with whitespace and a number
 var isRecordStart = regexp.MustCompile(`^\s*\d+\s+`)
+
 // extractRecordRemainder removes the leading number and whitespace from a record start line
 var extractRecordRemainder = regexp.MustCompile(`^\s*\d+\s+`)
+
 // checks key=value pattern
 var checkKeyValue = regexp.MustCompile(`^\s+(\S+?)=`)
 

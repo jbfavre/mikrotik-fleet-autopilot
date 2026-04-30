@@ -2,8 +2,8 @@ package discover
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
-	"os"
 	"sort"
 	"strings"
 
@@ -36,9 +36,7 @@ type topologyGraph struct {
 	nextFirstSeen int
 }
 
-func outputTopology(topo *topology) error {
-	out := os.Stdout
-
+func outputTopology(out io.Writer, topo *topology) error {
 	if len(topo.errors) > 0 {
 		if _, werr := fmt.Fprintf(out, "Discovery Errors:\n"); werr != nil {
 			return werr
@@ -83,7 +81,9 @@ func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []str
 		undirected: make(map[string][]*linkDetail),
 	}
 
+	hostOrder := make(map[string]int, len(orderedHosts))
 	for idx, host := range orderedHosts {
+		hostOrder[host] = idx
 		graph.getOrCreateNode(host, true, idx)
 	}
 
@@ -92,7 +92,7 @@ func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []str
 		if result == nil {
 			continue
 		}
-		sourceNode := graph.getOrCreateNode(sourceHost, true, graph.sourceOrderOf(sourceHost, orderedHosts))
+		sourceNode := graph.getOrCreateNode(sourceHost, true, hostOrder[sourceHost])
 		for _, neighbor := range result.Neighbors {
 			identity := strings.TrimSpace(neighbor.Identity)
 			// Ensure we have a default value for identity
@@ -112,15 +112,6 @@ func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []str
 	}
 
 	return graph
-}
-
-func (g *topologyGraph) sourceOrderOf(host string, orderedHosts []string) int {
-	for idx, h := range orderedHosts {
-		if h == host {
-			return idx
-		}
-	}
-	return -1
 }
 
 func (g *topologyGraph) getOrCreateNode(name string, isSource bool, sourceOrder int) *topologyNode {
@@ -175,7 +166,7 @@ func (g *topologyGraph) addLink(from, to string, detail *linkDetail) {
 	}
 }
 
-func renderTopologyGraph(out *os.File, graph *topologyGraph, orderedHosts []string) {
+func renderTopologyGraph(out io.Writer, graph *topologyGraph, orderedHosts []string) {
 	components := connectedComponents(graph)
 	roots := selectRoots(graph, components, orderedHosts)
 
@@ -184,7 +175,7 @@ func renderTopologyGraph(out *os.File, graph *topologyGraph, orderedHosts []stri
 		if i > 0 {
 			_, _ = fmt.Fprintf(out, "\n")
 		}
-		treeEdges := renderComponent(out, graph, components[i], root)
+		treeEdges := renderComponent(out, graph, components[i], root, orderedHosts)
 		totalTreeEdges += len(treeEdges)
 	}
 
@@ -301,7 +292,7 @@ func (g *topologyGraph) neighbors(name string) []string {
 	return neighbors
 }
 
-func renderComponent(out *os.File, graph *topologyGraph, component []string, root string) map[string]bool {
+func renderComponent(out io.Writer, graph *topologyGraph, component []string, root string, orderedHosts []string) map[string]bool {
 	inComponent := make(map[string]bool)
 	for _, name := range component {
 		inComponent[name] = true
@@ -317,7 +308,7 @@ func renderComponent(out *os.File, graph *topologyGraph, component []string, roo
 		queue = queue[1:]
 		neighbors := graph.neighbors(current)
 		sort.Slice(neighbors, func(i, j int) bool {
-			return betterNode(graph, neighbors[i], neighbors[j], nil)
+			return betterNode(graph, neighbors[i], neighbors[j], orderedHosts)
 		})
 		for _, next := range neighbors {
 			if !inComponent[next] || visited[next] {
@@ -336,7 +327,7 @@ func renderComponent(out *os.File, graph *topologyGraph, component []string, roo
 	}
 	for p := range children {
 		sort.Slice(children[p], func(i, j int) bool {
-			return betterNode(graph, children[p][i], children[p][j], nil)
+			return betterNode(graph, children[p][i], children[p][j], orderedHosts)
 		})
 	}
 
@@ -377,7 +368,7 @@ func padRight(s string, width int) string {
 	return s + strings.Repeat(" ", width-len(s))
 }
 
-func renderChildren(out *os.File, graph *topologyGraph, parent string, children map[string][]string, indent string) {
+func renderChildren(out io.Writer, graph *topologyGraph, parent string, children map[string][]string, indent string) {
 	kids := children[parent]
 	for i, child := range kids {
 		isLast := i == len(kids)-1
@@ -495,7 +486,7 @@ func shortName(fqdn string) string {
 	return parts[0]
 }
 
-func printSummary(out *os.File, graph *topologyGraph, treeEdgeCount int) {
+func printSummary(out io.Writer, graph *topologyGraph, treeEdgeCount int) {
 	totalLinks := 0
 	for _, edges := range graph.undirected {
 		totalLinks += len(edges)

@@ -196,7 +196,28 @@ func TestParseNeighbor_AllFields(t *testing.T) {
 	}
 }
 
-// Integration Tests
+func TestTokenizeKeyValue_UnterminatedQuote(t *testing.T) {
+	record := `identity="router30-rb4011`
+	_, err := tokenizeKeyValue(record)
+	if err == nil {
+		t.Error("tokenizeKeyValue should error on unterminated quoted value")
+	}
+}
+
+func TestParseNeighbors_SourceIdentity(t *testing.T) {
+	raw := "[admin@router1] > /ip/neighbor/print detail\n" +
+		` 0 interface=sfp-sfpplus3,br-lan identity="router30-rb4011.jbfav.re" platform="MikroTik"`
+	result, err := ParseNeighbors(raw)
+	if err != nil {
+		t.Fatalf("ParseNeighbors failed: %v", err)
+	}
+	if result.SourceIdentity != "router1" {
+		t.Errorf("SourceIdentity = %q, want router1", result.SourceIdentity)
+	}
+	if len(result.Neighbors) != 1 {
+		t.Errorf("expected 1 neighbor, got %d", len(result.Neighbors))
+	}
+}
 
 func TestParseNeighbors_EmptyInput(t *testing.T) {
 	result, err := ParseNeighbors("")

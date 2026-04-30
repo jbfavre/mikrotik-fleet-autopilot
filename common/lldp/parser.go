@@ -145,10 +145,11 @@ func tokenizeKeyValue(record string) (map[string]string, error) {
 				}
 				i++
 			}
-			value := record[valStart:i]
-			if i < len(record) {
-				i++ // skip closing quote
+			if i >= len(record) {
+				return nil, fmt.Errorf("unterminated quoted value for key %q", key)
 			}
+			value := record[valStart:i]
+			i++ // skip closing quote
 			fields[key] = value
 		} else {
 			// Unquoted value: collect until next key= pattern or end

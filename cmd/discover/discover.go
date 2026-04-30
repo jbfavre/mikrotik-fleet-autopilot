@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
@@ -52,7 +53,7 @@ func discoverAction(ctx context.Context) error {
 	)
 
 	// Render output
-	return outputTopology(topology)
+	return outputTopology(os.Stdout, topology)
 }
 
 // topology holds discovery results indexed by source host

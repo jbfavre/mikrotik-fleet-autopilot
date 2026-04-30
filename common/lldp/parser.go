@@ -14,8 +14,14 @@ var isRecordStart = regexp.MustCompile(`^\s*\d+\s+`)
 // extractRecordRemainder removes the leading number and whitespace from a record start line
 var extractRecordRemainder = regexp.MustCompile(`^\s*\d+\s+`)
 
-// checks key=value pattern
+// Checks key=value pattern
 var checkKeyValue = regexp.MustCompile(`^\s+(\S+?)=`)
+
+// DetectSourceIdentity extracts device name from prompt line like "[user@device] >"
+var detectSourceIdentity = regexp.MustCompile(`\[.*?@(.+?)\]\s*[>/]`)
+
+// normalizeWhitespace collapses multiple spaces and newlines into single spaces
+var normalizeWhitespace = regexp.MustCompile(`\s+`)
 
 // ParseNeighbors parses LLDP neighbor output into a structured ParseResult
 func ParseNeighbors(raw string) (*ParseResult, error) {
@@ -29,7 +35,12 @@ func ParseNeighbors(raw string) (*ParseResult, error) {
 	}
 
 	// Extract source identity if present (from prompt line like "[user@device] >")
-	result.SourceIdentity = DetectSourceIdentity(raw)
+	result.SourceIdentity = ""
+	matches := detectSourceIdentity.FindStringSubmatch(raw)
+	if len(matches) > 1 {
+		result.SourceIdentity = matches[1]
+	}
+
 
 	// Split into individual record strings
 	records := splitRecords(raw)
@@ -52,17 +63,6 @@ func ParseNeighbors(raw string) (*ParseResult, error) {
 	}
 
 	return result, nil
-}
-
-// DetectSourceIdentity extracts device name from prompt line like "[user@device] >"
-func DetectSourceIdentity(raw string) string {
-	// Pattern: [anything@devicename] > or [anything@devicename] /
-	re := regexp.MustCompile(`\[.*?@(.+?)\]\s*[>/]`)
-	matches := re.FindStringSubmatch(raw)
-	if len(matches) > 1 {
-		return matches[1]
-	}
-	return ""
 }
 
 // splitRecords breaks raw output into numbered records
@@ -107,7 +107,7 @@ func tokenizeKeyValue(record string) (map[string]string, error) {
 	fields := make(map[string]string)
 
 	// Normalize whitespace in multiline values (e.g., system-description)
-	record = normalizeWhitespace(record)
+	record = normalizeWhitespace.ReplaceAllString(record, " ")
 
 	i := 0
 	for i < len(record) {
@@ -176,12 +176,6 @@ func tokenizeKeyValue(record string) (map[string]string, error) {
 	}
 
 	return fields, nil
-}
-
-// normalizeWhitespace collapses multiple spaces and newlines into single spaces
-func normalizeWhitespace(s string) string {
-	re := regexp.MustCompile(`\s+`)
-	return re.ReplaceAllString(s, " ")
 }
 
 // isSpace checks if character is whitespace

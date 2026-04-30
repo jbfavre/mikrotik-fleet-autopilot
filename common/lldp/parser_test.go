@@ -137,22 +137,6 @@ func TestParseCommaSeparated_Empty(t *testing.T) {
 	}
 }
 
-func TestDetectSourceIdentity(t *testing.T) {
-	raw := "[admin@router1] > /ip neighbor"
-	identity := DetectSourceIdentity(raw)
-	if identity != "router1" {
-		t.Errorf("DetectSourceIdentity = %q, want router1", identity)
-	}
-}
-
-func TestDetectSourceIdentity_NoPrompt(t *testing.T) {
-	raw := "0 identity=device platform=MikroTik"
-	identity := DetectSourceIdentity(raw)
-	if identity != "" {
-		t.Errorf("DetectSourceIdentity = %q, want empty", identity)
-	}
-}
-
 func TestParseNeighbor_MissingIdentity(t *testing.T) {
 	fields := map[string]string{
 		"platform": "MikroTik",

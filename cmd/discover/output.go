@@ -504,7 +504,7 @@ func printSummary(out *os.File, graph *topologyGraph, treeEdgeCount int) {
 	_, _ = fmt.Fprintf(out, "\n%s\n", strings.Repeat("─", 63))
 	_, _ = fmt.Fprintf(out, "Summary:\n")
 	_, _ = fmt.Fprintf(out, "  Devices: %d\n", len(graph.nodes))
-	_, _ = fmt.Fprintf(out, "  Total links: %d\n", totalLinks)
-	_, _ = fmt.Fprintf(out, "  Tree links: %d\n", treeEdgeCount)
-	_, _ = fmt.Fprintf(out, "  Cross-links: %d\n", len(graph.undirected)-treeEdgeCount)
+	_, _ = fmt.Fprintf(out, "  Total link entries: %d\n", totalLinks)
+	_, _ = fmt.Fprintf(out, "  Tree edges: %d\n", treeEdgeCount)
+	_, _ = fmt.Fprintf(out, "  Cross-link pairs: %d\n", len(graph.undirected)-treeEdgeCount)
 }

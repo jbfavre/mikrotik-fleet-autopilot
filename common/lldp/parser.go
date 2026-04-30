@@ -12,7 +12,7 @@ import (
 var isRecordStart = regexp.MustCompile(`^\s*\d+\s+`)
 
 // extractRecordRemainder removes the leading number and whitespace from a record start line
-var extractRecordRemainder = regexp.MustCompile(`^\s*\d+\s+`)
+var extractRecordRemainder = isRecordStart
 
 // Checks key=value pattern
 var checkKeyValue = regexp.MustCompile(`^\s+(\S+?)=`)

@@ -41,8 +41,29 @@ func outputTopology(out io.Writer, topo *topology) error {
 		if _, werr := fmt.Fprintf(out, "Discovery Errors:\n"); werr != nil {
 			return werr
 		}
-		for host, err := range topo.errors {
+
+		printed := make(map[string]struct{}, len(topo.errors))
+		for _, host := range topo.orderedHosts {
+			err, ok := topo.errors[host]
+			if !ok {
+				continue
+			}
 			if _, werr := fmt.Fprintf(out, "  %s: %v\n", host, err); werr != nil {
+				return werr
+			}
+			printed[host] = struct{}{}
+		}
+
+		var remainingHosts []string
+		for host := range topo.errors {
+			if _, ok := printed[host]; ok {
+				continue
+			}
+			remainingHosts = append(remainingHosts, host)
+		}
+		sort.Strings(remainingHosts)
+		for _, host := range remainingHosts {
+			if _, werr := fmt.Fprintf(out, "  %s: %v\n", host, topo.errors[host]); werr != nil {
 				return werr
 			}
 		}

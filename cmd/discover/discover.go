@@ -3,6 +3,7 @@ package discover
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 
@@ -16,11 +17,11 @@ var Command = &cli.Command{
 	Name:  "discover",
 	Usage: "Discover LLDP network topology across all routers",
 	Action: func(ctx context.Context, cmd *cli.Command) error {
-		return discoverAction(ctx)
+		return discoverAction(ctx, os.Stdout)
 	},
 }
 
-func discoverAction(ctx context.Context) error {
+func discoverAction(ctx context.Context, out io.Writer) error {
 	// Get global config
 	cfg, err := core.GetConfig(ctx)
 	if err != nil {
@@ -53,7 +54,7 @@ func discoverAction(ctx context.Context) error {
 	)
 
 	// Render output
-	return outputTopology(os.Stdout, topology)
+	return outputTopology(out, topology)
 }
 
 // topology holds discovery results indexed by source host

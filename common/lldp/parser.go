@@ -41,7 +41,6 @@ func ParseNeighbors(raw string) (*ParseResult, error) {
 		result.SourceIdentity = matches[1]
 	}
 
-
 	// Split into individual record strings
 	records := splitRecords(raw)
 

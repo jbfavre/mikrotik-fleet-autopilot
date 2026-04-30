@@ -188,20 +188,47 @@ func (g *topologyGraph) addLink(from, to string, detail *linkDetail) {
 	}
 }
 
-func renderTopologyGraph(out io.Writer, graph *topologyGraph, orderedHosts []string) {
+type errorTrackingWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (w *errorTrackingWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	n, err := w.w.Write(p)
+	if err != nil {
+		w.err = err
+	}
+	return n, err
+}
+
+func renderTopologyGraph(out io.Writer, graph *topologyGraph, orderedHosts []string) error {
+	trackedOut := &errorTrackingWriter{w: out}
 	components := connectedComponents(graph)
 	roots := selectRoots(graph, components, orderedHosts)
 
 	totalTreeEdges := 0
 	for i, root := range roots {
 		if i > 0 {
-			_, _ = fmt.Fprintf(out, "\n")
+			if _, err := fmt.Fprintf(trackedOut, "\n"); err != nil {
+				return err
+			}
 		}
-		treeEdges := renderComponent(out, graph, components[i], root, orderedHosts)
+		treeEdges := renderComponent(trackedOut, graph, components[i], root, orderedHosts)
+		if trackedOut.err != nil {
+			return trackedOut.err
+		}
 		totalTreeEdges += len(treeEdges)
 	}
 
-	printSummary(out, graph, totalTreeEdges)
+	printSummary(trackedOut, graph, totalTreeEdges)
+	if trackedOut.err != nil {
+		return trackedOut.err
+	}
+
+	return nil
 }
 
 func connectedComponents(graph *topologyGraph) [][]string {

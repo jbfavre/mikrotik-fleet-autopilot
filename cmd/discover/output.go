@@ -114,12 +114,13 @@ func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []str
 			continue
 		}
 		sourceNode := graph.getOrCreateNode(sourceHost, true, hostOrder[sourceHost])
-		for _, neighbor := range result.Neighbors {
+		for neighborIdx, neighbor := range result.Neighbors {
 			identity := strings.TrimSpace(neighbor.Identity)
-			// Ensure we have a default value for identity
-			// to avoid empty brackets when displaying topology
+			localInterface := strings.TrimSpace(neighbor.LocalInterface)
+			// Avoid collapsing distinct neighbors with missing identity into a
+			// single shared "unknown" node by generating a scoped placeholder.
 			if identity == "" {
-				identity = "unknown"
+				identity = fmt.Sprintf("unknown (%s:%s#%d)", sourceHost, localInterface, neighborIdx)
 			}
 			destination := graph.getOrCreateNode(identity, false, -1)
 			graph.addLink(sourceNode.name, destination.name, &linkDetail{

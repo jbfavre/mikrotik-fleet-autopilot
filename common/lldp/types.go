@@ -20,8 +20,8 @@ type Neighbor struct {
 	Board    string // hardware model (RB4011iGS+, CCR2004-1G-12S+2XS, etc.)
 
 	// Network addressing
-	Address    string // IPv4 address
-	Address6   string // IPv6 address (fe80:: prefix for link-local)
+	Address    string // RouterOS "address" field; may contain either IPv4 or IPv6 (including link-local fe80:: addresses)
+	Address6   string // explicit IPv6 address field when separately present in RouterOS output
 	MacAddress string // hardware MAC address
 
 	// Device capabilities and protocols

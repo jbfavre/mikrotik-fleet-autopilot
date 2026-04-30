@@ -373,6 +373,7 @@ func renderComponent(out io.Writer, graph *topologyGraph, component []string, ro
 	}
 
 	if len(crossLinks) > 0 {
+		sort.Strings(crossLinks)
 		_, _ = fmt.Fprintf(out, "  Cross-links:\n")
 		for _, line := range crossLinks {
 			_, _ = fmt.Fprintf(out, "    %s\n", line)

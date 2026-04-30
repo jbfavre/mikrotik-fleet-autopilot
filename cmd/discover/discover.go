@@ -13,11 +13,13 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
-var Command = &cli.Command{
-	Name:  "discover",
-	Usage: "Discover LLDP network topology across all routers",
-	Action: func(ctx context.Context, cmd *cli.Command) error {
-		return runDiscoverForHosts(ctx, os.Stdout)
+var Command = []*cli.Command{
+	{
+		Name:  "discover",
+		Usage: "Discover LLDP network topology across all routers",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			return runDiscoverForHosts(ctx, os.Stdout)
+		},
 	},
 }
 

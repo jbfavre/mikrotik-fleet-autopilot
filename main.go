@@ -99,7 +99,7 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Destination: &globalConfig.BufferedOutput,
 			},
 		},
-		Commands: append(append(append(export.Command, updates.Command...), enroll.Command...), discover.Command),
+		Commands: append(append(append(export.Command, updates.Command...), enroll.Command...), discover.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			// Set log level once at startup.
 			logLevel := slog.LevelWarn

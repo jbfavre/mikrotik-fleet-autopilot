@@ -89,7 +89,9 @@ func outputTopology(out io.Writer, topo *topology) error {
 		return werr
 	}
 
-	renderTopologyGraph(out, graph, topo.orderedHosts)
+	if err := renderTopologyGraph(out, graph, topo.orderedHosts); err != nil {
+		return err
+	}
 	return nil
 }
 

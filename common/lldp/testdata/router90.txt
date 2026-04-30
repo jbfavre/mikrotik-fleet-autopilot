@@ -1,0 +1,9 @@
+ 0 interface=sfp1,br-lan address=fe80::2ec8:1bff:fe39:74b6 
+   address6=fe80::2ec8:1bff:fe39:74b6 mac-address=2C:C8:1B:39:74:BF 
+   identity="core.jbfav.re" platform="MikroTik" 
+   version="7.22.2 (stable) 2026-04-22 08:03:57" unpack=none age=3s 
+   board="CCR2004-1G-12S+2XS" ipv6=yes interface-name="br-lan/sfp-sfpplus9" 
+   system-description="MikroTik RouterOS 7.22.2 (stable) 2026-04-22 08:03:57 
+                   CCR2004-1G-12S+2XS" 
+   system-caps=bridge,router system-caps-enabled=bridge,router 
+   discovered-by=lldp

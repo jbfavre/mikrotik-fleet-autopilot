@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/urfave/cli/v3"
+	"jb.favre/mikrotik-fleet-autopilot/cmd/discover"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/enroll"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
@@ -98,7 +99,7 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Destination: &globalConfig.BufferedOutput,
 			},
 		},
-		Commands: append(append(export.Command, updates.Command...), enroll.Command...),
+		Commands: append(append(append(export.Command, updates.Command...), enroll.Command...), discover.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			// Set log level once at startup.
 			logLevel := slog.LevelWarn

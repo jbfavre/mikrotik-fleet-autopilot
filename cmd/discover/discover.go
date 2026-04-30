@@ -17,11 +17,11 @@ var Command = &cli.Command{
 	Name:  "discover",
 	Usage: "Discover LLDP network topology across all routers",
 	Action: func(ctx context.Context, cmd *cli.Command) error {
-		return discoverAction(ctx, os.Stdout)
+		return runDiscoverForHosts(ctx, os.Stdout)
 	},
 }
 
-func discoverAction(ctx context.Context, out io.Writer) error {
+func runDiscoverForHosts(ctx context.Context, out io.Writer) error {
 	// Get global config
 	cfg, err := core.GetConfig(ctx)
 	if err != nil {

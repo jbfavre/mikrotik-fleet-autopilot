@@ -2,7 +2,8 @@ package lldp
 
 // Neighbor represents a single LLDP neighbor discovered by a RouterOS device
 type Neighbor struct {
-	// Record index from RouterOS output (0, 1, 2, ...)
+	// Parse order of this neighbor within the parsed RouterOS output.
+	// This is not guaranteed to match any numeric record prefix emitted by RouterOS.
 	Index int
 
 	// Local interface where neighbor was discovered

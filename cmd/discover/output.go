@@ -145,7 +145,7 @@ func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []str
 	}
 
 	if _, ok := graph.nodes[connectedTo]; !ok {
-		return nil, fmt.Errorf("connected-to target %q was not discovered; use a discovered device identity", connectedTo)
+		return nil, fmt.Errorf("connected-to target %q was not found in the topology; use a configured source host or a discovered device identity", connectedTo)
 	}
 
 	// mfa is a synthetic graph-only node representing the computer running the tool.

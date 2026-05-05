@@ -20,7 +20,7 @@ var Command = []*cli.Command{
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "connected-to",
-				Usage: "Show the local mfa computer as connected to a discovered device identity",
+				Usage: "Show the local mfa computer as connected to a device identity or source host already present in the topology graph",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {

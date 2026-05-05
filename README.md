@@ -38,14 +38,14 @@ mikrotik-fleet-autopilot discover [options]
 ```
 
 **Options:**
-- `--connected-to <device-identity>` - Add a synthetic `mfa` node to the topology graph and show it as connected to the specified discovered device identity
+- `--connected-to <device-identity>` - Add a synthetic `mfa` node to the topology graph and show it as connected to the specified topology node identity. This can be a discovered LLDP device identity or a configured source host already present in the graph.
 
 **Examples:**
 ```bash
 # Discover topology from configured routers
 mikrotik-fleet-autopilot discover
 
-# Show the local mfa computer as connected to a discovered device
+# Show the local mfa computer as connected to a topology node identity
 mikrotik-fleet-autopilot discover --connected-to router1.home
 ```
 

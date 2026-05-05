@@ -506,7 +506,9 @@ func renderChildren(out io.Writer, graph *topologyGraph, parent string, children
 			}
 			_, _ = fmt.Fprintf(out, "%s%s   %s  via %s ↔ %s\n", indent, vertBar, detailConnector, local, remote)
 		}
-		_, _ = fmt.Fprintf(out, "%s%s   %s\n", indent, vertBar, detailConnector)
+		if vertBar != " " || detailConnector != " " {
+			_, _ = fmt.Fprintf(out, "%s%s   %s\n", indent, vertBar, detailConnector)
+		}
 
 		nextIndent := indent + vertBar + "   "
 		renderChildren(out, graph, child, children, nextIndent)

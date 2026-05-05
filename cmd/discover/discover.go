@@ -29,9 +29,23 @@ var Command = []*cli.Command{
 	},
 }
 
-var createSSHConnection = ssh.CreateConnection
+type discoverDeps struct {
+	createSSHConnection any
+}
+
+func defaultDiscoverDeps() discoverDeps {
+	return discoverDeps{
+		createSSHConnection: ssh.CreateConnection,
+	}
+}
 
 func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string) error {
+	return runDiscoverForHostsWithDeps(ctx, out, connectedTo, defaultDiscoverDeps())
+}
+
+func runDiscoverForHostsWithDeps(ctx context.Context, out io.Writer, connectedTo string, deps discoverDeps) error {
+	_ = deps
+
 	// Get global config
 	cfg, err := core.GetConfig(ctx)
 	if err != nil {

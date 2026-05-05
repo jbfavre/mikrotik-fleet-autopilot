@@ -232,7 +232,7 @@ func TestOutputTopology_ConnectedToRendersMFAAsRoot(t *testing.T) {
 	if !rootLineFound {
 		t.Fatalf("expected rendered topology to contain a root line, got output:\n%s", out.String())
 	}
-	if strings.Contains(out.String(), "via ? <-> ?") {
+	if strings.Contains(out.String(), "via ? ↔ ?") {
 		t.Fatalf("expected synthetic mfa edge to avoid empty via lines, got output:\n%s", out.String())
 	}
 }

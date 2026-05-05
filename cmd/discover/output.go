@@ -11,6 +11,8 @@ import (
 	"jb.favre/mikrotik-fleet-autopilot/common/lldp"
 )
 
+const mfaNodeName = "mfa"
+
 type topologyNode struct {
 	name        string
 	isSource    bool
@@ -36,7 +38,7 @@ type topologyGraph struct {
 	nextFirstSeen int
 }
 
-func outputTopology(out io.Writer, topo *topology) error {
+func outputTopology(out io.Writer, topo *topology, connectedTo string) error {
 	if len(topo.errors) > 0 {
 		if _, werr := fmt.Fprintf(out, "Discovery Errors:\n"); werr != nil {
 			return werr
@@ -79,7 +81,10 @@ func outputTopology(out io.Writer, topo *topology) error {
 		return nil
 	}
 
-	graph := buildTopologyGraph(topo.results, topo.orderedHosts)
+	graph, err := buildTopologyGraph(topo.results, topo.orderedHosts, connectedTo)
+	if err != nil {
+		return err
+	}
 	slog.Info("topology graph built", "vertices", len(graph.nodes))
 
 	if _, werr := fmt.Fprintf(out, "LLDP Topology Graph\n"); werr != nil {
@@ -95,7 +100,7 @@ func outputTopology(out io.Writer, topo *topology) error {
 	return nil
 }
 
-func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []string) *topologyGraph {
+func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []string, connectedTo string) (*topologyGraph, error) {
 	graph := &topologyGraph{
 		g:          simple.NewUndirectedGraph(),
 		nodes:      make(map[string]*topologyNode),
@@ -135,7 +140,23 @@ func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []str
 		}
 	}
 
-	return graph
+	if connectedTo == "" {
+		return graph, nil
+	}
+
+	if _, ok := graph.nodes[connectedTo]; !ok {
+		return nil, fmt.Errorf("connected-to target %q was not discovered; use a discovered device identity", connectedTo)
+	}
+
+	// mfa is a synthetic graph-only node representing the computer running the tool.
+	// It must never be added to discovery inputs or any SSH connection path.
+	mfaNode := graph.getOrCreateNode(mfaNodeName, false, -1)
+	graph.addLink(mfaNode.name, connectedTo, &linkDetail{
+		from: mfaNode.name,
+		to:   connectedTo,
+	})
+
+	return graph, nil
 }
 
 func (g *topologyGraph) getOrCreateNode(name string, isSource bool, sourceOrder int) *topologyNode {
@@ -209,7 +230,7 @@ func (w *errorTrackingWriter) Write(p []byte) (int, error) {
 func renderTopologyGraph(out io.Writer, graph *topologyGraph, orderedHosts []string) error {
 	trackedOut := &errorTrackingWriter{w: out}
 	components := connectedComponents(graph)
-	roots := selectRoots(graph, components, orderedHosts)
+	roots := selectRoots(graph, components, orderedHosts, preferredRoot(graph))
 
 	totalTreeEdges := 0
 	for i, root := range roots {
@@ -231,6 +252,13 @@ func renderTopologyGraph(out io.Writer, graph *topologyGraph, orderedHosts []str
 	}
 
 	return nil
+}
+
+func preferredRoot(graph *topologyGraph) string {
+	if _, ok := graph.nodes[mfaNodeName]; ok {
+		return mfaNodeName
+	}
+	return ""
 }
 
 func connectedComponents(graph *topologyGraph) [][]string {
@@ -271,9 +299,13 @@ func connectedComponents(graph *topologyGraph) [][]string {
 	return components
 }
 
-func selectRoots(graph *topologyGraph, components [][]string, orderedHosts []string) []string {
+func selectRoots(graph *topologyGraph, components [][]string, orderedHosts []string, preferred string) []string {
 	roots := make([]string, 0, len(components))
 	for _, component := range components {
+		if preferred != "" && componentContains(component, preferred) {
+			roots = append(roots, preferred)
+			continue
+		}
 		best := component[0]
 		for _, candidate := range component[1:] {
 			if betterNode(graph, candidate, best, orderedHosts) {
@@ -283,6 +315,15 @@ func selectRoots(graph *topologyGraph, components [][]string, orderedHosts []str
 		roots = append(roots, best)
 	}
 	return roots
+}
+
+func componentContains(component []string, target string) bool {
+	for _, name := range component {
+		if name == target {
+			return true
+		}
+	}
+	return false
 }
 
 func betterNode(graph *topologyGraph, left, right string, orderedHosts []string) bool {
@@ -388,7 +429,7 @@ func renderComponent(out io.Writer, graph *topologyGraph, component []string, ro
 	}
 
 	_, _ = fmt.Fprintf(out, "[%s]\n", graph.nodes[root].name)
-	renderChildren(out, graph, root, children, "")
+	renderChildren(out, graph, root, children, "  ")
 
 	crossLinks := make([]string, 0)
 	for pair, links := range graph.undirected {
@@ -413,13 +454,6 @@ func renderComponent(out io.Writer, graph *topologyGraph, component []string, ro
 	return treeEdges
 }
 
-func padRight(s string, width int) string {
-	if len(s) >= width {
-		return s
-	}
-	return s + strings.Repeat(" ", width-len(s))
-}
-
 func renderChildren(out io.Writer, graph *topologyGraph, parent string, children map[string][]string, indent string) {
 	kids := children[parent]
 	for i, child := range kids {
@@ -434,46 +468,47 @@ func renderChildren(out io.Writer, graph *topologyGraph, parent string, children
 		childName := graph.nodes[child].name
 		edges := edgeDetailsBetween(graph, parent, child)
 
-		if len(edges) == 0 {
-			// No edge details (edge came from peer side only) — print node label only
-			_, _ = fmt.Fprintf(out, "%s%s[%s]\n", indent, branch, childName)
+		_, _ = fmt.Fprintf(out, "%s%s[%s]\n", indent, branch, childName)
+
+		// Filter renderable edges (skip if both interfaces are empty)
+		renderableEdges := make([]*linkDetail, 0)
+		for _, edge := range edges {
+			local := strings.TrimSpace(edge.localInterface)
+			remote := strings.TrimSpace(edge.remoteIface)
+			if local == "" && remote == "" {
+				continue
+			}
+			renderableEdges = append(renderableEdges, edge)
+		}
+
+		if len(renderableEdges) == 0 {
+			// No edge details (edge came from peer side only) — render descendants only.
 			renderChildren(out, graph, child, children, indent+vertBar+"   ")
 			continue
 		}
 
-		maxLocalLen := 0
-		for _, e := range edges {
-			if len(e.localInterface) > maxLocalLen {
-				maxLocalLen = len(e.localInterface)
+		// Determine detail connector: vertical bar only if this node has child devices to follow
+		hasChildren := len(children[child]) > 0
+		detailConnector := " "
+		if hasChildren {
+			detailConnector = "│"
+		}
+
+		// Print via lines with detail connector
+		for _, edge := range renderableEdges {
+			local := strings.TrimSpace(edge.localInterface)
+			remote := strings.TrimSpace(edge.remoteIface)
+			if local == "" {
+				local = "?"
 			}
+			if remote == "" {
+				remote = "?"
+			}
+			_, _ = fmt.Fprintf(out, "%s%s   %s  via %s ↔ %s\n", indent, vertBar, detailConnector, local, remote)
 		}
+		_, _ = fmt.Fprintf(out, "%s%s   %s\n", indent, vertBar, detailConnector)
 
-		// First edge: branch + localIface → [child] ← remoteIface
-		_, _ = fmt.Fprintf(out, "%s%s%s → [%s] ← %s\n",
-			indent, branch,
-			padRight(edges[0].localInterface, maxLocalLen),
-			childName,
-			edges[0].remoteIface,
-		)
-
-		// Additional parallel edges: aligned continuation lines
-		// "←" must be at the same column as on the first edge line.
-		// First-line "←" col  = len(indent) + 3 + maxLocalLen + 4 + len(childName) + 2
-		// Continuation prefix = len(indent) + 1(vertBar) + 2("  ") + maxLocalLen
-		// Fill to align       = len(childName) + 6
-		for _, edge := range edges[1:] {
-			_, _ = fmt.Fprintf(out, "%s%s  %s%s← %s\n",
-				indent, vertBar,
-				padRight(edge.localInterface, maxLocalLen),
-				strings.Repeat(" ", len(childName)+6),
-				edge.remoteIface,
-			)
-		}
-
-		// nextIndent positions grandchildren's branch char under "[" of [child]
-		// "[" col = len(indent) + 3(branch) + maxLocalLen + 3(" → ") = len(indent) + maxLocalLen + 6
-		// nextIndent = indent + vertBar(1) + spaces(maxLocalLen+5)  →  branch lands at col maxLocalLen+6 ✓
-		nextIndent := indent + vertBar + strings.Repeat(" ", maxLocalLen+5)
+		nextIndent := indent + vertBar + "   "
 		renderChildren(out, graph, child, children, nextIndent)
 	}
 }

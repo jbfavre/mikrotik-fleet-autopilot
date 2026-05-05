@@ -17,13 +17,21 @@ var Command = []*cli.Command{
 	{
 		Name:  "discover",
 		Usage: "Discover LLDP network topology across all routers",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "connected-to",
+				Usage: "Show the local mfa computer as connected to a discovered device identity",
+			},
+		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return runDiscoverForHosts(ctx, os.Stdout)
+			return runDiscoverForHosts(ctx, os.Stdout, cmd.String("connected-to"))
 		},
 	},
 }
 
-func runDiscoverForHosts(ctx context.Context, out io.Writer) error {
+var createSSHConnection = ssh.CreateConnection
+
+func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string) error {
 	// Get global config
 	cfg, err := core.GetConfig(ctx)
 	if err != nil {
@@ -56,7 +64,7 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer) error {
 	)
 
 	// Render output
-	return outputTopology(out, topology)
+	return outputTopology(out, topology, connectedTo)
 }
 
 // topology holds discovery results indexed by source host
@@ -78,7 +86,7 @@ func discoverTopology(ctx context.Context, hosts []string) (*topology, error) {
 		slog.Info("connecting to host", "host", host)
 
 		// Connect
-		conn, err := ssh.CreateConnection(ctx, host)
+		conn, err := createSSHConnection(ctx, host)
 		if err != nil {
 			slog.Warn("connection failed", "host", host, "error", err)
 			topo.errors[host] = fmt.Errorf("connection failed: %w", err)

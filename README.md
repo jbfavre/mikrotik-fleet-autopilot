@@ -30,6 +30,25 @@ mikrotik-fleet-autopilot --host router1.local,192.168.1.1 --ssh-user admin --ssh
 
 ### Available Commands
 
+#### discover
+Discover LLDP topology across the configured routers.
+
+```bash
+mikrotik-fleet-autopilot discover [options]
+```
+
+**Options:**
+- `--connected-to <device-identity>` - Add a synthetic `mfa` node to the topology graph and show it as connected to the specified discovered device identity
+
+**Examples:**
+```bash
+# Discover topology from configured routers
+mikrotik-fleet-autopilot discover
+
+# Show the local mfa computer as connected to a discovered device
+mikrotik-fleet-autopilot discover --connected-to router1.home
+```
+
 #### export
 Export MikroTik router configuration to `.rsc` files.
 

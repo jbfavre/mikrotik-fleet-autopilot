@@ -11,7 +11,8 @@ type Neighbor struct {
 	LocalInterfaceChain string // full chain: "sfp-sfpplus3,br-lan"
 
 	// Remote interface information
-	RemoteInterface string // interface-name from neighbor perspective
+	RemoteInterface      string // extracted last part: "ether1"
+	RemoteInterfaceChain string // full chain: "br-lan/ether1"
 
 	// Neighbor device identity
 	Identity string // FQDN of neighbor device

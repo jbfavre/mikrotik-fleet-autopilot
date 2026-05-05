@@ -192,29 +192,30 @@ func newNeighbor(index int, fields map[string]string) (*Neighbor, error) {
 	}
 
 	n := &Neighbor{
-		Index:               index,
-		Identity:            identity,
-		Platform:            getStringField(fields, "platform"),
-		Version:             getStringField(fields, "version"),
-		Board:               getStringField(fields, "board"),
-		Address:             getStringField(fields, "address"),
-		Address6:            getStringField(fields, "address6"),
-		MacAddress:          getStringField(fields, "mac-address"),
-		SystemDescription:   getStringField(fields, "system-description"),
-		SystemCaps:          parseCommaSeparated(getStringField(fields, "system-caps")),
-		SystemCapsEnabled:   parseCommaSeparated(getStringField(fields, "system-caps-enabled")),
-		DiscoveredBy:        parseCommaSeparated(getStringField(fields, "discovered-by")),
-		Age:                 getStringField(fields, "age"),
-		Uptime:              getStringField(fields, "uptime"),
-		SoftwareID:          getStringField(fields, "software-id"),
-		Unpack:              getStringField(fields, "unpack"),
-		IPv6Enabled:         getStringField(fields, "ipv6") == "yes",
-		LocalInterfaceChain: getStringField(fields, "interface"),
-		RemoteInterface:     getStringField(fields, "interface-name"),
+		Index:                index,
+		Identity:             identity,
+		Platform:             getStringField(fields, "platform"),
+		Version:              getStringField(fields, "version"),
+		Board:                getStringField(fields, "board"),
+		Address:              getStringField(fields, "address"),
+		Address6:             getStringField(fields, "address6"),
+		MacAddress:           getStringField(fields, "mac-address"),
+		SystemDescription:    getStringField(fields, "system-description"),
+		SystemCaps:           parseCommaSeparated(getStringField(fields, "system-caps")),
+		SystemCapsEnabled:    parseCommaSeparated(getStringField(fields, "system-caps-enabled")),
+		DiscoveredBy:         parseCommaSeparated(getStringField(fields, "discovered-by")),
+		Age:                  getStringField(fields, "age"),
+		Uptime:               getStringField(fields, "uptime"),
+		SoftwareID:           getStringField(fields, "software-id"),
+		Unpack:               getStringField(fields, "unpack"),
+		IPv6Enabled:          getStringField(fields, "ipv6") == "yes",
+		LocalInterfaceChain:  getStringField(fields, "interface"),
+		RemoteInterfaceChain: getStringField(fields, "interface-name"),
 	}
 
 	// Extract physical interface from the chain
 	n.LocalInterface = extractLocalInterface(n.LocalInterfaceChain)
+	n.RemoteInterface = extractRemoteInterface(n.RemoteInterfaceChain)
 
 	return n, nil
 }
@@ -253,5 +254,18 @@ func extractLocalInterface(chain string) string {
 	if len(parts) > 0 {
 		return strings.TrimSpace(parts[0])
 	}
-	return ""
+	return strings.TrimSpace(chain)
+}
+
+// extractRemoteInterface extracts the physical interface from a chain like "br-lan/ether1"
+// Returns the last component after the slash
+func extractRemoteInterface(chain string) string {
+	if chain == "" {
+		return ""
+	}
+	parts := strings.Split(chain, "/")
+	if len(parts) > 0 {
+		return strings.TrimSpace(parts[len(parts)-1])
+	}
+	return strings.TrimSpace(chain)
 }

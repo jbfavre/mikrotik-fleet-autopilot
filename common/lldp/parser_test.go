@@ -113,6 +113,27 @@ func TestExtractLocalInterface_Empty(t *testing.T) {
 	}
 }
 
+func TestExtractRemoteInterface_ChainWithBridge(t *testing.T) {
+	iface := extractRemoteInterface("br-lan/sfp-sfpplus3")
+	if iface != "sfp-sfpplus3" {
+		t.Errorf("extractRemoteInterface = %q, want sfp-sfpplus3", iface)
+	}
+}
+
+func TestExtractRemoteInterface_BondChain(t *testing.T) {
+	iface := extractRemoteInterface("br-lan/bond0/ether9")
+	if iface != "ether9" {
+		t.Errorf("extractRemoteInterface = %q, want ether9", iface)
+	}
+}
+
+func TestExtractRemoteInterface_Empty(t *testing.T) {
+	iface := extractRemoteInterface("")
+	if iface != "" {
+		t.Errorf("extractRemoteInterface = %q, want empty", iface)
+	}
+}
+
 func TestParseCommaSeparated_Single(t *testing.T) {
 	caps := parseCommaSeparated("bridge")
 	if len(caps) != 1 || caps[0] != "bridge" {

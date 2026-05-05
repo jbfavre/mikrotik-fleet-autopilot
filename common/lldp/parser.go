@@ -254,7 +254,7 @@ func extractLocalInterface(chain string) string {
 	if len(parts) > 0 {
 		return strings.TrimSpace(parts[0])
 	}
-	return ""
+	return strings.TrimSpace(chain)
 }
 
 // extractRemoteInterface extracts the physical interface from a chain like "br-lan/ether1"
@@ -267,5 +267,5 @@ func extractRemoteInterface(chain string) string {
 	if len(parts) > 0 {
 		return strings.TrimSpace(parts[len(parts)-1])
 	}
-	return ""
+	return strings.TrimSpace(chain)
 }

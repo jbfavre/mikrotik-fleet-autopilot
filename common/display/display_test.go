@@ -542,7 +542,7 @@ func TestConcurrentFailureRenderAtomicity(t *testing.T) {
 			cb("⏳", "Connecting to router…")
 
 			// Simulate varying network delays by spinning briefly
-			for j := 0; j < 1000; j++ {
+			for range 1000 {
 				_ = d.renderLines() // Rapidly call renderLines to increase contention
 			}
 
@@ -626,7 +626,7 @@ func TestRenderLinesLocksAllHosts(t *testing.T) {
 	// Without logs: delimiter + 3 hosts = 4 lines.
 	// Call renderLines multiple times: should always see the same state
 	// (deadlock would manifest as goroutine hanging, race detector would catch non-atomic reads)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		snapshot := d.renderLines()
 		if len(snapshot) != 4 {
 			t.Errorf("iteration %d: renderLines returned %d lines, want 4 (delimiter + 3 hosts)", i, len(snapshot))
@@ -750,7 +750,7 @@ func TestLogWriterWithSeparatorThreadSafe(t *testing.T) {
 	w := &logWriter{base: &lockedWriter{mu: &bufMu, w: &buf}, outFd: -1}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()

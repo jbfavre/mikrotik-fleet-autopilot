@@ -376,8 +376,8 @@ func TestOutputTopology_ViaLineHasNoBarForLeafNode(t *testing.T) {
 	}
 
 	output := out.String()
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(output, "\n")
+	for line := range lines {
 		if strings.Contains(line, "via ether1 ↔ sfp1") {
 			if strings.HasPrefix(strings.TrimLeft(line, " "), "│") {
 				t.Fatalf("expected via line WITHOUT vertical bar (|) for leaf node, but found bar in: %q", line)
@@ -402,5 +402,93 @@ func TestShortName(t *testing.T) {
 		if got := shortName(c.in); got != c.want {
 			t.Errorf("shortName(%q)=%q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestOutputTopology_RendersUpgradePlanSection(t *testing.T) {
+	topo := &topology{
+		orderedHosts: []string{"router1", "router2"},
+		results: map[string]*lldp.ParseResult{
+			"router1": {
+				Neighbors: []*lldp.Neighbor{
+					{Identity: "router2"},
+				},
+			},
+			"router2": {Neighbors: []*lldp.Neighbor{}},
+		},
+		errors: map[string]error{},
+	}
+
+	var out bytes.Buffer
+	if err := outputTopology(&out, topo, ""); err != nil {
+		t.Fatalf("outputTopology() unexpected error = %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "Upgrade Plan") {
+		t.Fatalf("expected output to contain Upgrade Plan section, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Wave") {
+		t.Fatalf("expected output to contain wave lines, got:\n%s", output)
+	}
+}
+
+func TestOutputTopology_UpgradePlanExcludesNonSourceNodes(t *testing.T) {
+	topo := &topology{
+		orderedHosts: []string{"router1"},
+		results: map[string]*lldp.ParseResult{
+			"router1": {
+				Neighbors: []*lldp.Neighbor{
+					{Identity: "external-switch"},
+				},
+			},
+		},
+		errors: map[string]error{},
+	}
+
+	var out bytes.Buffer
+	if err := outputTopology(&out, topo, ""); err != nil {
+		t.Fatalf("outputTopology() unexpected error = %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "Excluded") {
+		t.Fatalf("expected output to mention excluded non-upgradeable devices, got:\n%s", output)
+	}
+	if !strings.Contains(output, "external-switch") {
+		t.Fatalf("expected excluded list to contain external-switch, got:\n%s", output)
+	}
+}
+
+func TestOutputTopology_UpgradeSummaryMetrics(t *testing.T) {
+	topo := &topology{
+		orderedHosts: []string{"router1", "router2", "router3"},
+		results: map[string]*lldp.ParseResult{
+			"router1": {
+				Neighbors: []*lldp.Neighbor{
+					{Identity: "router2"},
+					{Identity: "router3"},
+				},
+			},
+			"router2": {Neighbors: []*lldp.Neighbor{}},
+			"router3": {Neighbors: []*lldp.Neighbor{}},
+		},
+		errors: map[string]error{},
+	}
+
+	var out bytes.Buffer
+	if err := outputTopology(&out, topo, ""); err != nil {
+		t.Fatalf("outputTopology() unexpected error = %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "Upgradeable devices") {
+		t.Fatalf("expected summary to contain Upgradeable devices metric, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Upgrade waves") {
+		t.Fatalf("expected summary to contain Upgrade waves metric, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Max wave parallelism") {
+		t.Fatalf("expected summary to contain Max wave parallelism metric, got:\n%s", output)
 	}
 }

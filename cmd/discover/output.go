@@ -581,7 +581,7 @@ func printSummary(out io.Writer, graph *topologyGraph, treeEdgeCount int) {
 
 	_, _ = fmt.Fprintf(out, "%s\n", strings.Repeat("─", 63))
 	_, _ = fmt.Fprintf(out, "Summary:\n")
-	_, _ = fmt.Fprintf(out, "  Total devices            : %d\n", len(graph.nodes))
-	_, _ = fmt.Fprintf(out, "  Rendered forest edges    : %d\n", treeEdgeCount)
-	_, _ = fmt.Fprintf(out, "  Stored LLDP records      : %d\n", totalLinks)
+	_, _ = fmt.Fprintf(out, "  Total devices        : %d\n", len(graph.nodes))
+	_, _ = fmt.Fprintf(out, "  Rendered forest edges: %d\n", treeEdgeCount)
+	_, _ = fmt.Fprintf(out, "  Stored LLDP records  : %d\n", totalLinks)
 }

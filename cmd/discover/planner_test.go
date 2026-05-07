@@ -45,26 +45,20 @@ func TestBuildUpgradePlan_LinearChain(t *testing.T) {
 
 	plan := buildUpgradePlan(graph, orderedHosts)
 
-	if len(plan.waves) != 2 {
-		t.Fatalf("expected 2 waves, got %d: %+v", len(plan.waves), plan.waves)
+	if len(plan.waves) != 3 {
+		t.Fatalf("expected 3 waves, got %d: %+v", len(plan.waves), plan.waves)
 	}
-	if len(plan.waves[0].devices) != 2 {
-		t.Fatalf("expected 2 devices in wave 1 (both leaves), got %d: %v", len(plan.waves[0].devices), plan.waves[0].devices)
+	if len(plan.waves[0].devices) != 1 {
+		t.Fatalf("expected 1 device in wave 1 (leaf), got %d: %v", len(plan.waves[0].devices), plan.waves[0].devices)
 	}
-	found1, found3 := false, false
-	for _, d := range plan.waves[0].devices {
-		switch d {
-		case "device1":
-			found1 = true
-		case "device3":
-			found3 = true
-		}
-	}
-	if !found1 || !found3 {
-		t.Fatalf("expected device1 and device3 in wave 1, got %v", plan.waves[0].devices)
+	if len(plan.waves[0].devices) != 1 || plan.waves[0].devices[0] != "device3" {
+		t.Fatalf("expected [device3] in wave 1, got %v", plan.waves[0].devices)
 	}
 	if len(plan.waves[1].devices) != 1 || plan.waves[1].devices[0] != "device2" {
 		t.Fatalf("expected [device2] in wave 2 (root), got %v", plan.waves[1].devices)
+	}
+	if len(plan.waves[2].devices) != 1 || plan.waves[2].devices[0] != "device1" {
+		t.Fatalf("expected [device1] in wave 3 (leaf), got %v", plan.waves[2].devices)
 	}
 	if len(plan.excluded) != 0 {
 		t.Fatalf("expected no excluded devices, got %v", plan.excluded)

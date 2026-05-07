@@ -1,7 +1,6 @@
 package discover
 
 import (
-	"maps"
 	"sort"
 )
 

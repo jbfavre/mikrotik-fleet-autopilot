@@ -182,6 +182,49 @@ func TestBuildUpgradePlan_NonSourceExclusion(t *testing.T) {
 	}
 }
 
+// TestBuildUpgradePlan_IntermediaryNonSourceBetweenSources verifies that an
+// upstream source waits for a downstream upgradeable source even when they are
+// connected through a discovered-only intermediary.
+func TestBuildUpgradePlan_IntermediaryNonSourceBetweenSources(t *testing.T) {
+	results := map[string]*lldp.ParseResult{
+		"source-root": {
+			Neighbors: []*lldp.Neighbor{
+				{Identity: "intermediate"},
+			},
+		},
+		"source-leaf": {
+			Neighbors: []*lldp.Neighbor{
+				{Identity: "intermediate"},
+			},
+		},
+	}
+	orderedHosts := []string{"source-root", "source-leaf"}
+	graph := buildGraphForPlannerTest(t, results, orderedHosts, "")
+
+	plan := buildUpgradePlan(graph, orderedHosts)
+
+	if len(plan.waves) != 2 {
+		t.Fatalf("expected 2 waves, got %d: %+v", len(plan.waves), plan.waves)
+	}
+	if len(plan.waves[0].devices) != 1 || plan.waves[0].devices[0] != "source-leaf" {
+		t.Fatalf("expected [source-leaf] in wave 1, got %v", plan.waves[0].devices)
+	}
+	if len(plan.waves[1].devices) != 1 || plan.waves[1].devices[0] != "source-root" {
+		t.Fatalf("expected [source-root] in wave 2, got %v", plan.waves[1].devices)
+	}
+	if len(plan.excluded) != 1 || plan.excluded[0] != "intermediate" {
+		t.Fatalf("expected [intermediate] in excluded, got %v", plan.excluded)
+	}
+
+	scheduledDevices := devicesInWave(plan)
+	if scheduledDevices["intermediate"] {
+		t.Fatalf("intermediate must not appear in any wave")
+	}
+	if !scheduledDevices["source-root"] || !scheduledDevices["source-leaf"] {
+		t.Fatalf("expected both source devices to be scheduled, got %v", scheduledDevices)
+	}
+}
+
 // TestBuildUpgradePlan_MultipleComponents verifies that waves from disconnected
 // components are merged correctly: all leaves in the first wave, all hubs last.
 func TestBuildUpgradePlan_MultipleComponents(t *testing.T) {

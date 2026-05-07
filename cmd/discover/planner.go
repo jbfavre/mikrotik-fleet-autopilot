@@ -1,8 +1,9 @@
 package discover
 
-import "maps"
-
-import "sort"
+import (
+	"maps"
+	"sort"
+)
 
 // upgradePlan holds the computed wave schedule for all upgradeable devices.
 type upgradePlan struct {

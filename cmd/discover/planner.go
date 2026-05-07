@@ -128,30 +128,72 @@ func buildUpgradePlan(graph *topologyGraph, orderedHosts []string) *upgradePlan 
 		return plan
 	}
 
+	selectUpgradeableComponentRoot := func(component []string, preferred string, fallback string) string {
+		inComponent := make(map[string]bool, len(component))
+		hasUpgradeable := false
+		for _, name := range component {
+			inComponent[name] = true
+			if upgradeable[name] {
+				hasUpgradeable = true
+			}
+		}
+		if !hasUpgradeable {
+			return fallback
+		}
+		if preferred != "" && inComponent[preferred] && upgradeable[preferred] {
+			return preferred
+		}
+		for _, name := range orderedHosts {
+			if inComponent[name] && upgradeable[name] {
+				return name
+			}
+		}
+
+		candidates := make([]string, 0, len(component))
+		for _, name := range component {
+			if upgradeable[name] {
+				candidates = append(candidates, name)
+			}
+		}
+		sort.Strings(candidates)
+		return candidates[0]
+	}
+
+	linkUpgradeableDescendants := func(root string, children map[string][]string, parentOf map[string]string, upgradeableChildCount map[string]int) {
+		var visit func(string, string)
+		visit = func(name string, nearestUpgradeableAncestor string) {
+			currentUpgradeableAncestor := nearestUpgradeableAncestor
+			if upgradeable[name] {
+				if nearestUpgradeableAncestor != "" {
+					parentOf[name] = nearestUpgradeableAncestor
+					upgradeableChildCount[nearestUpgradeableAncestor]++
+				}
+				currentUpgradeableAncestor = name
+			}
+			for _, child := range children[name] {
+				visit(child, currentUpgradeableAncestor)
+			}
+		}
+		visit(root, "")
+	}
+
 	// Phase 2: build spanning trees per component, compute child counts.
 	components := connectedComponents(graph)
-	roots := selectRoots(graph, components, orderedHosts, preferredRoot(graph))
+	preferred := preferredRoot(graph)
+	roots := selectRoots(graph, components, orderedHosts, preferred)
 
-	parentOf := make(map[string]string)           // child → spanning-tree parent
-	upgradeableChildCount := make(map[string]int) // upgradeable children remaining per node
+	parentOf := make(map[string]string)           // child → nearest upgradeable spanning-tree ancestor
+	upgradeableChildCount := make(map[string]int) // upgradeable descendants remaining per node
 
 	for i, component := range components {
-		root := roots[i]
+		root := selectUpgradeableComponentRoot(component, preferred, roots[i])
 		inComponent := make(map[string]bool)
 		for _, name := range component {
 			inComponent[name] = true
 		}
 
-		parent, children := buildSpanningTree(graph, root, inComponent, orderedHosts)
-
-		maps.Copy(parentOf, parent)
-		for p, kids := range children {
-			for _, kid := range kids {
-				if upgradeable[kid] {
-					upgradeableChildCount[p]++
-				}
-			}
-		}
+		_, children := buildSpanningTree(graph, root, inComponent, orderedHosts)
+		linkUpgradeableDescendants(root, children, parentOf, upgradeableChildCount)
 	}
 
 	// Phase 3: iterative ready-set scheduling.

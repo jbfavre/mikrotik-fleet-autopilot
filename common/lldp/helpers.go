@@ -1,5 +1,7 @@
 package lldp
 
+import "slices"
+
 // ByLocalInterface groups neighbors by the local interface where they were discovered
 func ByLocalInterface(neighbors []*Neighbor) map[string][]*Neighbor {
 	result := make(map[string][]*Neighbor)
@@ -26,11 +28,8 @@ func ByIdentity(neighbors []*Neighbor) map[string][]*Neighbor {
 func FilterByDiscoveryProtocol(neighbors []*Neighbor, protocol string) []*Neighbor {
 	result := make([]*Neighbor, 0)
 	for _, n := range neighbors {
-		for _, proto := range n.DiscoveredBy {
-			if proto == protocol {
-				result = append(result, n)
-				break
-			}
+		if slices.Contains(n.DiscoveredBy, protocol) {
+			result = append(result, n)
 		}
 	}
 	return result

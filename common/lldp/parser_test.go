@@ -3,6 +3,7 @@ package lldp
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -479,10 +480,5 @@ func TestFilterByDiscoveryProtocol_CDP(t *testing.T) {
 
 // Helper function for test assertions
 func sliceContains(s []string, v string) bool {
-	for _, item := range s {
-		if item == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s, v)
 }

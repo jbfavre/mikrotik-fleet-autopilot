@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
@@ -58,6 +59,9 @@ func TestBuildCommandFlags(t *testing.T) {
 		"max-concurrent-hosts": false,
 		"buffered-output":      false,
 		"skip-hostkey-check":   false,
+		"interface":            false,
+		"mndp":                 false,
+		"mndp-timeout":         false,
 	}
 
 	// Check all expected flags exist
@@ -77,8 +81,8 @@ func TestBuildCommandFlags(t *testing.T) {
 	}
 
 	// Test that we have the right number of flags
-	if len(cmd.Flags) != 8 {
-		t.Errorf("Expected 8 flags, got %d", len(cmd.Flags))
+	if len(cmd.Flags) != 11 {
+		t.Errorf("Expected 11 flags, got %d", len(cmd.Flags))
 	}
 }
 
@@ -648,5 +652,76 @@ func TestBuildCommandDisplayModeFlagRemoved(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "flag provided but not defined") {
 		t.Errorf("unexpected error for removed flag: %v", err)
+	}
+}
+
+func TestMNDPAndHostMutualExclusivity(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--mndp", "discover"})
+	if err == nil {
+		t.Fatal("cmd.Run() expected mutual exclusivity error, got nil")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected 'mutually exclusive' error, got: %v", err)
+	}
+}
+
+func TestMNDPFlagAloneDoesNotError(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	// Use a pre-cancelled context so the Before hook fires but the action exits immediately.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--mndp", "discover"})
+
+	// The context cancel should cause a context.Canceled error (or MNDP fires and fails),
+	// but NOT a mutual exclusivity / "no routers" error.
+	if err != nil && strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("--mndp alone must not trigger mutual exclusivity error, got: %v", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "no routers specified") {
+		t.Errorf("--mndp alone must not trigger 'no routers' error, got: %v", err)
+	}
+	if !globalConfig.UseMNDP {
+		t.Error("UseMNDP should be true when --mndp flag is set")
+	}
+}
+
+func TestMNDPTimeoutFlagParsed(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--host", "router1", "--mndp-timeout", "30s", "updates"})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Errorf("cmd.Run() unexpected error = %v", err)
+	}
+	if globalConfig.MNDPTimeout != 30*time.Second {
+		t.Errorf("MNDPTimeout = %v, want 30s", globalConfig.MNDPTimeout)
+	}
+}
+
+func TestMNDPTimeoutFlagInvalid(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--mndp-timeout", "bad", "updates"})
+	if err == nil {
+		t.Fatal("cmd.Run() expected parse error for invalid --mndp-timeout, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --mndp-timeout") {
+		t.Errorf("expected 'invalid --mndp-timeout' error, got: %v", err)
 	}
 }

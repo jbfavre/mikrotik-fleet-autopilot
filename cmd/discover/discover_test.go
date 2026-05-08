@@ -3,13 +3,16 @@ package discover
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
 	"jb.favre/mikrotik-fleet-autopilot/common/lldp"
+	"jb.favre/mikrotik-fleet-autopilot/common/mndp"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
@@ -46,7 +49,12 @@ func TestBuildTopologyGraph_Basic(t *testing.T) {
 		},
 	}
 
-	graph, err := buildTopologyGraph(results, []string{"device1", "device2"}, "")
+	topo := &topology{
+		orderedHosts: []string{"device1", "device2"},
+		results:      results,
+		errors:       map[string]error{},
+	}
+	graph, err := buildTopologyGraph(topo, "")
 	if err != nil {
 		t.Fatalf("buildTopologyGraph() unexpected error = %v", err)
 	}
@@ -81,7 +89,12 @@ func TestBuildTopologyGraph_RedundantLinksMultiplicity(t *testing.T) {
 		},
 	}
 
-	graph, err := buildTopologyGraph(results, []string{"source"}, "")
+	topo := &topology{
+		orderedHosts: []string{"source"},
+		results:      results,
+		errors:       map[string]error{},
+	}
+	graph, err := buildTopologyGraph(topo, "")
 	if err != nil {
 		t.Fatalf("buildTopologyGraph() unexpected error = %v", err)
 	}
@@ -103,7 +116,12 @@ func TestSelectRoots_PrefersHigherDegree(t *testing.T) {
 		"c": {Neighbors: []*lldp.Neighbor{}},
 	}
 
-	graph, err := buildTopologyGraph(results, []string{"a", "b", "c"}, "")
+	topo := &topology{
+		orderedHosts: []string{"a", "b", "c"},
+		results:      results,
+		errors:       map[string]error{},
+	}
+	graph, err := buildTopologyGraph(topo, "")
 	if err != nil {
 		t.Fatalf("buildTopologyGraph() unexpected error = %v", err)
 	}
@@ -127,7 +145,12 @@ func TestBuildTopologyGraph_ConnectedToAddsMFANode(t *testing.T) {
 		"router2": {Neighbors: []*lldp.Neighbor{}},
 	}
 
-	graph, err := buildTopologyGraph(results, []string{"router1", "router2"}, "router2")
+	topo := &topology{
+		orderedHosts: []string{"router1", "router2"},
+		results:      results,
+		errors:       map[string]error{},
+	}
+	graph, err := buildTopologyGraph(topo, "router2")
 	if err != nil {
 		t.Fatalf("buildTopologyGraph() unexpected error = %v", err)
 	}
@@ -158,7 +181,12 @@ func TestBuildTopologyGraph_ConnectedToUnknownTargetFails(t *testing.T) {
 		"router1": {Neighbors: []*lldp.Neighbor{}},
 	}
 
-	_, err := buildTopologyGraph(results, []string{"router1"}, "router2")
+	topo := &topology{
+		orderedHosts: []string{"router1"},
+		results:      results,
+		errors:       map[string]error{},
+	}
+	_, err := buildTopologyGraph(topo, "router2")
 	if err == nil {
 		t.Fatal("expected error for unknown connected-to target, got nil")
 	}
@@ -490,5 +518,216 @@ func TestOutputTopology_UpgradeSummaryMetrics(t *testing.T) {
 	}
 	if !strings.Contains(output, "Max wave parallelism") {
 		t.Fatalf("expected summary to contain Max wave parallelism metric, got:\n%s", output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MNDP path tests
+// ---------------------------------------------------------------------------
+
+func TestRunDiscoverForHosts_MNDPSuccessfulDiscovery(t *testing.T) {
+	// Inject a mock MNDP listener that returns one device with an IPv4 address
+	originalListen := listenMNDP
+	listenMNDP = func(_ context.Context, _ string, _ time.Duration) ([]*mndp.Device, error) {
+		return []*mndp.Device{
+			{MACAddress: "aa:bb:cc:dd:ee:ff", Identity: "router.home", IPv4Address: "192.168.1.1"},
+		}, nil
+	}
+	defer func() { listenMNDP = originalListen }()
+
+	// SSH stub returns empty LLDP output
+	originalSSH := createSSHConnection
+	createSSHConnection = func(_ context.Context, _ string) (ssh.RunnerInterface, error) {
+		return &stubRunner{runOutput: ""}, nil
+	}
+	defer func() { createSSHConnection = originalSSH }()
+
+	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
+	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+
+	var out bytes.Buffer
+	if err := runDiscoverForHosts(ctx, &out, ""); err != nil {
+		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	}
+	// The topology should display "router.home" (MNDP identity), not the bare IP
+	if !strings.Contains(out.String(), "router.home") {
+		t.Errorf("expected output to contain MNDP identity 'router.home', got:\n%s", out.String())
+	}
+}
+
+func TestRunDiscoverForHosts_MNDPSSHFails(t *testing.T) {
+	// MNDP returns a device
+	originalListen := listenMNDP
+	listenMNDP = func(_ context.Context, _ string, _ time.Duration) ([]*mndp.Device, error) {
+		return []*mndp.Device{
+			{MACAddress: "aa:bb:cc:dd:ee:ff", Identity: "router.home", IPv4Address: "192.168.1.1"},
+		}, nil
+	}
+	defer func() { listenMNDP = originalListen }()
+
+	// SSH connection fails
+	originalSSH := createSSHConnection
+	createSSHConnection = func(_ context.Context, _ string) (ssh.RunnerInterface, error) {
+		return nil, errors.New("connection refused")
+	}
+	defer func() { createSSHConnection = originalSSH }()
+
+	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
+	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+
+	var out bytes.Buffer
+	// Should not return an error (SSH failure is recorded, not fatal)
+	if err := runDiscoverForHosts(ctx, &out, ""); err != nil {
+		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	}
+	// The error section should appear in the output
+	output := out.String()
+	if !strings.Contains(output, "Discovery Errors") {
+		t.Errorf("expected output to contain 'Discovery Errors', got:\n%s", output)
+	}
+}
+
+func TestRunDiscoverForHosts_MNDPZeroDevices(t *testing.T) {
+	// MNDP returns no devices
+	originalListen := listenMNDP
+	listenMNDP = func(_ context.Context, _ string, _ time.Duration) ([]*mndp.Device, error) {
+		return []*mndp.Device{}, nil
+	}
+	defer func() { listenMNDP = originalListen }()
+
+	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
+	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+
+	err := runDiscoverForHosts(ctx, io.Discard, "")
+	if err == nil {
+		t.Fatal("runDiscoverForHosts() expected error for zero MNDP devices, got nil")
+	}
+	if !strings.Contains(err.Error(), "no hosts") {
+		t.Errorf("expected 'no hosts' error, got: %v", err)
+	}
+}
+
+func TestRunDiscoverForHosts_MNDPListenError(t *testing.T) {
+	// MNDP listener returns an error
+	originalListen := listenMNDP
+	listenMNDP = func(_ context.Context, _ string, _ time.Duration) ([]*mndp.Device, error) {
+		return nil, errors.New("network unreachable")
+	}
+	defer func() { listenMNDP = originalListen }()
+
+	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
+	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+
+	err := runDiscoverForHosts(ctx, io.Discard, "")
+	// MNDP error is non-fatal (warn + empty host list → "no hosts" error)
+	if err == nil {
+		t.Fatal("runDiscoverForHosts() expected error after MNDP failure with empty hosts, got nil")
+	}
+	if !strings.Contains(err.Error(), "no hosts") {
+		t.Errorf("expected 'no hosts' error after MNDP failure, got: %v", err)
+	}
+}
+
+func TestBuildTopologyGraph_MNDPIdentityAliasing(t *testing.T) {
+	// When ipToIdentity maps an IP to an identity, the node should use the identity as its name
+	results := map[string]*lldp.ParseResult{
+		"192.168.1.1": {
+			Neighbors: []*lldp.Neighbor{
+				{Identity: "switch1"},
+			},
+		},
+	}
+
+	topo := &topology{
+		orderedHosts: []string{"192.168.1.1"},
+		results:      results,
+		errors:       map[string]error{},
+		ipToIdentity: map[string]string{"192.168.1.1": "router.home"},
+	}
+	graph, err := buildTopologyGraph(topo, "")
+	if err != nil {
+		t.Fatalf("buildTopologyGraph() unexpected error = %v", err)
+	}
+
+	// The node should be named "router.home", not "192.168.1.1"
+	if _, ok := graph.nodes["router.home"]; !ok {
+		t.Errorf("expected node 'router.home' (from MNDP identity), got nodes: %v", graph.nodes)
+	}
+	if _, ok := graph.nodes["192.168.1.1"]; ok {
+		t.Errorf("expected bare IP '192.168.1.1' to be replaced by MNDP identity")
+	}
+}
+
+func TestBuildTopologyGraph_SSHReachabilityMarked(t *testing.T) {
+	results := map[string]*lldp.ParseResult{
+		"router1": {Neighbors: []*lldp.Neighbor{}},
+	}
+	errs := map[string]error{
+		"router2": errors.New("connection refused"),
+	}
+
+	topo := &topology{
+		orderedHosts: []string{"router1", "router2"},
+		results:      results,
+		errors:       errs,
+	}
+	graph, err := buildTopologyGraph(topo, "")
+	if err != nil {
+		t.Fatalf("buildTopologyGraph() unexpected error = %v", err)
+	}
+
+	// router1 had a result → sshReachable = true
+	if n, ok := graph.nodes["router1"]; !ok || n.sshReachable == nil || !*n.sshReachable {
+		t.Errorf("expected router1 to be SSH reachable")
+	}
+	// router2 had an error → sshReachable = false
+	if n, ok := graph.nodes["router2"]; !ok || n.sshReachable == nil || *n.sshReachable {
+		t.Errorf("expected router2 to be SSH unreachable")
+	}
+}
+
+func TestOutputTopology_UnreachableDeviceRenderedWithPrefix(t *testing.T) {
+	// router2 is in ordered hosts but SSH failed
+	topo := &topology{
+		orderedHosts: []string{"router1", "router2"},
+		results: map[string]*lldp.ParseResult{
+			"router1": {Neighbors: []*lldp.Neighbor{{Identity: "router2"}}},
+		},
+		errors: map[string]error{
+			"router2": errors.New("connection refused"),
+		},
+	}
+
+	var out bytes.Buffer
+	if err := outputTopology(&out, topo, ""); err != nil {
+		t.Fatalf("outputTopology() unexpected error = %v", err)
+	}
+
+	output := out.String()
+	// router2 has sshReachable=false → should appear with ❓ prefix in the tree
+	if !strings.Contains(output, "❓") {
+		t.Errorf("expected ❓ prefix for SSH-unreachable device, got:\n%s", output)
+	}
+}
+
+func TestOutputTopology_UnreachableCountInSummary(t *testing.T) {
+	topo := &topology{
+		orderedHosts: []string{"router1", "router2"},
+		results: map[string]*lldp.ParseResult{
+			"router1": {Neighbors: []*lldp.Neighbor{{Identity: "router2"}}},
+		},
+		errors: map[string]error{
+			"router2": errors.New("connection refused"),
+		},
+	}
+
+	var out bytes.Buffer
+	if err := outputTopology(&out, topo, ""); err != nil {
+		t.Fatalf("outputTopology() unexpected error = %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "Unreachable devices") {
+		t.Errorf("expected 'Unreachable devices' in summary, got:\n%s", output)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/discover"
@@ -45,7 +46,7 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Name:        "host",
 				Aliases:     []string{"H"},
 				Value:       "",
-				Usage:       "MikroTik router hostname or IP address (comma-separated for multiple routers). If not provided, will auto-discover from router*.rsc files in current directory",
+				Usage:       "Comma-separated list of MikroTik hosts. Mutually exclusive with --mndp",
 				Destination: hosts,
 			},
 			&cli.StringFlag{
@@ -98,6 +99,25 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Usage:       "Force buffered host progress output (deterministic final flush). By default, live display is preferred on TTY unless --debug is enabled",
 				Destination: &globalConfig.BufferedOutput,
 			},
+			&cli.StringFlag{
+				Name:        "interface",
+				Aliases:     []string{"i"},
+				Category:    "discovery",
+				Usage:       "Network interface to use for MNDP discovery (default: all non-loopback interfaces). Mutually exclusive with --host",
+				Destination: &globalConfig.Interface,
+			},
+			&cli.BoolFlag{
+				Name:        "mndp",
+				Category:    "discovery",
+				Usage:       "Dynamically discover MikroTik devices via MNDP. Mutually exclusive with --host",
+				Destination: &globalConfig.UseMNDP,
+			},
+			&cli.StringFlag{
+				Name:     "mndp-timeout",
+				Category: "discovery",
+				Value:    "15s",
+				Usage:    "How long to listen for MNDP responses (e.g. 15s, 1m). Only used with --mndp",
+			},
 		},
 		Commands: append(append(append(export.Command, updates.Command...), enroll.Command...), discover.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
@@ -117,15 +137,29 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 			globalConfig.EffectiveMaxConcurrent = effectiveMaxConcurrent
 			globalConfig.PreferLiveMode = !globalConfig.BufferedOutput
 
+			if raw := cmd.String("mndp-timeout"); raw != "" {
+				d, err := time.ParseDuration(raw)
+				if err != nil {
+					return ctx, fmt.Errorf("invalid --mndp-timeout value %q: %w", raw, err)
+				}
+				globalConfig.MNDPTimeout = d
+			}
+
 			// Check if a subcommand was provided
 			// If not, the help will be shown automatically by urfave/cli
 			if cmd.Args().Len() > 0 {
 				slog.Debug("command line arguments", "args", cmd.Args())
+
+				// Mutual exclusivity guard
+				if *hosts != "" && globalConfig.UseMNDP {
+					return ctx, fmt.Errorf("--host and --mndp are mutually exclusive: use --mndp for dynamic discovery or --host to target specific devices")
+				}
+
 				// Setup hosts
 				if *hosts != "" {
 					// Split comma-separated hosts
 					globalConfig.Hosts = core.ParseHosts(*hosts)
-				} else {
+				} else if !globalConfig.UseMNDP {
 					// Auto-discover routers
 					routers, err := core.DiscoverHosts()
 					if err != nil {
@@ -134,8 +168,9 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 					globalConfig.Hosts = routers
 					slog.Info("auto-discovered routers", "count", len(routers), "routers", routers)
 				}
+				// When --mndp is set, Hosts stays empty here; discover subcommand populates it.
 
-				if len(globalConfig.Hosts) == 0 {
+				if len(globalConfig.Hosts) == 0 && !globalConfig.UseMNDP {
 					slog.Error("no routers specified or discovered")
 					return ctx, fmt.Errorf("no routers specified or discovered")
 				}

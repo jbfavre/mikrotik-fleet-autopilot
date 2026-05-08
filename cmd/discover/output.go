@@ -154,6 +154,8 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 			localInterface := strings.TrimSpace(neighbor.LocalInterface)
 			// Avoid collapsing distinct neighbors with missing identity into a
 			// single shared "unknown" node by generating a scoped placeholder.
+			// We use canonicalSource (MNDP identity when available) so the
+			// placeholder matches the node name already used in the graph.
 			if identity == "" {
 				identity = fmt.Sprintf("unknown (%s:%s#%d)", canonicalSource, localInterface, neighborIdx)
 			}

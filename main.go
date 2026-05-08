@@ -103,7 +103,7 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Name:        "interface",
 				Aliases:     []string{"i"},
 				Category:    "discovery",
-				Usage:       "Network interface to use for MNDP discovery (default: all non-loopback interfaces). Mutually exclusive with --host",
+				Usage:       "Network interface to use for MNDP discovery (default: all non-loopback interfaces). Only used with --mndp",
 				Destination: &globalConfig.Interface,
 			},
 			&cli.BoolFlag{

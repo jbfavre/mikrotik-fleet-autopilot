@@ -48,6 +48,8 @@ func buildTestPacket(mac []byte, identity, version, platform string, uptime uint
 		appendTLV(tlvIPv4, ipv4)
 	}
 	if len(ipv6) == 16 {
+		// MNDP uses TLV type 15 for both IPv4 and IPv6, distinguished by length:
+		// 4 bytes = IPv4, 16 bytes = IPv6. The parser skips IPv6 entries silently.
 		appendTLV(tlvIPv4, ipv6)
 	}
 
@@ -126,6 +128,9 @@ func TestParsePacket_BothIPv4AndIPv6(t *testing.T) {
 	}
 	appendTLV(tlvMAC, mac)
 	appendTLV(tlvIdentity, []byte("router.home"))
+	// In MNDP, TLV type 15 (tlvIPv4) is used for both IPv4 and IPv6 addresses.
+	// The length field distinguishes them: 4 bytes = IPv4, 16 bytes = IPv6.
+	// The parser skips IPv6 entries silently.
 	appendTLV(tlvIPv4, ipv4) // IPv4: length 4 → should be stored
 	appendTLV(tlvIPv4, ipv6) // IPv6: length 16 → should be skipped
 

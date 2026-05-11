@@ -130,6 +130,64 @@ func TestDeduplicateDevices_SortedByIdentity(t *testing.T) {
 	}
 }
 
+func TestShouldReplaceDevice(t *testing.T) {
+	withIPv4 := &Device{IPv4Address: "192.168.1.10"}
+	withoutIPv4 := &Device{}
+
+	tests := []struct {
+		name      string
+		seen      bool
+		existing  *Device
+		candidate *Device
+		want      bool
+	}{
+		{
+			name:      "unseen device is always accepted",
+			seen:      false,
+			existing:  nil,
+			candidate: withoutIPv4,
+			want:      true,
+		},
+		{
+			name:      "candidate with IPv4 replaces existing without IPv4",
+			seen:      true,
+			existing:  withoutIPv4,
+			candidate: withIPv4,
+			want:      true,
+		},
+		{
+			name:      "candidate without IPv4 does not replace existing with IPv4",
+			seen:      true,
+			existing:  withIPv4,
+			candidate: withoutIPv4,
+			want:      false,
+		},
+		{
+			name:      "candidate with IPv4 replaces existing with IPv4 as newer record",
+			seen:      true,
+			existing:  withIPv4,
+			candidate: withIPv4,
+			want:      true,
+		},
+		{
+			name:      "candidate without IPv4 replaces existing without IPv4 as newer record",
+			seen:      true,
+			existing:  withoutIPv4,
+			candidate: withoutIPv4,
+			want:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldReplaceDevice(tt.seen, tt.existing, tt.candidate)
+			if got != tt.want {
+				t.Fatalf("shouldReplaceDevice() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestListen_RejectsNonPositiveTimeout(t *testing.T) {
 	_, err := Listen(context.Background(), "", 0)
 	if err == nil {

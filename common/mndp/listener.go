@@ -56,15 +56,6 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 	var wg sync.WaitGroup
 
 	for _, iface := range ifaces {
-		//ipv4, err := firstIPv4(iface)
-		//if err != nil {
-		//	if ifaceName != "" {
-		//		return nil, fmt.Errorf("mndp: interface %q has no usable IPv4 address: %w", iface.Name, err)
-		//	}
-		//	slog.Debug("mndp: skipping interface (no IPv4)", "interface", iface.Name, "error", err)
-		//	continue
-		//}
-
 		addr := "0.0.0.0:5678"
 		conn, err := net.ListenPacket("udp4", addr)
 		if err != nil {
@@ -137,7 +128,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 
 				mu.Lock()
 				existing, seen := devByMAC[dev.MACAddress]
-				if !seen || dev.IPv4Address != "" || existing.IPv4Address == "" {
+				if shouldReplaceDevice(seen, existing, dev) {
 					devByMAC[dev.MACAddress] = dev
 				}
 				mu.Unlock()
@@ -148,6 +139,23 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 	wg.Wait()
 
 	return deduplicateDevices(devByMAC), nil
+}
+
+func shouldReplaceDevice(seen bool, existing, candidate *Device) bool {
+	if !seen {
+		return true
+	}
+	existingHasIPv4 := existing.IPv4Address != ""
+	candidateHasIPv4 := candidate.IPv4Address != ""
+
+	// Prefer the record that carries an IPv4 address; if both (or neither) have IPv4, prefer the newer record.
+	if !existingHasIPv4 && candidateHasIPv4 {
+		return true
+	}
+	if existingHasIPv4 && !candidateHasIPv4 {
+		return false
+	}
+	return true
 }
 
 // SendProbe sends an MNDP discovery request packet on conn.
@@ -167,30 +175,6 @@ func SendProbe(conn net.PacketConn) error {
 		return fmt.Errorf("mndp: failed to send probe: %w", err)
 	}
 	return nil
-}
-
-// firstIPv4 returns the string representation of the first IPv4 unicast
-// address assigned to iface, or an error if none is found.
-func firstIPv4(iface net.Interface) (string, error) {
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return "", err
-	}
-	for _, addr := range addrs {
-		switch v := addr.(type) {
-		case *net.IPNet:
-			ip := v.IP.To4()
-			if ip != nil {
-				return ip.String(), nil
-			}
-		case *net.IPAddr:
-			ip := v.IP.To4()
-			if ip != nil {
-				return ip.String(), nil
-			}
-		}
-	}
-	return "", fmt.Errorf("no IPv4 address found on interface %q", iface.Name)
 }
 
 // deduplicateDevices takes the last-seen-wins map, builds a slice, and sorts it by Identity.

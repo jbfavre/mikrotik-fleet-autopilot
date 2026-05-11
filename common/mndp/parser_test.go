@@ -210,3 +210,45 @@ func TestParsePacket_UnknownMsgType(t *testing.T) {
 		t.Fatal("ParsePacket() expected error for unknown msg-type, got nil")
 	}
 }
+
+func TestParsePacket_TLVEndiannessIsBigEndian(t *testing.T) {
+	mac := []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}
+
+	t.Run("big-endian-tlv-header-parses", func(t *testing.T) {
+		pkt := []byte{
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x01, // type: MAC
+			0x00, 0x06, // len: 6
+			0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+			0x00, 0x05, // type: Identity
+			0x00, 0x06, // len: 6
+			'r', 'o', 'u', 't', 'e', 'r',
+		}
+
+		dev, err := ParsePacket(pkt)
+		if err != nil {
+			t.Fatalf("ParsePacket() unexpected error for big-endian TLV header = %v", err)
+		}
+		if dev.MACAddress != "aa:bb:cc:dd:ee:ff" {
+			t.Fatalf("MACAddress = %q, want %q", dev.MACAddress, "aa:bb:cc:dd:ee:ff")
+		}
+	})
+
+	t.Run("little-endian-tlv-header-fails", func(t *testing.T) {
+		pkt := []byte{
+			0x00, 0x00, 0x00, 0x00,
+			0x01, 0x00, // type: MAC (little-endian encoded)
+			0x06, 0x00, // len: 6 (little-endian encoded)
+		}
+		pkt = append(pkt, mac...)
+		pkt = append(pkt,
+			0x05, 0x00, // type: Identity (little-endian encoded)
+			0x06, 0x00, // len: 6 (little-endian encoded)
+			'r', 'o', 'u', 't', 'e', 'r',
+		)
+
+		if _, err := ParsePacket(pkt); err == nil {
+			t.Fatal("ParsePacket() expected error for little-endian TLV header, got nil")
+		}
+	})
+}

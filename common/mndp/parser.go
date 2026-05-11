@@ -3,7 +3,6 @@ package mndp
 import (
 	"encoding/binary"
 	"fmt"
-	"log/slog"
 	"net"
 )
 
@@ -26,12 +25,11 @@ const (
 //
 // Wire format:
 //
-//		// Header: [1B seq_lo] [1B msg-type] [1B seq_hi or reserved] [1B counter/reserved]
-//	      [TLV…][2B type LE][2B length LE][length bytes value]
+//	Header: [1B seq_lo] [1B msg-type] [1B seq_hi or reserved] [1B counter/reserved]
+//	[TLV…][2B type BE][2B length BE][length bytes value]
 //
 // Returns an error for:
 //   - Packets shorter than 4 bytes
-//   - msg-type 0x0000 (request) or unknown types
 //   - Truncated TLV values
 //   - Missing MAC address TLV
 //   - Missing Identity TLV
@@ -58,12 +56,6 @@ func ParsePacket(data []byte) (*Device, error) {
 
 		value := data[offset : offset+tlvLen]
 		offset += tlvLen
-
-		slog.Debug("mndp: TLV",
-			"type", tlvType,
-			"length", tlvLen,
-			"hex", fmt.Sprintf("% 02x", value),
-		)
 
 		switch tlvType {
 		case tlvMAC:
@@ -101,29 +93,8 @@ func ParsePacket(data []byte) (*Device, error) {
 			}
 		case tlvUnknown18:
 			// Observed but undocumented; silently skip
-		default:
-			slog.Debug("mndp: skipping unknown TLV",
-				"type", tlvType,
-				"length", tlvLen,
-				"hex", fmt.Sprintf("% 02x", value),
-			)
 		}
 	}
-
-	slog.Debug("mndp: parsed device",
-		"mac", dev.MACAddress,
-		"identity", dev.Identity,
-		"version", dev.Version,
-		"platform", dev.Platform,
-		"uptime", dev.Uptime,
-		"softwareid", dev.SoftwareID,
-		"board", dev.Board,
-		"unpack", dev.Unpack,
-		"ipv6", dev.IPv6Address,
-		"rmote interface", dev.SourceInterfaceName,
-		"ipv4", dev.IPv4Address,
-		"local interface", dev.InterfaceName,
-	)
 
 	if dev.MACAddress == "" {
 		return nil, fmt.Errorf("mndp: missing required MAC address TLV")

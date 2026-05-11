@@ -10,7 +10,12 @@ import (
 // from LLDP results and fails the test on any error.
 func buildGraphForPlannerTest(t *testing.T, results map[string]*lldp.ParseResult, orderedHosts []string, connectedTo string) *topologyGraph {
 	t.Helper()
-	graph, err := buildTopologyGraph(results, orderedHosts, connectedTo)
+	topo := &topology{
+		orderedHosts: orderedHosts,
+		results:      results,
+		errors:       map[string]error{},
+	}
+	graph, err := buildTopologyGraph(topo, connectedTo)
 	if err != nil {
 		t.Fatalf("buildTopologyGraph() unexpected error = %v", err)
 	}

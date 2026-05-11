@@ -102,8 +102,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 				if err != nil {
 					var ne net.Error
 					if errors.As(err, &ne) && ne.Timeout() {
-						now := time.Now()
-						if !now.Before(deadline) {
+						if !readDeadline.Before(deadline) {
 							break
 						}
 						continue

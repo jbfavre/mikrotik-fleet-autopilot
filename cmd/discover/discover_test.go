@@ -679,6 +679,43 @@ func TestBuildTopologyGraph_ConnectedToSupportsMNDPSourceIP(t *testing.T) {
 	}
 }
 
+func TestBuildTopologyGraph_MNDPDuplicateIdentityDisambiguatedByHost(t *testing.T) {
+	topo := &topology{
+		orderedHosts: []string{"192.168.1.1", "192.168.1.2"},
+		results: map[string]*lldp.ParseResult{
+			"192.168.1.1": {Neighbors: []*lldp.Neighbor{}},
+		},
+		errors: map[string]error{
+			"192.168.1.2": errors.New("ssh failed"),
+		},
+		ipToIdentity: map[string]string{
+			"192.168.1.1": "router.home",
+			"192.168.1.2": "router.home",
+		},
+	}
+
+	graph, err := buildTopologyGraph(topo, "")
+	if err != nil {
+		t.Fatalf("buildTopologyGraph() unexpected error = %v", err)
+	}
+
+	name1 := "router.home (192.168.1.1)"
+	name2 := "router.home (192.168.1.2)"
+	if _, ok := graph.nodes[name1]; !ok {
+		t.Fatalf("expected disambiguated node %q to exist", name1)
+	}
+	if _, ok := graph.nodes[name2]; !ok {
+		t.Fatalf("expected disambiguated node %q to exist", name2)
+	}
+
+	if n := graph.nodes[name1]; n.sshReachable == nil || !*n.sshReachable {
+		t.Fatalf("expected %q to be marked SSH reachable", name1)
+	}
+	if n := graph.nodes[name2]; n.sshReachable == nil || *n.sshReachable {
+		t.Fatalf("expected %q to be marked SSH unreachable", name2)
+	}
+}
+
 func TestBuildTopologyGraph_SSHReachabilityMarked(t *testing.T) {
 	results := map[string]*lldp.ParseResult{
 		"router1": {Neighbors: []*lldp.Neighbor{}},

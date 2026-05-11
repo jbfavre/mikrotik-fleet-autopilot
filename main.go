@@ -152,6 +152,11 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 			// If not, the help will be shown automatically by urfave/cli
 			if cmd.Args().Len() > 0 {
 				slog.Debug("command line arguments", "args", cmd.Args())
+				subcommand := cmd.Args().Get(0)
+
+				if globalConfig.UseMNDP && subcommand != "discover" {
+					return ctx, fmt.Errorf("--mndp is only supported with the discover subcommand")
+				}
 
 				// Mutual exclusivity guard
 				if *hosts != "" && globalConfig.UseMNDP {

@@ -112,6 +112,17 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		undirected: make(map[string][]*linkDetail),
 	}
 
+	identityHostCounts := make(map[string]int)
+	for _, host := range topo.orderedHosts {
+		if topo.ipToIdentity == nil {
+			continue
+		}
+		if id, ok := topo.ipToIdentity[host]; ok && id != "" {
+			identityHostCounts[id]++
+		}
+	}
+
+	hostToNodeName := make(map[string]string, len(topo.orderedHosts))
 	hostOrder := make(map[string]int, len(topo.orderedHosts))
 	for idx, host := range topo.orderedHosts {
 		hostOrder[host] = idx
@@ -120,9 +131,14 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		canonicalName := host
 		if topo.ipToIdentity != nil {
 			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
-				canonicalName = id
+				if identityHostCounts[id] > 1 {
+					canonicalName = fmt.Sprintf("%s (%s)", id, host)
+				} else {
+					canonicalName = id
+				}
 			}
 		}
+		hostToNodeName[host] = canonicalName
 		node := graph.getOrCreateNode(canonicalName, true, idx)
 
 		// Mark SSH reachability
@@ -141,13 +157,7 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		if result == nil {
 			continue
 		}
-		// Resolve canonical name for the source node
-		canonicalSource := sourceHost
-		if topo.ipToIdentity != nil {
-			if id, ok := topo.ipToIdentity[sourceHost]; ok && id != "" {
-				canonicalSource = id
-			}
-		}
+		canonicalSource := hostToNodeName[sourceHost]
 		sourceNode := graph.getOrCreateNode(canonicalSource, true, hostOrder[sourceHost])
 		for neighborIdx, neighbor := range result.Neighbors {
 			identity := strings.TrimSpace(neighbor.Identity)
@@ -175,8 +185,13 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 	}
 
 	canonicalConnectedTo := connectedTo
-	if topo.ipToIdentity != nil {
+	if resolved, ok := hostToNodeName[connectedTo]; ok {
+		canonicalConnectedTo = resolved
+	} else if topo.ipToIdentity != nil {
 		if id, ok := topo.ipToIdentity[connectedTo]; ok && id != "" {
+			if identityHostCounts[id] > 1 {
+				return nil, fmt.Errorf("connected-to target %q resolves to a duplicate identity %q; use a specific source IP instead", connectedTo, id)
+			}
 			canonicalConnectedTo = id
 		}
 	}

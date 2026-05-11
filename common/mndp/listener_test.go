@@ -1,7 +1,9 @@
 package mndp
 
 import (
+	"context"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -125,5 +127,15 @@ func TestDeduplicateDevices_SortedByIdentity(t *testing.T) {
 	if result[0].Identity != "apple" || result[1].Identity != "mango" || result[2].Identity != "zebra" {
 		t.Errorf("deduplicateDevices() not sorted: got %q, %q, %q",
 			result[0].Identity, result[1].Identity, result[2].Identity)
+	}
+}
+
+func TestListen_RejectsNonPositiveTimeout(t *testing.T) {
+	_, err := Listen(context.Background(), "", 0)
+	if err == nil {
+		t.Fatal("Listen() expected error for non-positive timeout, got nil")
+	}
+	if !strings.Contains(err.Error(), "timeout must be greater than 0") {
+		t.Fatalf("Listen() error = %v, want timeout validation error", err)
 	}
 }

@@ -693,6 +693,20 @@ func TestMNDPFlagAloneDoesNotError(t *testing.T) {
 	}
 }
 
+func TestMNDPFlagRejectedForNonDiscoverSubcommands(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--mndp", "updates"})
+	if err == nil {
+		t.Fatal("cmd.Run() expected error for --mndp on non-discover subcommand, got nil")
+	}
+	if !strings.Contains(err.Error(), "only supported with the discover subcommand") {
+		t.Errorf("unexpected error for --mndp with updates: %v", err)
+	}
+}
+
 func TestMNDPTimeoutFlagParsed(t *testing.T) {
 	var globalConfig core.Config
 	var hosts, sshPassword, sshPassphrase string
@@ -722,5 +736,19 @@ func TestMNDPTimeoutFlagInvalid(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid --mndp-timeout") {
 		t.Errorf("expected 'invalid --mndp-timeout' error, got: %v", err)
+	}
+}
+
+func TestMNDPTimeoutFlagNonPositive(t *testing.T) {
+	var globalConfig core.Config
+	var hosts, sshPassword, sshPassphrase string
+
+	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--mndp-timeout", "0s", "updates"})
+	if err == nil {
+		t.Fatal("cmd.Run() expected error for non-positive --mndp-timeout, got nil")
+	}
+	if !strings.Contains(err.Error(), "must be greater than 0") {
+		t.Errorf("expected non-positive timeout error, got: %v", err)
 	}
 }

@@ -19,6 +19,10 @@ const listenReadPollInterval = 250 * time.Millisecond
 // Devices are deduplicated by MACAddress (last-seen wins).
 // Returns the deduplicated slice, sorted by Identity.
 func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*Device, error) {
+	if timeout <= 0 {
+		return nil, fmt.Errorf("mndp: timeout must be greater than 0")
+	}
+
 	var ifaces []net.Interface
 
 	if ifaceName != "" {
@@ -54,6 +58,9 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 	for _, iface := range ifaces {
 		ipv4, err := firstIPv4(iface)
 		if err != nil {
+			if ifaceName != "" {
+				return nil, fmt.Errorf("mndp: interface %q has no usable IPv4 address: %w", iface.Name, err)
+			}
 			slog.Debug("mndp: skipping interface (no IPv4)", "interface", iface.Name, "error", err)
 			continue
 		}
@@ -61,11 +68,18 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 		addr := ipv4 + ":5678"
 		conn, err := net.ListenPacket("udp4", addr)
 		if err != nil {
+			if ifaceName != "" {
+				return nil, fmt.Errorf("mndp: failed to bind to interface %q (%s): %w", iface.Name, addr, err)
+			}
 			slog.Debug("mndp: failed to bind on interface", "interface", iface.Name, "addr", addr, "error", err)
 			continue
 		}
 
 		if err := SendProbe(conn); err != nil {
+			if ifaceName != "" {
+				_ = conn.Close()
+				return nil, fmt.Errorf("mndp: failed to send probe on interface %q: %w", iface.Name, err)
+			}
 			slog.Debug("mndp: probe send failed", "interface", iface.Name, "error", err)
 			_ = conn.Close()
 			continue

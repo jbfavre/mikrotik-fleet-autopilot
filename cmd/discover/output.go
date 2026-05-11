@@ -228,6 +228,9 @@ func disambiguatedIdentityHint(identity string, orderedHosts []string, ipToIdent
 			names = append(names, fmt.Sprintf("%s (%s)", identity, host))
 		}
 	}
+	if len(names) == 0 {
+		return identity
+	}
 	return strings.Join(names, ", ")
 }
 

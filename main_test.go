@@ -675,19 +675,18 @@ func TestMNDPFlagAloneDoesNotError(t *testing.T) {
 
 	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
 
-	// Use a pre-cancelled context so the Before hook fires but the action exits immediately.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cancel()
-	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--mndp", "discover"})
+	// Use --help to stop after CLI parsing/validation so the test does not execute
+	// the real discover action or touch network interfaces.
+	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--mndp", "--help"})
 
-	// The context cancel should cause a context.Canceled error (or MNDP fires and fails),
-	// but NOT a mutual exclusivity / "no routers" error.
-	if err != nil && strings.Contains(err.Error(), "mutually exclusive") {
-		t.Errorf("--mndp alone must not trigger mutual exclusivity error, got: %v", err)
-	}
-	if err != nil && strings.Contains(err.Error(), "no routers specified") {
-		t.Errorf("--mndp alone must not trigger 'no routers' error, got: %v", err)
+	if err != nil {
+		if strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("--mndp alone must not trigger mutual exclusivity error, got: %v", err)
+		}
+		if strings.Contains(err.Error(), "no routers specified") {
+			t.Errorf("--mndp alone must not trigger 'no routers' error, got: %v", err)
+		}
+		t.Errorf("cmd.Run() unexpected error = %v", err)
 	}
 	if !globalConfig.UseMNDP {
 		t.Error("UseMNDP should be true when --mndp flag is set")

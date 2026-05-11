@@ -3,6 +3,7 @@ package mndp
 import (
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"net"
 )
 
@@ -93,8 +94,29 @@ func ParsePacket(data []byte) (*Device, error) {
 			}
 		case tlvUnknown18:
 			// Observed but undocumented; silently skip
+		default:
+			slog.Debug("mndp: skipping unknown TLV",
+				"type", tlvType,
+				"length", tlvLen,
+				"hex", fmt.Sprintf("% 02x", value),
+			)
 		}
 	}
+
+	slog.Debug("mndp: parsed device",
+		"mac", dev.MACAddress,
+		"identity", dev.Identity,
+		"version", dev.Version,
+		"platform", dev.Platform,
+		"uptime", dev.Uptime,
+		"softwareid", dev.SoftwareID,
+		"board", dev.Board,
+		"unpack", dev.Unpack,
+		"ipv6", dev.IPv6Address,
+		"remote interface", dev.SourceInterfaceName,
+		"ipv4", dev.IPv4Address,
+		"local interface", dev.InterfaceName,
+	)
 
 	if dev.MACAddress == "" {
 		return nil, fmt.Errorf("mndp: missing required MAC address TLV")

@@ -56,16 +56,16 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 	var wg sync.WaitGroup
 
 	for _, iface := range ifaces {
-		ipv4, err := firstIPv4(iface)
-		if err != nil {
-			if ifaceName != "" {
-				return nil, fmt.Errorf("mndp: interface %q has no usable IPv4 address: %w", iface.Name, err)
-			}
-			slog.Debug("mndp: skipping interface (no IPv4)", "interface", iface.Name, "error", err)
-			continue
-		}
+		//ipv4, err := firstIPv4(iface)
+		//if err != nil {
+		//	if ifaceName != "" {
+		//		return nil, fmt.Errorf("mndp: interface %q has no usable IPv4 address: %w", iface.Name, err)
+		//	}
+		//	slog.Debug("mndp: skipping interface (no IPv4)", "interface", iface.Name, "error", err)
+		//	continue
+		//}
 
-		addr := ipv4 + ":5678"
+		addr := "0.0.0.0:5678"
 		conn, err := net.ListenPacket("udp4", addr)
 		if err != nil {
 			if ifaceName != "" {
@@ -136,7 +136,10 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 				dev.InterfaceName = ifName
 
 				mu.Lock()
-				devByMAC[dev.MACAddress] = dev // last-seen wins
+				existing, seen := devByMAC[dev.MACAddress]
+				if !seen || dev.IPv4Address != "" || existing.IPv4Address == "" {
+					devByMAC[dev.MACAddress] = dev
+				}
 				mu.Unlock()
 			}
 		}(conn, iface.Name)

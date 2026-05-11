@@ -113,12 +113,11 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 	}
 
 	identityHostCounts := make(map[string]int)
-	for _, host := range topo.orderedHosts {
-		if topo.ipToIdentity == nil {
-			continue
-		}
-		if id, ok := topo.ipToIdentity[host]; ok && id != "" {
-			identityHostCounts[id]++
+	if topo.ipToIdentity != nil {
+		for _, host := range topo.orderedHosts {
+			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
+				identityHostCounts[id]++
+			}
 		}
 	}
 
@@ -188,6 +187,8 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 	if resolved, ok := hostToNodeName[connectedTo]; ok {
 		canonicalConnectedTo = resolved
 	} else if topo.ipToIdentity != nil {
+		// Fallback for IP values that can be canonicalized by MNDP identity but
+		// are not part of orderedHosts (for example, external caller inputs).
 		if id, ok := topo.ipToIdentity[connectedTo]; ok && id != "" {
 			if identityHostCounts[id] > 1 {
 				return nil, fmt.Errorf("connected-to target %q resolves to a duplicate identity %q; use a specific source IP instead", connectedTo, id)

@@ -9,17 +9,17 @@ import (
 	"strings"
 
 	"gonum.org/v1/gonum/graph/simple"
-	"jb.favre/mikrotik-fleet-autopilot/common/lldp"
 )
 
 const mfaNodeName = "mfa"
 
 type topologyNode struct {
-	name        string
-	isSource    bool
-	sourceOrder int
-	firstSeen   int
-	graphID     int64
+	name         string
+	isSource     bool
+	sourceOrder  int
+	firstSeen    int
+	graphID      int64
+	sshReachable *bool // nil = not attempted; &true = ok; &false = failed
 }
 
 type linkDetail struct {
@@ -82,7 +82,7 @@ func outputTopology(out io.Writer, topo *topology, connectedTo string) error {
 		return nil
 	}
 
-	graph, err := buildTopologyGraph(topo.results, topo.orderedHosts, connectedTo)
+	graph, err := buildTopologyGraph(topo, connectedTo)
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func outputTopology(out io.Writer, topo *topology, connectedTo string) error {
 	return nil
 }
 
-func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []string, connectedTo string) (*topologyGraph, error) {
+func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, error) {
 	graph := &topologyGraph{
 		g:          simple.NewUndirectedGraph(),
 		nodes:      make(map[string]*topologyNode),
@@ -112,25 +112,61 @@ func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []str
 		undirected: make(map[string][]*linkDetail),
 	}
 
-	hostOrder := make(map[string]int, len(orderedHosts))
-	for idx, host := range orderedHosts {
-		hostOrder[host] = idx
-		graph.getOrCreateNode(host, true, idx)
+	identityHostCounts := make(map[string]int)
+	if topo.ipToIdentity != nil {
+		for _, host := range topo.orderedHosts {
+			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
+				identityHostCounts[id]++
+			}
+		}
 	}
 
-	for _, sourceHost := range orderedHosts {
-		result := results[sourceHost]
+	hostToNodeName := make(map[string]string, len(topo.orderedHosts))
+	hostOrder := make(map[string]int, len(topo.orderedHosts))
+	for idx, host := range topo.orderedHosts {
+		hostOrder[host] = idx
+
+		// Resolve canonical name: prefer MNDP identity over bare IP
+		canonicalName := host
+		if topo.ipToIdentity != nil {
+			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
+				if identityHostCounts[id] > 1 {
+					canonicalName = fmt.Sprintf("%s (%s)", id, host)
+				} else {
+					canonicalName = id
+				}
+			}
+		}
+		hostToNodeName[host] = canonicalName
+		node := graph.getOrCreateNode(canonicalName, true, idx)
+
+		// Mark SSH reachability
+		if _, failed := topo.errors[host]; failed {
+			f := false
+			node.sshReachable = &f
+		} else if _, ok := topo.results[host]; ok {
+			t := true
+			node.sshReachable = &t
+		}
+		// If neither result nor error exists for this host, sshReachable stays nil
+	}
+
+	for _, sourceHost := range topo.orderedHosts {
+		result := topo.results[sourceHost]
 		if result == nil {
 			continue
 		}
-		sourceNode := graph.getOrCreateNode(sourceHost, true, hostOrder[sourceHost])
+		canonicalSource := hostToNodeName[sourceHost]
+		sourceNode := graph.getOrCreateNode(canonicalSource, true, hostOrder[sourceHost])
 		for neighborIdx, neighbor := range result.Neighbors {
 			identity := strings.TrimSpace(neighbor.Identity)
 			localInterface := strings.TrimSpace(neighbor.LocalInterface)
 			// Avoid collapsing distinct neighbors with missing identity into a
 			// single shared "unknown" node by generating a scoped placeholder.
+			// We use canonicalSource (MNDP identity when available) so the
+			// placeholder matches the node name already used in the graph.
 			if identity == "" {
-				identity = fmt.Sprintf("unknown (%s:%s#%d)", sourceHost, localInterface, neighborIdx)
+				identity = fmt.Sprintf("unknown (%s:%s#%d)", canonicalSource, localInterface, neighborIdx)
 			}
 			destination := graph.getOrCreateNode(identity, false, -1)
 			graph.addLink(sourceNode.name, destination.name, &linkDetail{
@@ -147,19 +183,55 @@ func buildTopologyGraph(results map[string]*lldp.ParseResult, orderedHosts []str
 		return graph, nil
 	}
 
-	if _, ok := graph.nodes[connectedTo]; !ok {
+	canonicalConnectedTo := connectedTo
+	if resolved, ok := hostToNodeName[connectedTo]; ok {
+		canonicalConnectedTo = resolved
+	} else if topo.ipToIdentity != nil {
+		// Fallback for IP values that can be canonicalized by MNDP identity but
+		// are not part of orderedHosts (for example, external caller inputs).
+		if id, ok := topo.ipToIdentity[connectedTo]; ok && id != "" {
+			if identityHostCounts[id] > 1 {
+				hint := disambiguatedIdentityHint(id, topo.orderedHosts, topo.ipToIdentity)
+				return nil, fmt.Errorf(
+					"connected-to target %q resolves to duplicate identity %q; choose one source name: %s",
+					connectedTo,
+					id,
+					hint,
+				)
+			}
+			canonicalConnectedTo = id
+		}
+	}
+
+	if _, ok := graph.nodes[canonicalConnectedTo]; !ok {
+		if canonicalConnectedTo != connectedTo {
+			return nil, fmt.Errorf("connected-to target %q (resolved from IP to identity %q) was not found in the topology; use a configured source host or a discovered device identity", connectedTo, canonicalConnectedTo)
+		}
 		return nil, fmt.Errorf("connected-to target %q was not found in the topology; use a configured source host or a discovered device identity", connectedTo)
 	}
 
 	// mfa is a synthetic graph-only node representing the computer running the tool.
 	// It must never be added to discovery inputs or any SSH connection path.
 	mfaNode := graph.getOrCreateNode(mfaNodeName, false, -1)
-	graph.addLink(mfaNode.name, connectedTo, &linkDetail{
+	graph.addLink(mfaNode.name, canonicalConnectedTo, &linkDetail{
 		from: mfaNode.name,
-		to:   connectedTo,
+		to:   canonicalConnectedTo,
 	})
 
 	return graph, nil
+}
+
+func disambiguatedIdentityHint(identity string, orderedHosts []string, ipToIdentity map[string]string) string {
+	var names []string
+	for _, host := range orderedHosts {
+		if ipToIdentity[host] == identity {
+			names = append(names, fmt.Sprintf("%s (%s)", identity, host))
+		}
+	}
+	if len(names) == 0 {
+		return identity
+	}
+	return strings.Join(names, ", ")
 }
 
 func (g *topologyGraph) getOrCreateNode(name string, isSource bool, sourceOrder int) *topologyNode {
@@ -402,7 +474,11 @@ func renderComponent(out io.Writer, graph *topologyGraph, component []string, ro
 		treeEdges[pairKey(p, child)] = true
 	}
 
-	_, _ = fmt.Fprintf(out, "[%s]\n", graph.nodes[root].name)
+	statusPrefix := ""
+	if n := graph.nodes[root]; n != nil && n.sshReachable != nil && !*n.sshReachable {
+		statusPrefix = "❓ "
+	}
+	_, _ = fmt.Fprintf(out, "[%s%s]\n", statusPrefix, graph.nodes[root].name)
 	renderChildren(out, graph, root, children, "  ")
 
 	crossLinks := make([]string, 0)
@@ -442,7 +518,11 @@ func renderChildren(out io.Writer, graph *topologyGraph, parent string, children
 		childName := graph.nodes[child].name
 		edges := edgeDetailsBetween(graph, parent, child)
 
-		_, _ = fmt.Fprintf(out, "%s%s[%s]\n", indent, branch, childName)
+		childStatusPrefix := ""
+		if n := graph.nodes[child]; n.sshReachable != nil && !*n.sshReachable {
+			childStatusPrefix = "❓ "
+		}
+		_, _ = fmt.Fprintf(out, "%s%s[%s%s]\n", indent, branch, childStatusPrefix, childName)
 
 		// Filter renderable edges (skip if both interfaces are empty)
 		renderableEdges := make([]*linkDetail, 0)
@@ -599,6 +679,16 @@ func printSummary(out io.Writer, graph *topologyGraph, treeEdgeCount int, plan *
 	_, _ = fmt.Fprintf(out, "  Total devices        : %d\n", len(graph.nodes))
 	_, _ = fmt.Fprintf(out, "  Rendered forest edges: %d\n", treeEdgeCount)
 	_, _ = fmt.Fprintf(out, "  Stored LLDP records  : %d\n", totalLinks)
+
+	unreachable := 0
+	for _, node := range graph.nodes {
+		if node.sshReachable != nil && !*node.sshReachable {
+			unreachable++
+		}
+	}
+	if unreachable > 0 {
+		_, _ = fmt.Fprintf(out, "  Unreachable devices  : %d  (MNDP-visible, SSH failed)\n", unreachable)
+	}
 
 	if plan != nil {
 		upgradeableCount := 0

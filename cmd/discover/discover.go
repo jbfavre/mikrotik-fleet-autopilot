@@ -10,6 +10,7 @@ import (
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
 	"jb.favre/mikrotik-fleet-autopilot/common/lldp"
+	"jb.favre/mikrotik-fleet-autopilot/common/mndp"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
@@ -31,40 +32,67 @@ var Command = []*cli.Command{
 
 var createSSHConnection = ssh.CreateConnection
 
+// listenMNDP is the MNDP listener function; injectable for testing.
+var listenMNDP = mndp.Listen
+
 func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string) error {
-	// Get global config
 	cfg, err := core.GetConfig(ctx)
 	if err != nil {
-		slog.Error("failed to get config", "error", err)
 		return fmt.Errorf("failed to get config: %w", err)
 	}
 
-	if len(cfg.Hosts) == 0 {
+	hosts := cfg.Hosts
+	var mndpByIP map[string]*mndp.Device
+	var ipToIdentity map[string]string
+
+	if cfg.UseMNDP {
+		slog.Info("starting MNDP discovery", "interface", cfg.Interface, "timeout", cfg.MNDPTimeout)
+		devices, err := listenMNDP(ctx, cfg.Interface, cfg.MNDPTimeout)
+		if err != nil {
+			slog.Warn("MNDP discovery failed", "error", err)
+			// non-fatal: continue with empty host list (will error below)
+		}
+		mndpByIP = make(map[string]*mndp.Device, len(devices))
+		ipToIdentity = make(map[string]string, len(devices))
+		for _, d := range devices {
+			if d.IPv4Address != "" {
+				mndpByIP[d.IPv4Address] = d
+				ipToIdentity[d.IPv4Address] = d.Identity
+			}
+		}
+		// Build ordered host list from MNDP results (already sorted by Identity in listener)
+		for _, d := range devices {
+			if d.IPv4Address != "" {
+				hosts = append(hosts, d.IPv4Address)
+			}
+		}
+		slog.Info("MNDP discovery complete", "devices", len(devices), "addressable", len(hosts))
+	}
+
+	if len(hosts) == 0 {
 		return fmt.Errorf("no hosts configured for discovery")
 	}
 
-	slog.Info("starting LLDP discovery", "hosts", len(cfg.Hosts))
+	slog.Info("starting LLDP discovery", "hosts", len(hosts))
 
-	// Discover neighbors from all hosts
-	topology, err := discoverTopology(ctx, cfg.Hosts)
+	topo, err := discoverTopology(ctx, hosts)
 	if err != nil {
-		slog.Error("discovery failed", "error", err)
 		return fmt.Errorf("discovery failed: %w", err)
 	}
+	topo.mndpByIP = mndpByIP
+	topo.ipToIdentity = ipToIdentity
 
-	// Log summary before rendering
 	totalNeighbors := 0
-	for _, result := range topology.results {
+	for _, result := range topo.results {
 		totalNeighbors += len(result.Neighbors)
 	}
 	slog.Info("discovery complete",
-		"hosts_ok", len(topology.results),
-		"hosts_err", len(topology.errors),
+		"hosts_ok", len(topo.results),
+		"hosts_err", len(topo.errors),
 		"total_neighbors", totalNeighbors,
 	)
 
-	// Render output
-	return outputTopology(out, topology, connectedTo)
+	return outputTopology(out, topo, connectedTo)
 }
 
 // topology holds discovery results indexed by source host
@@ -72,6 +100,8 @@ type topology struct {
 	orderedHosts []string
 	results      map[string]*lldp.ParseResult
 	errors       map[string]error
+	mndpByIP     map[string]*mndp.Device // IPv4Address → Device
+	ipToIdentity map[string]string       // IPv4Address → MNDP Identity
 }
 
 func discoverTopology(ctx context.Context, hosts []string) (*topology, error) {

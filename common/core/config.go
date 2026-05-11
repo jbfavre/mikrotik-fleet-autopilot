@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"runtime"
+	"time"
 )
 
 type Config struct {
@@ -14,6 +15,9 @@ type Config struct {
 	EffectiveMaxConcurrent int
 	BufferedOutput         bool
 	PreferLiveMode         bool
+	Interface              string        // --interface: NIC name for MNDP (empty = all eligible)
+	UseMNDP                bool          // --mndp: use MNDP for host discovery
+	MNDPTimeout            time.Duration // --mndp-timeout: collection window
 }
 
 // ResolveMaxConcurrentHosts returns the effective host concurrency cap.

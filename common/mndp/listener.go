@@ -2,7 +2,6 @@ package mndp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -70,39 +69,37 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 		}
 
 		deadline := time.Now().Add(timeout)
-		if err := conn.SetDeadline(deadline); err != nil {
-			slog.Debug("mndp: failed to set deadline", "interface", iface.Name, "error", err)
-			_ = conn.Close()
-			continue
-		}
-
 		wg.Add(1)
 		go func(conn net.PacketConn, ifName string) {
 			defer wg.Done()
 			defer func() { _ = conn.Close() }()
 
-			done := make(chan struct{})
-			go func() {
-				select {
-				case <-ctx.Done():
-					_ = conn.Close()
-				case <-done:
-				}
-			}()
-			defer close(done)
-
 			buf := make([]byte, 4096)
 			for {
+				if ctx.Err() != nil {
+					break
+				}
+
+				readDeadline := time.Now().Add(250 * time.Millisecond)
+				if readDeadline.After(deadline) {
+					readDeadline = deadline
+				}
+				if err := conn.SetReadDeadline(readDeadline); err != nil {
+					slog.Debug("mndp: failed to set read deadline", "interface", ifName, "error", err)
+					break
+				}
+
 				n, _, err := conn.ReadFrom(buf)
 				if err != nil {
-					if ctx.Err() != nil {
+					if ne, ok := err.(net.Error); ok && ne.Timeout() {
+						if time.Now().After(deadline) || time.Now().Equal(deadline) {
+							break
+						}
+						continue
+					}
+					if ctx.Err() != nil || err == net.ErrClosed {
 						break
 					}
-					if errors.Is(err, net.ErrClosed) {
-						break
-					}
-
-					// Timeout or other error; stop reading this interface
 					break
 				}
 

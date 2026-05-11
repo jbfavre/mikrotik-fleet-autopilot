@@ -146,6 +146,8 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 					return ctx, fmt.Errorf("invalid --mndp-timeout value %q: must be greater than 0", raw)
 				}
 				globalConfig.MNDPTimeout = d
+			} else {
+				return ctx, fmt.Errorf("invalid --mndp-timeout value %q: cannot be empty", raw)
 			}
 
 			// Check if a subcommand was provided

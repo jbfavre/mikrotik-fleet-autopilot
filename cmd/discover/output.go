@@ -687,7 +687,7 @@ func printSummary(out io.Writer, graph *topologyGraph, treeEdgeCount int, plan *
 		}
 	}
 	if unreachable > 0 {
-		_, _ = fmt.Fprintf(out, "  Unreachable devices  : %d  (SSH failed)\n", unreachable)
+		_, _ = fmt.Fprintf(out, "  Unreachable devices  : %d  (MNDP-visible, SSH failed)\n", unreachable)
 	}
 
 	if plan != nil {

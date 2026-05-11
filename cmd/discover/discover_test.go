@@ -658,6 +658,27 @@ func TestBuildTopologyGraph_MNDPIdentityAliasing(t *testing.T) {
 	}
 }
 
+func TestBuildTopologyGraph_ConnectedToSupportsMNDPSourceIP(t *testing.T) {
+	topo := &topology{
+		orderedHosts: []string{"192.168.1.1"},
+		results: map[string]*lldp.ParseResult{
+			"192.168.1.1": {Neighbors: []*lldp.Neighbor{}},
+		},
+		errors:       map[string]error{},
+		ipToIdentity: map[string]string{"192.168.1.1": "router.home"},
+	}
+
+	graph, err := buildTopologyGraph(topo, "192.168.1.1")
+	if err != nil {
+		t.Fatalf("buildTopologyGraph() unexpected error = %v", err)
+	}
+
+	edges := graph.outgoing[mfaNodeName]["router.home"]
+	if len(edges) != 1 {
+		t.Fatalf("expected synthetic edge from %s to router.home, got %d", mfaNodeName, len(edges))
+	}
+}
+
 func TestBuildTopologyGraph_SSHReachabilityMarked(t *testing.T) {
 	results := map[string]*lldp.ParseResult{
 		"router1": {Neighbors: []*lldp.Neighbor{}},

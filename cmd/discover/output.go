@@ -174,16 +174,23 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		return graph, nil
 	}
 
-	if _, ok := graph.nodes[connectedTo]; !ok {
+	canonicalConnectedTo := connectedTo
+	if topo.ipToIdentity != nil {
+		if id, ok := topo.ipToIdentity[connectedTo]; ok && id != "" {
+			canonicalConnectedTo = id
+		}
+	}
+
+	if _, ok := graph.nodes[canonicalConnectedTo]; !ok {
 		return nil, fmt.Errorf("connected-to target %q was not found in the topology; use a configured source host or a discovered device identity", connectedTo)
 	}
 
 	// mfa is a synthetic graph-only node representing the computer running the tool.
 	// It must never be added to discovery inputs or any SSH connection path.
 	mfaNode := graph.getOrCreateNode(mfaNodeName, false, -1)
-	graph.addLink(mfaNode.name, connectedTo, &linkDetail{
+	graph.addLink(mfaNode.name, canonicalConnectedTo, &linkDetail{
 		from: mfaNode.name,
-		to:   connectedTo,
+		to:   canonicalConnectedTo,
 	})
 
 	return graph, nil

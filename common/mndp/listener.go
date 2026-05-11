@@ -2,6 +2,7 @@ package mndp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -80,10 +81,27 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 			defer wg.Done()
 			defer func() { _ = conn.Close() }()
 
+			done := make(chan struct{})
+			go func() {
+				select {
+				case <-ctx.Done():
+					_ = conn.Close()
+				case <-done:
+				}
+			}()
+			defer close(done)
+
 			buf := make([]byte, 4096)
 			for {
 				n, _, err := conn.ReadFrom(buf)
 				if err != nil {
+					if ctx.Err() != nil {
+						break
+					}
+					if errors.Is(err, net.ErrClosed) {
+						break
+					}
+
 					// Timeout or other error; stop reading this interface
 					break
 				}

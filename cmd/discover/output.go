@@ -191,7 +191,7 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		// are not part of orderedHosts (for example, external caller inputs).
 		if id, ok := topo.ipToIdentity[connectedTo]; ok && id != "" {
 			if identityHostCounts[id] > 1 {
-				return nil, fmt.Errorf("connected-to target %q resolves to a duplicate identity %q; use a specific source IP instead", connectedTo, id)
+				return nil, fmt.Errorf("connected-to target %q resolves to duplicate identity %q; choose one of the disambiguated source names (%s)", connectedTo, id, disambiguatedIdentityHint(id, topo.orderedHosts, topo.ipToIdentity))
 			}
 			canonicalConnectedTo = id
 		}
@@ -213,6 +213,16 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 	})
 
 	return graph, nil
+}
+
+func disambiguatedIdentityHint(identity string, orderedHosts []string, ipToIdentity map[string]string) string {
+	var names []string
+	for _, host := range orderedHosts {
+		if ipToIdentity[host] == identity {
+			names = append(names, fmt.Sprintf("%s (%s)", identity, host))
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 func (g *topologyGraph) getOrCreateNode(name string, isSource bool, sourceOrder int) *topologyNode {

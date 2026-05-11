@@ -142,6 +142,9 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				if err != nil {
 					return ctx, fmt.Errorf("invalid --mndp-timeout value %q: %w", raw, err)
 				}
+				if d <= 0 {
+					return ctx, fmt.Errorf("invalid --mndp-timeout value %q: must be greater than 0", raw)
+				}
 				globalConfig.MNDPTimeout = d
 			}
 

@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const listenReadPollInterval = 250 * time.Millisecond
+
 // Listen sends an MNDP probe on ifaceName (or all eligible interfaces when empty)
 // and collects responses for the duration of timeout.
 // Devices are deduplicated by MACAddress (last-seen wins).
@@ -81,7 +83,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 					break
 				}
 
-				readDeadline := time.Now().Add(250 * time.Millisecond)
+				readDeadline := time.Now().Add(listenReadPollInterval)
 				if readDeadline.After(deadline) {
 					readDeadline = deadline
 				}
@@ -92,7 +94,8 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 
 				n, _, err := conn.ReadFrom(buf)
 				if err != nil {
-					if ne, ok := err.(net.Error); ok && ne.Timeout() {
+					var ne net.Error
+					if errors.As(err, &ne) && ne.Timeout() {
 						now := time.Now()
 						if !now.Before(deadline) {
 							break

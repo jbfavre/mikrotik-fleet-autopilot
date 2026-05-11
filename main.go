@@ -46,7 +46,7 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Name:        "host",
 				Aliases:     []string{"H"},
 				Value:       "",
-				Usage:       "Comma-separated list of MikroTik hosts. Mutually exclusive with --mndp",
+				Usage:       "Comma-separated list of MikroTik hosts. Mutually exclusive with --mndp. If omitted and --mndp is not set, routers are auto-discovered from router*.rsc files",
 				Destination: hosts,
 			},
 			&cli.StringFlag{

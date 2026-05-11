@@ -2,7 +2,7 @@ package mndp
 
 // Device represents a MikroTik device discovered via MNDP.
 type Device struct {
-	MACAddress    string // TLV type 1  — canonical deduplication key (hex string, e.g. "AA:BB:CC:DD:EE:FF")
+	MACAddress    string // TLV type 1  — canonical deduplication key (lower-case hex string, e.g. "aa:bb:cc:dd:ee:ff")
 	Identity      string // TLV type 5  — matches LLDP neighbor identity
 	Version       string // TLV type 7
 	Platform      string // TLV type 8  ("MikroTik")

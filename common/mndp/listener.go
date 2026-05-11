@@ -110,6 +110,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 					if errors.Is(err, net.ErrClosed) {
 						break
 					}
+					slog.Debug("mndp: read error", "interface", ifName, "error", err)
 					break
 				}
 

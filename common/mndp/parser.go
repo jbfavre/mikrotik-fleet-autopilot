@@ -3,29 +3,31 @@ package mndp
 import (
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"net"
 )
 
 const (
-	tlvMAC        = 1
-	tlvIdentity   = 5
-	tlvVersion    = 7
-	tlvPlatform   = 8
-	tlvUptime     = 10
-	tlvSoftwareID = 11
-	tlvBoard      = 12
-	tlvIPv4       = 15
-
-	msgTypeRequest  = 0x0000
-	msgTypeResponse = 0x0001
+	tlvMAC                 = 1
+	tlvIdentity            = 5
+	tlvVersion             = 7
+	tlvPlatform            = 8
+	tlvUptime              = 10
+	tlvSoftwareID          = 11
+	tlvBoard               = 12
+	tlvUnpack              = 14
+	tlvIPv6                = 15
+	tlvSourceInterfaceName = 16
+	tlvIPv4                = 17
+	tlvUnknown18           = 18 // observed in the wild; purpose unknown
 )
 
 // ParsePacket parses an MNDP response packet and returns the discovered Device.
 //
 // Wire format:
 //
-//	[2B msg-type LE][2B sequence LE] [TLV…]
-//	TLV: [2B type LE][2B length LE][length bytes value]
+//		// Header: [1B seq_lo] [1B msg-type] [1B seq_hi or reserved] [1B counter/reserved]
+//	      [TLV…][2B type LE][2B length LE][length bytes value]
 //
 // Returns an error for:
 //   - Packets shorter than 4 bytes
@@ -38,17 +40,6 @@ func ParsePacket(data []byte) (*Device, error) {
 		return nil, fmt.Errorf("mndp: packet too short (%d bytes)", len(data))
 	}
 
-	msgType := binary.LittleEndian.Uint16(data[0:2])
-
-	switch msgType {
-	case msgTypeRequest:
-		return nil, fmt.Errorf("mndp: packet is a request (msg-type 0x0000), not a response")
-	case msgTypeResponse:
-		// OK — continue parsing
-	default:
-		return nil, fmt.Errorf("mndp: unknown msg-type 0x%04x", msgType)
-	}
-
 	dev := &Device{}
 	offset := 4
 
@@ -56,8 +47,8 @@ func ParsePacket(data []byte) (*Device, error) {
 		if offset+4 > len(data) {
 			return nil, fmt.Errorf("mndp: truncated TLV header at offset %d", offset)
 		}
-		tlvType := binary.LittleEndian.Uint16(data[offset : offset+2])
-		tlvLen := int(binary.LittleEndian.Uint16(data[offset+2 : offset+4]))
+		tlvType := binary.BigEndian.Uint16(data[offset : offset+2])
+		tlvLen := int(binary.BigEndian.Uint16(data[offset+2 : offset+4]))
 		offset += 4
 
 		if offset+tlvLen > len(data) {
@@ -67,6 +58,12 @@ func ParsePacket(data []byte) (*Device, error) {
 
 		value := data[offset : offset+tlvLen]
 		offset += tlvLen
+
+		slog.Debug("mndp: TLV",
+			"type", tlvType,
+			"length", tlvLen,
+			"hex", fmt.Sprintf("% 02x", value),
+		)
 
 		switch tlvType {
 		case tlvMAC:
@@ -87,13 +84,46 @@ func ParsePacket(data []byte) (*Device, error) {
 			dev.SoftwareID = string(value)
 		case tlvBoard:
 			dev.Board = string(value)
+		case tlvUnpack:
+			if tlvLen == 1 {
+				dev.Unpack = value[0] != 0
+			}
+		case tlvIPv6:
+			if tlvLen == 16 {
+				dev.IPv6Address = net.IP(value).String()
+			}
+			// Other lengths silently skipped
+		case tlvSourceInterfaceName:
+			dev.SourceInterfaceName = string(value)
 		case tlvIPv4:
 			if tlvLen == 4 {
 				dev.IPv4Address = net.IP(value).String()
 			}
-			// tlvLen == 16 is IPv6 — silently skipped (not yet supported)
+		case tlvUnknown18:
+			// Observed but undocumented; silently skip
+		default:
+			slog.Debug("mndp: skipping unknown TLV",
+				"type", tlvType,
+				"length", tlvLen,
+				"hex", fmt.Sprintf("% 02x", value),
+			)
 		}
 	}
+
+	slog.Debug("mndp: parsed device",
+		"mac", dev.MACAddress,
+		"identity", dev.Identity,
+		"version", dev.Version,
+		"platform", dev.Platform,
+		"uptime", dev.Uptime,
+		"softwareid", dev.SoftwareID,
+		"board", dev.Board,
+		"unpack", dev.Unpack,
+		"ipv6", dev.IPv6Address,
+		"rmote interface", dev.SourceInterfaceName,
+		"ipv4", dev.IPv4Address,
+		"local interface", dev.InterfaceName,
+	)
 
 	if dev.MACAddress == "" {
 		return nil, fmt.Errorf("mndp: missing required MAC address TLV")

@@ -77,12 +77,18 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 			defer wg.Done()
 			defer func() { _ = conn.Close() }()
 
+			done := make(chan struct{})
+			defer close(done)
+			go func() {
+				select {
+				case <-ctx.Done():
+					_ = conn.Close()
+				case <-done:
+				}
+			}()
+
 			buf := make([]byte, 4096)
 			for {
-				if ctx.Err() != nil {
-					break
-				}
-
 				readDeadline := time.Now().Add(listenReadPollInterval)
 				if readDeadline.After(deadline) {
 					readDeadline = deadline

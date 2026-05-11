@@ -182,6 +182,9 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 	}
 
 	if _, ok := graph.nodes[canonicalConnectedTo]; !ok {
+		if canonicalConnectedTo != connectedTo {
+			return nil, fmt.Errorf("connected-to target %q (resolved to %q) was not found in the topology; use a configured source host or a discovered device identity", connectedTo, canonicalConnectedTo)
+		}
 		return nil, fmt.Errorf("connected-to target %q was not found in the topology; use a configured source host or a discovered device identity", connectedTo)
 	}
 

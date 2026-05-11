@@ -2,6 +2,7 @@ package mndp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -92,12 +93,13 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 				n, _, err := conn.ReadFrom(buf)
 				if err != nil {
 					if ne, ok := err.(net.Error); ok && ne.Timeout() {
-						if time.Now().After(deadline) || time.Now().Equal(deadline) {
+						now := time.Now()
+						if !now.Before(deadline) {
 							break
 						}
 						continue
 					}
-					if ctx.Err() != nil || err == net.ErrClosed {
+					if errors.Is(err, net.ErrClosed) {
 						break
 					}
 					break

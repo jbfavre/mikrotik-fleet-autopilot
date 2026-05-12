@@ -228,9 +228,6 @@ func deduplicateDevices(devByIdentity map[string]map[string]*Device) []*Device {
 		}
 	}
 
-	slices.SortFunc(devices, func(a, b *Device) int {
-		return strings.Compare(a.Identity, b.Identity)
-	})
 	return devices
 }
 

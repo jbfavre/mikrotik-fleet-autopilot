@@ -123,9 +123,9 @@ func ParsePacket(data []byte) (*Device, error) {
 		"board", dev.Board,
 		"unpack", dev.Unpack,
 		"ipv6", dev.IPv6Address,
-		"remote interface", dev.SourceInterfaceName,
+		"remote_interface", dev.SourceInterfaceName,
 		"ipv4", dev.IPv4Address,
-		"local interface", dev.InterfaceName,
+		"local_interface", dev.InterfaceName,
 	)
 
 	if dev.MACAddress == "" {

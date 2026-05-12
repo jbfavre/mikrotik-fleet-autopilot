@@ -8,15 +8,12 @@ import (
 // buildTestPacket constructs a minimal valid MNDP response packet for testing.
 // mac must be 6 bytes; identity must be non-empty.
 func buildTestPacket(mac []byte, identity, version, platform string, uptime uint32, softwareID, board string, ipv4 []byte, ipv6 []byte) []byte {
-	pkt := []byte{
-		0x01, 0x00, // msg-type = 0x0001 (response), LE
-		0x00, 0x00, // sequence = 0
-	}
+	pkt := []byte{0x00, 0x00, 0x00, 0x00}
 
 	appendTLV := func(tlvType uint16, value []byte) {
 		hdr := make([]byte, 4)
-		binary.LittleEndian.PutUint16(hdr[0:2], tlvType)
-		binary.LittleEndian.PutUint16(hdr[2:4], uint16(len(value)))
+		binary.BigEndian.PutUint16(hdr[0:2], tlvType)
+		binary.BigEndian.PutUint16(hdr[2:4], uint16(len(value)))
 		pkt = append(pkt, hdr...)
 		pkt = append(pkt, value...)
 	}
@@ -48,9 +45,7 @@ func buildTestPacket(mac []byte, identity, version, platform string, uptime uint
 		appendTLV(tlvIPv4, ipv4)
 	}
 	if len(ipv6) == 16 {
-		// MNDP uses TLV type 15 for both IPv4 and IPv6, distinguished by length:
-		// 4 bytes = IPv4, 16 bytes = IPv6. The parser skips IPv6 entries silently.
-		appendTLV(tlvIPv4, ipv6)
+		appendTLV(tlvIPv6, ipv6)
 	}
 
 	return pkt
@@ -103,7 +98,10 @@ func TestParsePacket_IPv6OnlyAddress(t *testing.T) {
 		t.Fatalf("ParsePacket() unexpected error = %v", err)
 	}
 	if dev.IPv4Address != "" {
-		t.Errorf("IPv4Address = %q, want empty (IPv6 should be skipped)", dev.IPv4Address)
+		t.Errorf("IPv4Address = %q, want empty", dev.IPv4Address)
+	}
+	if dev.IPv6Address != "fe80::" {
+		t.Errorf("IPv6Address = %q, want %q", dev.IPv6Address, "fe80::")
 	}
 }
 
@@ -115,24 +113,19 @@ func TestParsePacket_BothIPv4AndIPv6(t *testing.T) {
 	ipv6[1] = 0x80
 
 	// Manually construct a packet with both IPv4 and IPv6 TLVs
-	pkt := []byte{
-		0x01, 0x00, // msg-type = response
-		0x00, 0x00, // sequence
-	}
+	pkt := []byte{0x00, 0x00, 0x00, 0x00}
 	appendTLV := func(tlvType uint16, value []byte) {
 		hdr := make([]byte, 4)
-		binary.LittleEndian.PutUint16(hdr[0:2], tlvType)
-		binary.LittleEndian.PutUint16(hdr[2:4], uint16(len(value)))
+		binary.BigEndian.PutUint16(hdr[0:2], tlvType)
+		binary.BigEndian.PutUint16(hdr[2:4], uint16(len(value)))
 		pkt = append(pkt, hdr...)
 		pkt = append(pkt, value...)
 	}
 	appendTLV(tlvMAC, mac)
 	appendTLV(tlvIdentity, []byte("router.home"))
-	// In MNDP, TLV type 15 (tlvIPv4) is used for both IPv4 and IPv6 addresses.
-	// The length field distinguishes them: 4 bytes = IPv4, 16 bytes = IPv6.
-	// The parser skips IPv6 entries silently.
+	// In MNDP, TLV type 17 contains IPv4 and TLV type 15 contains IPv6.
 	appendTLV(tlvIPv4, ipv4) // IPv4: length 4 → should be stored
-	appendTLV(tlvIPv4, ipv6) // IPv6: length 16 → should be skipped
+	appendTLV(tlvIPv6, ipv6) // IPv6: length 16 → should be parsed separately
 
 	dev, err := ParsePacket(pkt)
 	if err != nil {
@@ -141,14 +134,16 @@ func TestParsePacket_BothIPv4AndIPv6(t *testing.T) {
 	if dev.IPv4Address != "10.0.0.1" {
 		t.Errorf("IPv4Address = %q, want %q", dev.IPv4Address, "10.0.0.1")
 	}
+	if dev.IPv6Address != "fe80::" {
+		t.Errorf("IPv6Address = %q, want %q", dev.IPv6Address, "fe80::")
+	}
 }
 
 func TestParsePacket_TruncatedTLV(t *testing.T) {
 	pkt := []byte{
-		0x01, 0x00, // msg-type = response
-		0x00, 0x00, // sequence
-		0x01, 0x00, // TLV type = 1 (MAC)
-		0x06, 0x00, // TLV length = 6
+		0x00, 0x00, 0x00, 0x00,
+		0x00, 0x01, // TLV type = 1 (MAC)
+		0x00, 0x06, // TLV length = 6
 		// Only 2 bytes of value instead of 6 — truncated
 		0xAA, 0xBB,
 	}
@@ -162,10 +157,9 @@ func TestParsePacket_TruncatedTLV(t *testing.T) {
 func TestParsePacket_MissingMAC(t *testing.T) {
 	// Packet with identity but no MAC
 	pkt := []byte{
-		0x01, 0x00, // msg-type = response
-		0x00, 0x00, // sequence
-		0x05, 0x00, // TLV type = 5 (Identity)
-		0x06, 0x00, // TLV length = 6
+		0x00, 0x00, 0x00, 0x00,
+		0x00, 0x05, // TLV type = 5 (Identity)
+		0x00, 0x06, // TLV length = 6
 		'r', 'o', 'u', 't', 'e', 'r', // "router"
 	}
 
@@ -178,10 +172,9 @@ func TestParsePacket_MissingMAC(t *testing.T) {
 func TestParsePacket_MissingIdentity(t *testing.T) {
 	// Packet with MAC but no identity
 	pkt := []byte{
-		0x01, 0x00, // msg-type = response
-		0x00, 0x00, // sequence
-		0x01, 0x00, // TLV type = 1 (MAC)
-		0x06, 0x00, // TLV length = 6
+		0x00, 0x00, 0x00, 0x00,
+		0x00, 0x01, // TLV type = 1 (MAC)
+		0x00, 0x06, // TLV length = 6
 		0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
 	}
 
@@ -222,4 +215,46 @@ func TestParsePacket_UnknownMsgType(t *testing.T) {
 	if err == nil {
 		t.Fatal("ParsePacket() expected error for unknown msg-type, got nil")
 	}
+}
+
+func TestParsePacket_TLVEndiannessIsBigEndian(t *testing.T) {
+	mac := []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}
+
+	t.Run("big-endian-tlv-header-parses", func(t *testing.T) {
+		pkt := []byte{
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x01, // type: MAC
+			0x00, 0x06, // len: 6
+			0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+			0x00, 0x05, // type: Identity
+			0x00, 0x06, // len: 6
+			'r', 'o', 'u', 't', 'e', 'r',
+		}
+
+		dev, err := ParsePacket(pkt)
+		if err != nil {
+			t.Fatalf("ParsePacket() unexpected error for big-endian TLV header = %v", err)
+		}
+		if dev.MACAddress != "aa:bb:cc:dd:ee:ff" {
+			t.Fatalf("MACAddress = %q, want %q", dev.MACAddress, "aa:bb:cc:dd:ee:ff")
+		}
+	})
+
+	t.Run("little-endian-tlv-header-fails", func(t *testing.T) {
+		pkt := []byte{
+			0x00, 0x00, 0x00, 0x00,
+			0x01, 0x00, // type: MAC (little-endian encoded)
+			0x06, 0x00, // len: 6 (little-endian encoded)
+		}
+		pkt = append(pkt, mac...)
+		pkt = append(pkt,
+			0x05, 0x00, // type: Identity (little-endian encoded)
+			0x06, 0x00, // len: 6 (little-endian encoded)
+			'r', 'o', 'u', 't', 'e', 'r',
+		)
+
+		if _, err := ParsePacket(pkt); err == nil {
+			t.Fatal("ParsePacket() expected error for little-endian TLV header, got nil")
+		}
+	})
 }

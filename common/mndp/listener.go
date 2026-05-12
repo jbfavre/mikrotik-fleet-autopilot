@@ -16,7 +16,7 @@ const listenReadPollInterval = 250 * time.Millisecond
 
 // Listen sends an MNDP probe on ifaceName (or all eligible interfaces when empty)
 // and collects responses for the duration of timeout.
-// Devices are deduplicated by MACAddress (last-seen wins).
+// Devices are deduplicated by MACAddress (IPv4 wins over empty IP address, newer IPv4 wins).
 // Returns the deduplicated slice, sorted by Identity.
 func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*Device, error) {
 	if timeout <= 0 {
@@ -56,16 +56,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 	var wg sync.WaitGroup
 
 	for _, iface := range ifaces {
-		ipv4, err := firstIPv4(iface)
-		if err != nil {
-			if ifaceName != "" {
-				return nil, fmt.Errorf("mndp: interface %q has no usable IPv4 address: %w", iface.Name, err)
-			}
-			slog.Debug("mndp: skipping interface (no IPv4)", "interface", iface.Name, "error", err)
-			continue
-		}
-
-		addr := ipv4 + ":5678"
+		addr := "0.0.0.0:5678"
 		conn, err := net.ListenPacket("udp4", addr)
 		if err != nil {
 			if ifaceName != "" {
@@ -73,6 +64,8 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 			}
 			slog.Debug("mndp: failed to bind on interface", "interface", iface.Name, "addr", addr, "error", err)
 			continue
+		} else {
+			slog.Debug("mndp: successfull binding to interface", "interface", iface.Name, "addr", addr)
 		}
 
 		if err := SendProbe(conn); err != nil {
@@ -136,7 +129,10 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 				dev.InterfaceName = ifName
 
 				mu.Lock()
-				devByMAC[dev.MACAddress] = dev // last-seen wins
+				existing, seen := devByMAC[dev.MACAddress]
+				if shouldReplaceDevice(seen, existing, dev) {
+					devByMAC[dev.MACAddress] = dev
+				}
 				mu.Unlock()
 			}
 		}(conn, iface.Name)
@@ -145,6 +141,23 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 	wg.Wait()
 
 	return deduplicateDevices(devByMAC), nil
+}
+
+func shouldReplaceDevice(seen bool, existing, candidate *Device) bool {
+	if !seen {
+		return true
+	}
+	existingHasIPv4 := existing.IPv4Address != ""
+	candidateHasIPv4 := candidate.IPv4Address != ""
+
+	// Prefer the record that carries an IPv4 address; if both (or neither) have IPv4, prefer the newer record.
+	if !existingHasIPv4 && candidateHasIPv4 {
+		return true
+	}
+	if existingHasIPv4 && !candidateHasIPv4 {
+		return false
+	}
+	return true
 }
 
 // SendProbe sends an MNDP discovery request packet on conn.
@@ -164,30 +177,6 @@ func SendProbe(conn net.PacketConn) error {
 		return fmt.Errorf("mndp: failed to send probe: %w", err)
 	}
 	return nil
-}
-
-// firstIPv4 returns the string representation of the first IPv4 unicast
-// address assigned to iface, or an error if none is found.
-func firstIPv4(iface net.Interface) (string, error) {
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return "", err
-	}
-	for _, addr := range addrs {
-		switch v := addr.(type) {
-		case *net.IPNet:
-			ip := v.IP.To4()
-			if ip != nil {
-				return ip.String(), nil
-			}
-		case *net.IPAddr:
-			ip := v.IP.To4()
-			if ip != nil {
-				return ip.String(), nil
-			}
-		}
-	}
-	return "", fmt.Errorf("no IPv4 address found on interface %q", iface.Name)
 }
 
 // deduplicateDevices takes the last-seen-wins map, builds a slice, and sorts it by Identity.

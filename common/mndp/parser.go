@@ -22,12 +22,13 @@ const (
 	tlvUnknown18           = 18 // observed in the wild; purpose unknown
 )
 
-// ParsePacket parses an MNDP response packet and returns the discovered Device.
+// ParsePacket parses an MNDP packet and returns the discovered Device.
 //
 // Wire format:
 //
-//	Header: [1B seq_lo] [1B msg-type] [1B seq_hi or reserved] [1B counter/reserved]
-//	[TLV…][2B type BE][2B length BE][length bytes value]
+//	Headers: [1B seq_lo or reserved] [1B msg-type or reserved]
+//               [1B seq_hi or reserved] [1B counter or reserved]
+//	Payload: [TLV…][2B type BE][2B length BE][length bytes value]
 //
 // Returns an error for:
 //   - Packets shorter than 4 bytes
@@ -38,6 +39,10 @@ func ParsePacket(data []byte) (*Device, error) {
 	if len(data) < 4 {
 		return nil, fmt.Errorf("mndp: packet too short (%d bytes)", len(data))
 	}
+
+	slog.Debug("mndp: packet first 4 bytes",
+		"hex", fmt.Sprintf("% 02x", data[0:4]),
+	)
 
 	dev := &Device{}
 	offset := 4
@@ -94,6 +99,11 @@ func ParsePacket(data []byte) (*Device, error) {
 			}
 		case tlvUnknown18:
 			// Observed but undocumented; silently skip
+			slog.Debug("mndp: skipping unknown TLV 18",
+				"type", tlvType,
+				"length", tlvLen,
+				"hex", fmt.Sprintf("% 02x", value),
+			)
 		default:
 			slog.Debug("mndp: skipping unknown TLV",
 				"type", tlvType,

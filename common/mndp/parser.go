@@ -26,9 +26,9 @@ const (
 //
 // Wire format:
 //
-//	Headers: [1B seq_lo or reserved] [1B msg-type or reserved]
-//               [1B seq_hi or reserved] [1B counter or reserved]
-//	Payload: [TLV…][2B type BE][2B length BE][length bytes value]
+//		Headers: [1B seq_lo or reserved] [1B msg-type or reserved]
+//	              [1B seq_hi or reserved] [1B counter or reserved]
+//		Payload: [TLV…][2B type BE][2B length BE][length bytes value]
 //
 // Returns an error for:
 //   - Packets shorter than 4 bytes

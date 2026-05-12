@@ -64,7 +64,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 			}
 			slog.Debug("mndp: failed to bind on interface", "interface", iface.Name, "addr", addr, "error", err)
 			continue
-		}else {
+		} else {
 			slog.Debug("mndp: successfull binding to interface", "interface", iface.Name, "addr", addr)
 		}
 

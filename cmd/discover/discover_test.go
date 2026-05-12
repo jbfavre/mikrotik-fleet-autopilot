@@ -878,3 +878,78 @@ func TestOutputTopology_UnreachableCountInSummary(t *testing.T) {
 		t.Errorf("expected 'Unreachable devices' in summary, got:\n%s", output)
 	}
 }
+
+func TestRunDiscoverForHosts_LLDPPromotesNeighborHost(t *testing.T) {
+	originalLookup := lookupIPv4ByIdentity
+	lookupIPv4ByIdentity = func(_ context.Context, identity string) ([]net.IP, error) {
+		if identity == "router2" {
+			return []net.IP{net.ParseIP("192.168.1.2")}, nil
+		}
+		return nil, errors.New("not found")
+	}
+	defer func() { lookupIPv4ByIdentity = originalLookup }()
+
+	originalSSH := createSSHConnection
+	createSSHConnection = func(_ context.Context, host string) (ssh.RunnerInterface, error) {
+		switch host {
+		case "router1":
+			return &stubRunner{runOutput: `0 interface=ether1 address=192.168.1.2 mac-address=aa:bb:cc:dd:ee:ff identity="router2" discovered-by=lldp`}, nil
+		case "192.168.1.2":
+			return &stubRunner{runOutput: ""}, nil
+		default:
+			return nil, errors.New("unexpected host")
+		}
+	}
+	defer func() { createSSHConnection = originalSSH }()
+
+	ctx := context.WithValue(context.Background(), core.ConfigKey, &core.Config{Hosts: []string{"router1"}})
+
+	var out bytes.Buffer
+	if err := runDiscoverForHosts(ctx, &out, ""); err != nil {
+		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "router2 [LLDP]") {
+		t.Fatalf("expected LLDP-promoted node marker in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "LLDP auto-discovered") {
+		t.Fatalf("expected LLDP summary section in output, got:\n%s", output)
+	}
+}
+
+func TestRunDiscoverForHosts_LLDPPromotedHostIsSSHTarget(t *testing.T) {
+	originalLookup := lookupIPv4ByIdentity
+	lookupIPv4ByIdentity = func(_ context.Context, identity string) ([]net.IP, error) {
+		if identity == "router2" {
+			return []net.IP{net.ParseIP("192.168.1.2")}, nil
+		}
+		return nil, errors.New("not found")
+	}
+	defer func() { lookupIPv4ByIdentity = originalLookup }()
+
+	var connectedHosts []string
+	originalSSH := createSSHConnection
+	createSSHConnection = func(_ context.Context, host string) (ssh.RunnerInterface, error) {
+		connectedHosts = append(connectedHosts, host)
+		switch host {
+		case "router1":
+			return &stubRunner{runOutput: `0 interface=ether1 address=192.168.1.2 mac-address=aa:bb:cc:dd:ee:ff identity="router2" discovered-by=lldp`}, nil
+		case "192.168.1.2":
+			return &stubRunner{runOutput: ""}, nil
+		default:
+			return nil, errors.New("unexpected host")
+		}
+	}
+	defer func() { createSSHConnection = originalSSH }()
+
+	ctx := context.WithValue(context.Background(), core.ConfigKey, &core.Config{Hosts: []string{"router1"}})
+
+	if err := runDiscoverForHosts(ctx, io.Discard, ""); err != nil {
+		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	}
+
+	if !reflect.DeepEqual(connectedHosts, []string{"router1", "192.168.1.2"}) {
+		t.Fatalf("expected second-pass SSH target to be promoted LLDP host, got %v", connectedHosts)
+	}
+}

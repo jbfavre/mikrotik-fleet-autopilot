@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
@@ -106,6 +108,10 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string)
 	topo.mndpByIP = mndpByIP
 	topo.ipToIdentity = ipToIdentity
 
+	if err := expandTopologyFromLLDP(ctx, topo); err != nil {
+		return fmt.Errorf("lldp expansion failed: %w", err)
+	}
+
 	totalNeighbors := 0
 	for _, result := range topo.results {
 		totalNeighbors += len(result.Neighbors)
@@ -137,6 +143,158 @@ type topology struct {
 	errors       map[string]error
 	mndpByIP     map[string]*mndp.Device // IPv4Address → Device
 	ipToIdentity map[string]string       // IPv4Address → MNDP Identity
+	lldpPromoted map[string]struct{}
+}
+
+func expandTopologyFromLLDP(ctx context.Context, topo *topology) error {
+	if topo == nil {
+		return nil
+	}
+	if topo.lldpPromoted == nil {
+		topo.lldpPromoted = make(map[string]struct{})
+	}
+
+	seen := make(map[string]struct{}, len(topo.orderedHosts))
+	for _, host := range topo.orderedHosts {
+		seen[host] = struct{}{}
+	}
+
+	for {
+		candidates := collectLLDPTargets(ctx, topo, seen)
+		if len(candidates) == 0 {
+			return nil
+		}
+
+		for _, candidate := range candidates {
+			if candidate.identity != "" {
+				if topo.ipToIdentity == nil {
+					topo.ipToIdentity = make(map[string]string)
+				}
+				if _, ok := topo.ipToIdentity[candidate.target]; !ok {
+					topo.ipToIdentity[candidate.target] = candidate.identity
+				}
+			}
+		}
+
+		hosts := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			hosts = append(hosts, candidate.target)
+		}
+
+		nextTopo, err := discoverTopology(ctx, hosts)
+		if err != nil {
+			return err
+		}
+
+		added := false
+		for _, host := range nextTopo.orderedHosts {
+			if _, ok := nextTopo.results[host]; !ok {
+				continue
+			}
+			if _, ok := seen[host]; ok {
+				continue
+			}
+			seen[host] = struct{}{}
+			topo.orderedHosts = append(topo.orderedHosts, host)
+			topo.lldpPromoted[host] = struct{}{}
+			added = true
+		}
+
+		for host, result := range nextTopo.results {
+			topo.results[host] = result
+		}
+		for host, err := range nextTopo.errors {
+			topo.errors[host] = err
+		}
+
+		if !added {
+			return nil
+		}
+	}
+}
+
+type lldpDiscoveryCandidate struct {
+	target   string
+	identity string
+	order    int
+}
+
+func collectLLDPTargets(ctx context.Context, topo *topology, seen map[string]struct{}) []lldpDiscoveryCandidate {
+	if topo == nil {
+		return nil
+	}
+
+	candidates := make([]lldpDiscoveryCandidate, 0)
+	seenTargets := make(map[string]struct{})
+	order := 0
+
+	for _, sourceHost := range topo.orderedHosts {
+		result := topo.results[sourceHost]
+		if result == nil {
+			continue
+		}
+		for _, neighbor := range result.Neighbors {
+			target := resolveLLDPTarget(ctx, neighbor)
+			if target == "" {
+				continue
+			}
+			if _, ok := seen[target]; ok {
+				continue
+			}
+			if _, ok := seenTargets[target]; ok {
+				continue
+			}
+			seenTargets[target] = struct{}{}
+			candidates = append(candidates, lldpDiscoveryCandidate{target: target, identity: strings.TrimSpace(neighbor.Identity), order: order})
+			order++
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].order < candidates[j].order
+	})
+
+	return candidates
+}
+
+func resolveLLDPTarget(ctx context.Context, neighbor *lldp.Neighbor) string {
+	if neighbor == nil {
+		return ""
+	}
+	if strings.TrimSpace(neighbor.MacAddress) == "" {
+		return ""
+	}
+
+	if identity := strings.TrimSpace(neighbor.Identity); identity != "" {
+		if ips, err := lookupIPv4ByIdentity(ctx, identity); err == nil {
+			if ip := firstIPv4String(ips); ip != "" {
+				return ip
+			}
+		}
+	}
+
+	if ip := usableIP(neighbor.Address); ip != "" {
+		return ip
+	}
+	if ip := usableIP(neighbor.Address6); ip != "" {
+		return ip
+	}
+
+	return ""
+}
+
+func usableIP(value string) string {
+	parsed := net.ParseIP(strings.TrimSpace(value))
+	if parsed == nil {
+		return ""
+	}
+	if parsed.To4() != nil {
+		return parsed.String()
+	}
+	if parsed.IsLinkLocalUnicast() {
+		return ""
+	}
+	return parsed.String()
 }
 
 func discoverTopology(ctx context.Context, hosts []string) (*topology, error) {

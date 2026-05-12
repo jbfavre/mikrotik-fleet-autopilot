@@ -98,7 +98,10 @@ func TestParsePacket_IPv6OnlyAddress(t *testing.T) {
 		t.Fatalf("ParsePacket() unexpected error = %v", err)
 	}
 	if dev.IPv4Address != "" {
-		t.Errorf("IPv4Address = %q, want empty (IPv6 should be skipped)", dev.IPv4Address)
+		t.Errorf("IPv4Address = %q, want empty", dev.IPv4Address)
+	}
+	if dev.IPv6Address != "fe80::" {
+		t.Errorf("IPv6Address = %q, want %q", dev.IPv6Address, "fe80::")
 	}
 }
 
@@ -130,6 +133,9 @@ func TestParsePacket_BothIPv4AndIPv6(t *testing.T) {
 	}
 	if dev.IPv4Address != "10.0.0.1" {
 		t.Errorf("IPv4Address = %q, want %q", dev.IPv4Address, "10.0.0.1")
+	}
+	if dev.IPv6Address != "fe80::" {
+		t.Errorf("IPv6Address = %q, want %q", dev.IPv6Address, "fe80::")
 	}
 }
 

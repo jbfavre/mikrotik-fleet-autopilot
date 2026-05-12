@@ -16,7 +16,7 @@ const listenReadPollInterval = 250 * time.Millisecond
 
 // Listen sends an MNDP probe on ifaceName (or all eligible interfaces when empty)
 // and collects responses for the duration of timeout.
-// Devices are deduplicated by MACAddress (last-seen wins).
+// Devices are deduplicated by MACAddress (IPv4 wins over empty IP address, newer IPv4 wins).
 // Returns the deduplicated slice, sorted by Identity.
 func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*Device, error) {
 	if timeout <= 0 {

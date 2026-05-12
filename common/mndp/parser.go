@@ -99,10 +99,12 @@ func ParsePacket(data []byte) (*Device, error) {
 			}
 		case tlvUnknown18:
 			// Observed but undocumented; silently skip
-			slog.Debug("mndp: skipping unknown TLV 18",
+			slog.Debug("mndp: skipping unknown TLV",
 				"type", tlvType,
 				"length", tlvLen,
 				"hex", fmt.Sprintf("% 02x", value),
+				"identity", dev.Identity,
+				"mac", dev.MACAddress,
 			)
 		default:
 			slog.Debug("mndp: skipping unknown TLV",

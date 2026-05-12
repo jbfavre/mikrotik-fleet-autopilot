@@ -112,15 +112,6 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		undirected: make(map[string][]*linkDetail),
 	}
 
-	identityHostCounts := make(map[string]int)
-	if topo.ipToIdentity != nil {
-		for _, host := range topo.orderedHosts {
-			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
-				identityHostCounts[id]++
-			}
-		}
-	}
-
 	hostToNodeName := make(map[string]string, len(topo.orderedHosts))
 	hostOrder := make(map[string]int, len(topo.orderedHosts))
 	for idx, host := range topo.orderedHosts {
@@ -130,11 +121,7 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		canonicalName := host
 		if topo.ipToIdentity != nil {
 			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
-				if identityHostCounts[id] > 1 {
-					canonicalName = fmt.Sprintf("%s (%s)", id, host)
-				} else {
-					canonicalName = id
-				}
+				canonicalName = id
 			}
 		}
 		hostToNodeName[host] = canonicalName
@@ -190,15 +177,6 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		// Fallback for IP values that can be canonicalized by MNDP identity but
 		// are not part of orderedHosts (for example, external caller inputs).
 		if id, ok := topo.ipToIdentity[connectedTo]; ok && id != "" {
-			if identityHostCounts[id] > 1 {
-				hint := disambiguatedIdentityHint(id, topo.orderedHosts, topo.ipToIdentity)
-				return nil, fmt.Errorf(
-					"connected-to target %q resolves to duplicate identity %q; choose one source name: %s",
-					connectedTo,
-					id,
-					hint,
-				)
-			}
 			canonicalConnectedTo = id
 		}
 	}
@@ -219,19 +197,6 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 	})
 
 	return graph, nil
-}
-
-func disambiguatedIdentityHint(identity string, orderedHosts []string, ipToIdentity map[string]string) string {
-	var names []string
-	for _, host := range orderedHosts {
-		if ipToIdentity[host] == identity {
-			names = append(names, fmt.Sprintf("%s (%s)", identity, host))
-		}
-	}
-	if len(names) == 0 {
-		return identity
-	}
-	return strings.Join(names, ", ")
 }
 
 func (g *topologyGraph) getOrCreateNode(name string, isSource bool, sourceOrder int) *topologyNode {

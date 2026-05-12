@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"reflect"
 	"strings"
 	"testing"
@@ -538,6 +539,14 @@ func TestRunDiscoverForHosts_MNDPSuccessfulDiscovery(t *testing.T) {
 		}, nil
 	}
 	defer func() { listenMNDP = originalListen }()
+	originalLookup := lookupIPv4ByIdentity
+	lookupIPv4ByIdentity = func(_ context.Context, identity string) ([]net.IP, error) {
+		if identity != "router.home" {
+			t.Fatalf("unexpected DNS lookup identity %q", identity)
+		}
+		return []net.IP{net.ParseIP("192.168.1.1")}, nil
+	}
+	defer func() { lookupIPv4ByIdentity = originalLookup }()
 
 	// SSH stub returns empty LLDP output
 	originalSSH := createSSHConnection
@@ -568,6 +577,11 @@ func TestRunDiscoverForHosts_MNDPSSHFails(t *testing.T) {
 		}, nil
 	}
 	defer func() { listenMNDP = originalListen }()
+	originalLookup := lookupIPv4ByIdentity
+	lookupIPv4ByIdentity = func(_ context.Context, _ string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("192.168.1.1")}, nil
+	}
+	defer func() { lookupIPv4ByIdentity = originalLookup }()
 
 	// SSH connection fails
 	originalSSH := createSSHConnection
@@ -591,6 +605,67 @@ func TestRunDiscoverForHosts_MNDPSSHFails(t *testing.T) {
 	}
 }
 
+func TestRunDiscoverForHosts_MNDPUsesFirstCanonicalIPv4(t *testing.T) {
+	originalListen := listenMNDP
+	listenMNDP = func(_ context.Context, _ string, _ time.Duration) ([]*mndp.Device, error) {
+		return []*mndp.Device{{MACAddress: "aa:bb:cc:dd:ee:ff", Identity: "router.home", BaseIdentity: "router.home", IPv4Address: "10.0.0.10"}}, nil
+	}
+	defer func() { listenMNDP = originalListen }()
+
+	originalLookup := lookupIPv4ByIdentity
+	lookupIPv4ByIdentity = func(_ context.Context, identity string) ([]net.IP, error) {
+		if identity != "router.home" {
+			t.Fatalf("unexpected DNS lookup identity %q", identity)
+		}
+		return []net.IP{net.ParseIP("192.168.99.10"), net.ParseIP("192.168.99.11")}, nil
+	}
+	defer func() { lookupIPv4ByIdentity = originalLookup }()
+
+	var connectedHosts []string
+	originalSSH := createSSHConnection
+	createSSHConnection = func(_ context.Context, host string) (ssh.RunnerInterface, error) {
+		connectedHosts = append(connectedHosts, host)
+		return &stubRunner{runOutput: ""}, nil
+	}
+	defer func() { createSSHConnection = originalSSH }()
+
+	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
+	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+
+	if err := runDiscoverForHosts(ctx, io.Discard, ""); err != nil {
+		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	}
+
+	if !reflect.DeepEqual(connectedHosts, []string{"192.168.99.10"}) {
+		t.Fatalf("expected SSH to use only first canonical IPv4, got %v", connectedHosts)
+	}
+}
+
+func TestRunDiscoverForHosts_MNDPDNSFailureExcludesDevice(t *testing.T) {
+	originalListen := listenMNDP
+	listenMNDP = func(_ context.Context, _ string, _ time.Duration) ([]*mndp.Device, error) {
+		return []*mndp.Device{{MACAddress: "aa:bb:cc:dd:ee:ff", Identity: "router.home", BaseIdentity: "router.home", IPv4Address: "10.0.0.10"}}, nil
+	}
+	defer func() { listenMNDP = originalListen }()
+
+	originalLookup := lookupIPv4ByIdentity
+	lookupIPv4ByIdentity = func(_ context.Context, _ string) ([]net.IP, error) {
+		return nil, errors.New("no such host")
+	}
+	defer func() { lookupIPv4ByIdentity = originalLookup }()
+
+	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
+	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+
+	err := runDiscoverForHosts(ctx, io.Discard, "")
+	if err == nil {
+		t.Fatal("runDiscoverForHosts() expected no hosts error when canonical DNS lookup fails")
+	}
+	if !strings.Contains(err.Error(), "no hosts") {
+		t.Fatalf("expected no hosts error, got %v", err)
+	}
+}
+
 func TestRunDiscoverForHosts_MNDPZeroDevices(t *testing.T) {
 	// MNDP returns no devices
 	originalListen := listenMNDP
@@ -598,6 +673,11 @@ func TestRunDiscoverForHosts_MNDPZeroDevices(t *testing.T) {
 		return []*mndp.Device{}, nil
 	}
 	defer func() { listenMNDP = originalListen }()
+	originalLookup := lookupIPv4ByIdentity
+	lookupIPv4ByIdentity = func(_ context.Context, _ string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("192.168.1.1")}, nil
+	}
+	defer func() { lookupIPv4ByIdentity = originalLookup }()
 
 	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
 	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
@@ -618,6 +698,11 @@ func TestRunDiscoverForHosts_MNDPListenError(t *testing.T) {
 		return nil, errors.New("network unreachable")
 	}
 	defer func() { listenMNDP = originalListen }()
+	originalLookup := lookupIPv4ByIdentity
+	lookupIPv4ByIdentity = func(_ context.Context, _ string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("192.168.1.1")}, nil
+	}
+	defer func() { lookupIPv4ByIdentity = originalLookup }()
 
 	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
 	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
@@ -683,7 +768,7 @@ func TestBuildTopologyGraph_ConnectedToSupportsMNDPSourceIP(t *testing.T) {
 	}
 }
 
-func TestBuildTopologyGraph_MNDPDuplicateIdentityDisambiguatedByHost(t *testing.T) {
+func TestBuildTopologyGraph_MNDPDisambiguatedIdentityLabelsPreserved(t *testing.T) {
 	topo := &topology{
 		orderedHosts: []string{"192.168.1.1", "192.168.1.2"},
 		results: map[string]*lldp.ParseResult{
@@ -693,8 +778,8 @@ func TestBuildTopologyGraph_MNDPDuplicateIdentityDisambiguatedByHost(t *testing.
 			"192.168.1.2": errors.New("ssh failed"),
 		},
 		ipToIdentity: map[string]string{
-			"192.168.1.1": "router.home",
-			"192.168.1.2": "router.home",
+			"192.168.1.1": "router.home #1",
+			"192.168.1.2": "router.home #2",
 		},
 	}
 
@@ -703,8 +788,8 @@ func TestBuildTopologyGraph_MNDPDuplicateIdentityDisambiguatedByHost(t *testing.
 		t.Fatalf("buildTopologyGraph() unexpected error = %v", err)
 	}
 
-	name1 := "router.home (192.168.1.1)"
-	name2 := "router.home (192.168.1.2)"
+	name1 := "router.home #1"
+	name2 := "router.home #2"
 	if _, ok := graph.nodes[name1]; !ok {
 		t.Fatalf("expected disambiguated node %q to exist", name1)
 	}

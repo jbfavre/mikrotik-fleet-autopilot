@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 
 	"github.com/urfave/cli/v3"
@@ -35,6 +36,11 @@ var createSSHConnection = ssh.CreateConnection
 // listenMNDP is the MNDP listener function; injectable for testing.
 var listenMNDP = mndp.Listen
 
+// lookupIPv4ByIdentity resolves identity to canonical IPv4 addresses; injectable for testing.
+var lookupIPv4ByIdentity = func(ctx context.Context, identity string) ([]net.IP, error) {
+	return net.DefaultResolver.LookupIP(ctx, "ip4", identity)
+}
+
 func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string) error {
 	cfg, err := core.GetConfig(ctx)
 	if err != nil {
@@ -54,17 +60,35 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string)
 		}
 		mndpByIP = make(map[string]*mndp.Device, len(devices))
 		ipToIdentity = make(map[string]string, len(devices))
+		canonicalSeen := make(map[string]struct{}, len(devices))
 		for _, d := range devices {
-			if d.IPv4Address != "" {
-				mndpByIP[d.IPv4Address] = d
-				ipToIdentity[d.IPv4Address] = d.Identity
+			lookupIdentity := d.BaseIdentity
+			if lookupIdentity == "" {
+				lookupIdentity = d.Identity
 			}
-		}
-		// Build ordered host list from MNDP results (already sorted by Identity in listener)
-		for _, d := range devices {
-			if d.IPv4Address != "" {
-				hosts = append(hosts, d.IPv4Address)
+
+			ips, lookupErr := lookupIPv4ByIdentity(ctx, lookupIdentity)
+			if lookupErr != nil {
+				slog.Warn("MNDP identity has no canonical DNS IPv4", "identity", d.Identity, "base_identity", lookupIdentity, "error", lookupErr)
+				continue
 			}
+
+			canonicalIPv4 := firstIPv4String(ips)
+			if canonicalIPv4 == "" {
+				slog.Warn("MNDP identity resolved without IPv4 addresses", "identity", d.Identity, "base_identity", lookupIdentity)
+				continue
+			}
+
+			d.CanonicalIPv4 = canonicalIPv4
+			if _, seen := canonicalSeen[canonicalIPv4]; seen {
+				slog.Warn("duplicate canonical IPv4 from MNDP identities; skipping duplicate addressable host", "identity", d.Identity, "canonical_ipv4", canonicalIPv4)
+				continue
+			}
+			canonicalSeen[canonicalIPv4] = struct{}{}
+
+			mndpByIP[canonicalIPv4] = d
+			ipToIdentity[canonicalIPv4] = d.Identity
+			hosts = append(hosts, canonicalIPv4)
 		}
 		slog.Info("MNDP discovery complete", "devices", len(devices), "addressable", len(hosts))
 	}
@@ -93,6 +117,17 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string)
 	)
 
 	return outputTopology(out, topo, connectedTo)
+}
+
+func firstIPv4String(ips []net.IP) string {
+	for _, ip := range ips {
+		ipv4 := ip.To4()
+		if ipv4 == nil {
+			continue
+		}
+		return ipv4.String()
+	}
+	return ""
 }
 
 // topology holds discovery results indexed by source host

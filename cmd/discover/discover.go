@@ -261,9 +261,6 @@ func resolveLLDPTarget(ctx context.Context, neighbor *lldp.Neighbor) string {
 	if neighbor == nil {
 		return ""
 	}
-	if strings.TrimSpace(neighbor.MacAddress) == "" {
-		return ""
-	}
 
 	if identity := strings.TrimSpace(neighbor.Identity); identity != "" {
 		if ips, err := lookupIPv4ByIdentity(ctx, identity); err == nil {

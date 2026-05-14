@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
+	"jb.favre/mikrotik-fleet-autopilot/common/core"
 )
 
 func TestDefaultRunner_IsAlreadyClosedError(t *testing.T) {
@@ -102,6 +103,22 @@ func TestDefaultRunner_Run_NilClient(t *testing.T) {
 	}
 }
 
+func TestDefaultRunner_RunInteractive_NilClient(t *testing.T) {
+	runner := &Runner{
+		client: nil,
+	}
+
+	_, err := runner.RunInteractive("test\n")
+	if err == nil {
+		t.Error("RunInteractive() with nil client expected error, got nil")
+	}
+
+	expectedErr := "SSH connection not established"
+	if err != nil && err.Error() != expectedErr {
+		t.Errorf("RunInteractive() error = %q, want %q", err.Error(), expectedErr)
+	}
+}
+
 func TestConnection_Run_WithMockServer(t *testing.T) {
 	server, port := startMockSSHServer(t)
 	defer server.stop()
@@ -112,7 +129,7 @@ func TestConnection_Run_WithMockServer(t *testing.T) {
 	}
 
 	address := fmt.Sprintf("127.0.0.1:%d", port)
-	conn, err := buildTestConnection(ctx, address, "admin", "testpass", "", hostKeyCallback)
+	conn, err := buildTestConnection(ctx, address, "admin", core.StringPtr("testpass"), nil, hostKeyCallback)
 	if err != nil {
 		t.Fatalf("Failed to build connection: %v", err)
 	}
@@ -145,7 +162,7 @@ func TestConnection_Close_WithMockServer(t *testing.T) {
 	}
 
 	address := fmt.Sprintf("127.0.0.1:%d", port)
-	conn, err := buildTestConnection(ctx, address, "admin", "testpass", "", hostKeyCallback)
+	conn, err := buildTestConnection(ctx, address, "admin", core.StringPtr("testpass"), nil, hostKeyCallback)
 	if err != nil {
 		t.Fatalf("Failed to build connection: %v", err)
 	}

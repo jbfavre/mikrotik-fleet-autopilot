@@ -308,7 +308,7 @@ func TestUpdateHostKey(t *testing.T) {
 				ApplyUpdatesFunc:     updates.Updates,
 				ExportConfigFunc:     export.Export,
 			}
-			_, err := updateHostKey(ctx, tt.host, deps)
+			_, _, err := updateHostKey(ctx, tt.host, deps)
 
 			// Verify
 			if (err != nil) != tt.wantErr {
@@ -329,6 +329,202 @@ func TestUpdateHostKey(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestUpdateHostKey_ReturnsOpenConnection(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(originalWd) }()
+	_ = os.Chdir(tmpDir)
+
+	closeCalled := false
+	deps := EnrollDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
+			dstFile := ssh.HostKeyFilePath(host)
+			if err := copyFile(srcFile, dstFile); err != nil {
+				return nil, err
+			}
+			return &sshmocks_test.MockRunner{
+				CloseFunc: func() error {
+					closeCalled = true
+					return nil
+				},
+			}, nil
+		},
+	}
+
+	conn, _, err := updateHostKey(context.Background(), "router-open", deps)
+	if err != nil {
+		t.Fatalf("updateHostKey() error = %v", err)
+	}
+	if closeCalled {
+		t.Fatal("updateHostKey() should return an open connection without closing it")
+	}
+	if conn == nil {
+		t.Fatal("updateHostKey() returned nil connection")
+	}
+	_ = conn.Close()
+	if !closeCalled {
+		t.Fatal("expected caller-side Close() to close returned connection")
+	}
+}
+
+func TestRunEnrollForHosts_RequiresNewPassword(t *testing.T) {
+	cfg := EnrollConfig{
+		Hostname:           "router1",
+		NewPassword:        "",
+		UpdateHostKeyOnly:  false,
+		Debug:              true,
+		MaxConcurrentHosts: 1,
+		PreferLiveMode:     true,
+	}
+	err := runEnrollForHosts(context.Background(), []string{"router1"}, cfg, EnrollDependencies{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "--new-password is required") {
+		t.Fatalf("runEnrollForHosts() error = %v, want missing --new-password validation error", err)
+	}
+}
+
+func TestRunEnrollForHosts_UpdateHostKeyOnlySkipsNewPasswordValidation(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(originalWd) }()
+	_ = os.Chdir(tmpDir)
+
+	cfg := EnrollConfig{
+		Hostname:           "",
+		NewPassword:        "",
+		UpdateHostKeyOnly:  true,
+		Debug:              true,
+		MaxConcurrentHosts: 1,
+		PreferLiveMode:     true,
+	}
+	deps := EnrollDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
+			dstFile := ssh.HostKeyFilePath(host)
+			if err := copyFile(srcFile, dstFile); err != nil {
+				return nil, err
+			}
+			return &sshmocks_test.MockRunner{}, nil
+		},
+	}
+
+	if err := runEnrollForHosts(context.Background(), []string{"router1"}, cfg, deps, &bytes.Buffer{}); err != nil {
+		t.Fatalf("runEnrollForHosts() unexpected error in --update-hostkey-only mode: %v", err)
+	}
+}
+
+func TestEnroll_PasswordChangeStepAndManagerRotation(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(originalWd) }()
+	_ = os.Chdir(tmpDir)
+
+	if err := os.WriteFile("pre.rsc", []byte(""), 0644); err != nil {
+		t.Fatalf("failed to create pre script: %v", err)
+	}
+	if err := os.WriteFile("post.rsc", []byte(""), 0644); err != nil {
+		t.Fatalf("failed to create post script: %v", err)
+	}
+
+	var interactiveInput string
+	connectionCount := 0
+	deps := EnrollDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
+			dstFile := ssh.HostKeyFilePath(host)
+			if err := copyFile(srcFile, dstFile); err != nil {
+				return nil, err
+			}
+
+			connectionCount++
+			if connectionCount >= 2 {
+				managerAny, err := core.GetSshManager(ctx)
+				if err != nil {
+					return nil, err
+				}
+				manager, ok := managerAny.(*ssh.SshManager)
+				if !ok || manager == nil {
+					return nil, fmt.Errorf("failed to cast manager from context")
+				}
+				if !strings.Contains(manager.String(), "password:yes (hidden)") {
+					return nil, fmt.Errorf("expected rotated manager password on reconnect, got %s", manager.String())
+				}
+			}
+
+			return &sshmocks_test.MockRunner{
+				RunInteractiveFunc: func(input string) (string, error) {
+					interactiveInput = input
+					return "", nil
+				},
+				RunFunc: func(cmd string) (string, error) {
+					return "", nil
+				},
+				CloseFunc: func() error { return nil },
+			}, nil
+		},
+		ApplyUpdatesFunc: func(context.Context, string) error { return nil },
+		ExportConfigFunc: func(context.Context, string, string, bool, string) error { return nil },
+	}
+
+	ctx := context.WithValue(context.Background(), core.SshManagerKey, ssh.NewSshManager("admin", core.StringPtr(""), nil))
+	cfg := EnrollConfig{
+		Hostname:           "router1",
+		NewPassword:        "new-password",
+		PreEnrollScript:    "pre.rsc",
+		PostEnrollScript:   "post.rsc",
+		SkipUpdates:        true,
+		SkipExport:         true,
+		MaxConcurrentHosts: 1,
+		PreferLiveMode:     true,
+	}
+	if err := enroll(ctx, "router1", cfg, deps, nil); err != nil {
+		t.Fatalf("enroll() unexpected error = %v", err)
+	}
+	if interactiveInput != "new-password\nnew-password\n" {
+		t.Fatalf("interactive input = %q, want repeated new password", interactiveInput)
+	}
+	if connectionCount < 2 {
+		t.Fatalf("expected at least 2 SSH connections (host key + reconnect), got %d", connectionCount)
+	}
+}
+
+func TestEnroll_PasswordChangeFailureStopsEnrollment(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(originalWd) }()
+	_ = os.Chdir(tmpDir)
+	_ = os.WriteFile("pre.rsc", []byte(""), 0644)
+	_ = os.WriteFile("post.rsc", []byte(""), 0644)
+
+	deps := EnrollDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
+			dstFile := ssh.HostKeyFilePath(host)
+			_ = copyFile(srcFile, dstFile)
+			return &sshmocks_test.MockRunner{
+				RunInteractiveFunc: func(input string) (string, error) {
+					return "", fmt.Errorf("interactive prompt failed")
+				},
+			}, nil
+		},
+	}
+	ctx := context.WithValue(context.Background(), core.SshManagerKey, ssh.NewSshManager("admin", core.StringPtr(""), nil))
+	cfg := EnrollConfig{
+		Hostname:           "router1",
+		NewPassword:        "new-password",
+		PreEnrollScript:    "pre.rsc",
+		PostEnrollScript:   "post.rsc",
+		SkipUpdates:        true,
+		SkipExport:         true,
+		MaxConcurrentHosts: 1,
+		PreferLiveMode:     true,
+	}
+	err := enroll(ctx, "router1", cfg, deps, nil)
+	if err == nil || !strings.Contains(err.Error(), "failed to set admin password") {
+		t.Fatalf("enroll() error = %v, want password change failure", err)
 	}
 }
 
@@ -546,7 +742,7 @@ func TestHandleUpdateHostKeyOnly(t *testing.T) {
 			}
 
 			// Execute
-			_, err := updateHostKey(ctx, tt.host, deps)
+			_, _, err := updateHostKey(ctx, tt.host, deps)
 
 			// Verify error expectation
 			if (err != nil) != tt.wantErr {
@@ -651,6 +847,7 @@ func TestEnrollActionValidation(t *testing.T) {
 
 			// Build enrollment config from test values
 			enrollCfg := EnrollConfig{
+				NewPassword:       "new-password",
 				Hostname:          tt.hostnameValue,
 				UpdateHostKeyOnly: tt.updateHostKeyOnly,
 				Force:             tt.force,
@@ -748,7 +945,8 @@ func TestRunEnrollForHosts_Sequential(t *testing.T) {
 		ExportConfigFunc: export.Export,
 	}
 
-	cfg := EnrollConfig{UpdateHostKeyOnly: true, Debug: true, MaxConcurrentHosts: 1, PreferLiveMode: true}
+	cfg := EnrollConfig{
+		NewPassword: "new-password", UpdateHostKeyOnly: true, Debug: true, MaxConcurrentHosts: 1, PreferLiveMode: true}
 
 	var out bytes.Buffer
 	err := runEnrollForHosts(context.Background(), hosts, cfg, deps, &out)
@@ -821,7 +1019,8 @@ func TestRunEnrollForHosts_Concurrent(t *testing.T) {
 		ExportConfigFunc: export.Export,
 	}
 
-	cfg := EnrollConfig{UpdateHostKeyOnly: true, Debug: true, MaxConcurrentHosts: len(hosts), PreferLiveMode: true}
+	cfg := EnrollConfig{
+		NewPassword: "new-password", UpdateHostKeyOnly: true, Debug: true, MaxConcurrentHosts: len(hosts), PreferLiveMode: true}
 
 	var out bytes.Buffer
 	err := runEnrollForHosts(context.Background(), hosts, cfg, deps, &out)
@@ -969,6 +1168,7 @@ func TestApplyPreEnrollScript(t *testing.T) {
 			scriptPath := filepath.Join(tmpDir, "pre-enroll.rsc")
 
 			cfg := EnrollConfig{
+				NewPassword:     "new-password",
 				PreEnrollScript: scriptPath,
 			}
 
@@ -1070,6 +1270,7 @@ func TestApplyPostEnrollScript(t *testing.T) {
 			scriptPath := filepath.Join(tmpDir, "post-enroll.rsc")
 
 			cfg := EnrollConfig{
+				NewPassword:      "new-password",
 				PostEnrollScript: scriptPath,
 			}
 
@@ -1212,8 +1413,9 @@ func TestExportConfiguration(t *testing.T) {
 			outputDir := t.TempDir()
 
 			enrollCfg := EnrollConfig{
-				OutputDir: outputDir,
-				Hostname:  "test-router",
+				NewPassword: "new-password",
+				OutputDir:   outputDir,
+				Hostname:    "test-router",
 			}
 
 			// Create mock export function
@@ -1562,6 +1764,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 
 			// Build enrollment config
 			enrollCfg := EnrollConfig{
+				NewPassword:       "new-password",
 				Hostname:          tt.hostname,
 				PreEnrollScript:   tt.preEnrollScript,
 				PostEnrollScript:  tt.postEnrollScript,
@@ -1595,7 +1798,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 				err = fmt.Errorf("cannot use --force and --update-hostkey-only together")
 			} else if enrollCfg.UpdateHostKeyOnly {
 				// Route to processMultiHostKeyUpdate
-				_, err = updateHostKey(ctx, tt.host, deps)
+				_, _, err = updateHostKey(ctx, tt.host, deps)
 			} else {
 				// Normal enrollment validation
 				if len(cfg.Hosts) != 1 {
@@ -1604,7 +1807,7 @@ func TestEnrollMainWorkflow(t *testing.T) {
 					host := cfg.Hosts[0]
 
 					// Step 1: Update host key
-					_, err = updateHostKey(ctx, host, deps)
+					_, _, err = updateHostKey(ctx, host, deps)
 					if err != nil {
 						err = fmt.Errorf("failed to capture host key: %w", err)
 					}
@@ -2126,6 +2329,7 @@ func TestEnrollWorkflow(t *testing.T) {
 
 			// Setup pre/post enroll scripts if they exist
 			cfg := EnrollConfig{
+				NewPassword:       "new-password",
 				Hostname:          tt.hostname,
 				SkipUpdates:       tt.skipUpdates,
 				SkipExport:        tt.skipExport,
@@ -2149,6 +2353,7 @@ func TestEnrollWorkflow(t *testing.T) {
 				Hosts: hosts,
 			}
 			ctx = context.WithValue(ctx, core.ConfigKey, coreConfig)
+			ctx = context.WithValue(ctx, core.SshManagerKey, ssh.NewSshManager("admin", core.StringPtr(""), nil))
 
 			// Execute enroll
 			err := enroll(ctx, tt.host, cfg, deps, nil)

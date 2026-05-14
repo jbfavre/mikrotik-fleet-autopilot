@@ -13,6 +13,7 @@ type MockRunner struct {
 	CloseFunc                func() error
 	IsAlreadyClosedErrorFunc func(err error) bool
 	RunFunc                  func(cmd string) (string, error)
+	RunInteractiveFunc       func(input string) (string, error)
 	CommandHistory           []string // Make this exportable for all tests
 }
 
@@ -34,6 +35,13 @@ func (m *MockRunner) Run(cmd string) (string, error) {
 	m.CommandHistory = append(m.CommandHistory, cmd)
 	if m.RunFunc != nil {
 		return m.RunFunc(cmd)
+	}
+	return "", nil
+}
+
+func (m *MockRunner) RunInteractive(input string) (string, error) {
+	if m.RunInteractiveFunc != nil {
+		return m.RunInteractiveFunc(input)
 	}
 	return "", nil
 }

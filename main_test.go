@@ -10,15 +10,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
 func TestBuildCommand(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	// Test basic command properties
 	if cmd.Name != "mikrotik-fleet-autopilot" {
@@ -46,9 +47,9 @@ func TestBuildCommand(t *testing.T) {
 
 func TestBuildCommandFlags(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	expectedFlags := map[string]bool{
 		"host":                 false,
@@ -88,16 +89,14 @@ func TestBuildCommandFlags(t *testing.T) {
 
 func TestBuildCommandFlagBinding(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
 	// Set some initial values
 	hosts = "192.168.1.1"
-	sshPassword = "test-password"
-	sshPassphrase = "test-passphrase"
 	globalConfig.User = "testuser"
 	globalConfig.Debug = true
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	// The command should be built without errors
 	if cmd == nil {
@@ -115,9 +114,9 @@ func TestBuildCommandFlagBinding(t *testing.T) {
 
 func TestBuildCommandSubcommands(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	// Check that we have subcommands
 	if len(cmd.Commands) == 0 {
@@ -139,12 +138,12 @@ func TestBuildCommandSubcommands(t *testing.T) {
 func TestBuildCommandMultipleInstances(t *testing.T) {
 	// Test that multiple instances can be created independently
 	var config1 core.Config
-	var hosts1, pass1, phrase1 string
-	cmd1 := buildCommand(&config1, &hosts1, &pass1, &phrase1)
+	var hosts1 string
+	cmd1 := buildCommand(&config1, &hosts1)
 
 	var config2 core.Config
-	var hosts2, pass2, phrase2 string
-	cmd2 := buildCommand(&config2, &hosts2, &pass2, &phrase2)
+	var hosts2 string
+	cmd2 := buildCommand(&config2, &hosts2)
 
 	// Each command should be independent
 	if cmd1 == cmd2 {
@@ -162,11 +161,11 @@ func TestBuildCommandMultipleInstances(t *testing.T) {
 
 func TestHostParsing(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
 	hosts = "192.168.1.1,192.168.1.2, 192.168.1.3"
 
-	buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	buildCommand(&globalConfig, &hosts)
 
 	// The actual parsing happens in the Before hook, but we can test
 	// that the setup is correct
@@ -224,11 +223,10 @@ func TestAutoDiscoveryWithBeforeHook(t *testing.T) {
 
 	// Build command with empty hosts to trigger auto-discovery
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 	globalConfig.User = "testuser"
-	sshPassword = "testpass"
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	// Test the complete flow by running the command with a subcommand argument
 	// This simulates: mikrotik-fleet-autopilot export config
@@ -325,7 +323,7 @@ func TestSshManagerCreation(t *testing.T) {
 	password := "test-pass"
 	passphrase := "test-phrase"
 
-	sshManager := ssh.NewSshManager(user, password, passphrase)
+	sshManager := ssh.NewSshManager(user, core.StringPtr(password), core.StringPtr(passphrase))
 
 	if sshManager == nil {
 		t.Error("NewSshManager returned nil")
@@ -346,12 +344,12 @@ func TestSshManagerCreation(t *testing.T) {
 
 func TestBuildCommandWithEmptyCredentials(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
 	hosts = "192.168.1.1"
 	// Leave password and passphrase empty
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	// Command should build successfully even with empty credentials
 	if cmd == nil {
@@ -359,16 +357,104 @@ func TestBuildCommandWithEmptyCredentials(t *testing.T) {
 	}
 
 	// SSH manager should be creatable with empty credentials
-	sshManager := ssh.NewSshManager("admin", "", "")
+	sshManager := ssh.NewSshManager("admin", core.StringPtr(""), core.StringPtr(""))
 	if sshManager == nil {
 		t.Error("NewSshManager failed with empty credentials")
+	}
+}
+
+func TestBuildCommandSSHCredentialPointers(t *testing.T) {
+	tests := []struct {
+		name                string
+		args                []string
+		wantPasswordNil     bool
+		wantPasswordValue   string
+		wantPassphraseNil   bool
+		wantPassphraseValue string
+	}{
+		{
+			name:              "unset ssh flags produce nil pointers",
+			args:              []string{"mikrotik-fleet-autopilot", "--host", "router1", "inspect-ssh-manager"},
+			wantPasswordNil:   true,
+			wantPassphraseNil: true,
+		},
+		{
+			name:                "explicit empty ssh flags produce empty-string pointers",
+			args:                []string{"mikrotik-fleet-autopilot", "--host", "router1", "--ssh-password=", "--ssh-passphrase=", "inspect-ssh-manager"},
+			wantPasswordNil:     false,
+			wantPasswordValue:   "",
+			wantPassphraseNil:   false,
+			wantPassphraseValue: "",
+		},
+		{
+			name:                "set ssh flags produce non-empty pointers",
+			args:                []string{"mikrotik-fleet-autopilot", "--host", "router1", "--ssh-password=secret", "--ssh-passphrase=phrase", "inspect-ssh-manager"},
+			wantPasswordNil:     false,
+			wantPasswordValue:   "secret",
+			wantPassphraseNil:   false,
+			wantPassphraseValue: "phrase",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var globalConfig core.Config
+			var hosts string
+			cmd := buildCommand(&globalConfig, &hosts)
+
+			cmd.Commands = append(cmd.Commands, &cli.Command{
+				Name: "inspect-ssh-manager",
+				Action: func(ctx context.Context, _ *cli.Command) error {
+					managerAny, err := core.GetSshManager(ctx)
+					if err != nil {
+						return err
+					}
+					manager, ok := managerAny.(*ssh.SshManager)
+					if !ok || manager == nil {
+						return errors.New("failed to cast SSH manager from context")
+					}
+					managerString := manager.String()
+
+					passwordState := "password:not set"
+					switch {
+					case tt.wantPasswordNil:
+						passwordState = "password:not set"
+					case tt.wantPasswordValue == "":
+						passwordState = "password:empty (hidden)"
+					default:
+						passwordState = "password:yes (hidden)"
+					}
+					if !strings.Contains(managerString, passwordState) {
+						t.Fatalf("manager string %q missing %q", managerString, passwordState)
+					}
+
+					passphraseState := "passphrase:not set"
+					switch {
+					case tt.wantPassphraseNil:
+						passphraseState = "passphrase:not set"
+					case tt.wantPassphraseValue == "":
+						passphraseState = "passphrase:empty (hidden)"
+					default:
+						passphraseState = "passphrase:yes (hidden)"
+					}
+					if !strings.Contains(managerString, passphraseState) {
+						t.Fatalf("manager string %q missing %q", managerString, passphraseState)
+					}
+					return nil
+				},
+			})
+
+			if err := cmd.Run(context.Background(), tt.args); err != nil {
+				t.Fatalf("cmd.Run() error = %v", err)
+			}
+		})
 	}
 }
 
 // TestBuildCommandBeforeHook tests the Before hook execution
 func TestBuildCommandBeforeHook(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
 	tests := []struct {
 		name        string
@@ -391,7 +477,7 @@ func TestBuildCommandBeforeHook(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			hosts = tt.hosts
-			cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+			cmd := buildCommand(&globalConfig, &hosts)
 
 			if cmd == nil {
 				t.Fatal("buildCommand returned nil")
@@ -413,9 +499,9 @@ func TestBuildCommandBeforeHook(t *testing.T) {
 // TestBuildCommandAllSubcommands verifies that all expected subcommands are registered
 func TestBuildCommandAllSubcommands(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	expectedCommands := []string{"export", "updates", "enroll"}
 
@@ -440,7 +526,7 @@ func TestBuildCommandAllSubcommands(t *testing.T) {
 // TestBuildCommandHostParsing tests that hosts are parsed correctly
 func TestBuildCommandHostParsing(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
 	tests := []struct {
 		name          string
@@ -467,7 +553,7 @@ func TestBuildCommandHostParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			hosts = tt.hostsInput
-			cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+			cmd := buildCommand(&globalConfig, &hosts)
 
 			if cmd == nil {
 				t.Fatal("buildCommand returned nil")
@@ -491,13 +577,13 @@ func TestBuildCommandHostParsing(t *testing.T) {
 // TestBuildCommandDebugFlag tests that debug flag is properly bound
 func TestBuildCommandDebugFlag(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
 	// Test with debug enabled
 	globalConfig.Debug = true
 	hosts = "test-host"
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	if cmd == nil {
 		t.Fatal("buildCommand returned nil")
@@ -510,7 +596,7 @@ func TestBuildCommandDebugFlag(t *testing.T) {
 
 	// Test with debug disabled
 	globalConfig.Debug = false
-	cmd2 := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd2 := buildCommand(&globalConfig, &hosts)
 
 	if cmd2 == nil {
 		t.Fatal("buildCommand returned nil")
@@ -523,9 +609,9 @@ func TestBuildCommandDebugFlag(t *testing.T) {
 
 func TestBuildCommandMaxConcurrentHostsFlag(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	// Use a pre-cancelled context so the root Before hook fires (binding flags into
 	// globalConfig) but the subcommand action exits immediately without SSH work.
@@ -546,9 +632,9 @@ func TestBuildCommandMaxConcurrentHostsFlag(t *testing.T) {
 
 func TestBuildCommandMaxConcurrentHostsAutoDetect(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 	// Use a pre-cancelled context so the root Before hook fires (binding flags into
 	// globalConfig) but the subcommand action exits immediately without SSH work.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -566,9 +652,9 @@ func TestBuildCommandMaxConcurrentHostsAutoDetect(t *testing.T) {
 
 func TestBuildCommandMaxConcurrentHostsRejectsInvalidOverride(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 	// The Before hook must abort with an error before the subcommand action runs.
 	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--max-concurrent-hosts", "-1", "updates"})
 	if err == nil {
@@ -581,9 +667,9 @@ func TestBuildCommandMaxConcurrentHostsRejectsInvalidOverride(t *testing.T) {
 
 func TestBuildCommandMaxConcurrentHostsSequential(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	// Use a pre-cancelled context so the root Before hook fires (binding flags into
 	// globalConfig) but the subcommand action exits immediately without SSH work.
@@ -601,9 +687,9 @@ func TestBuildCommandMaxConcurrentHostsSequential(t *testing.T) {
 
 func TestBuildCommandBufferedOutputFlagDefault(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -622,9 +708,9 @@ func TestBuildCommandBufferedOutputFlagDefault(t *testing.T) {
 
 func TestBuildCommandBufferedOutputFlagEnabled(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -643,9 +729,9 @@ func TestBuildCommandBufferedOutputFlagEnabled(t *testing.T) {
 
 func TestBuildCommandDisplayModeFlagRemoved(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--display-mode", "buffered", "updates"})
 	if err == nil {
 		t.Fatal("cmd.Run() expected an error for removed --display-mode flag")
@@ -657,9 +743,9 @@ func TestBuildCommandDisplayModeFlagRemoved(t *testing.T) {
 
 func TestMNDPAndHostMutualExclusivity(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--mndp", "discover"})
 	if err == nil {
 		t.Fatal("cmd.Run() expected mutual exclusivity error, got nil")
@@ -671,9 +757,9 @@ func TestMNDPAndHostMutualExclusivity(t *testing.T) {
 
 func TestMNDPFlagAloneDoesNotError(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	// Use --help to stop after CLI parsing/validation so the test does not execute
 	// the real discover action or touch network interfaces.
@@ -695,9 +781,9 @@ func TestMNDPFlagAloneDoesNotError(t *testing.T) {
 
 func TestMNDPFlagRejectedForNonDiscoverSubcommands(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--mndp", "updates"})
 	if err == nil {
 		t.Fatal("cmd.Run() expected error for --mndp on non-discover subcommand, got nil")
@@ -709,9 +795,9 @@ func TestMNDPFlagRejectedForNonDiscoverSubcommands(t *testing.T) {
 
 func TestMNDPTimeoutFlagParsed(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -727,9 +813,9 @@ func TestMNDPTimeoutFlagParsed(t *testing.T) {
 
 func TestMNDPTimeoutFlagInvalid(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--mndp-timeout", "bad", "updates"})
 	if err == nil {
 		t.Fatal("cmd.Run() expected parse error for invalid --mndp-timeout, got nil")
@@ -741,9 +827,9 @@ func TestMNDPTimeoutFlagInvalid(t *testing.T) {
 
 func TestMNDPTimeoutFlagNonPositive(t *testing.T) {
 	var globalConfig core.Config
-	var hosts, sshPassword, sshPassphrase string
+	var hosts string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--mndp-timeout", "0s", "updates"})
 	if err == nil {
 		t.Fatal("cmd.Run() expected error for non-positive --mndp-timeout, got nil")

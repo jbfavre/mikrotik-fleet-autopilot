@@ -113,16 +113,35 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		undirected: make(map[string][]*linkDetail),
 	}
 
+	// Pre-scan identities to detect collisions (same identity for multiple hosts).
+	// Collisions are disambiguated with a stable " #N" ordinal suffix assigned in
+	// orderedHosts traversal order.
+	identityOccurrences := make(map[string]int)
+	if topo.ipToIdentity != nil {
+		for _, host := range topo.orderedHosts {
+			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
+				identityOccurrences[id]++
+			}
+		}
+	}
+	identityCounter := make(map[string]int)
+
 	hostToNodeName := make(map[string]string, len(topo.orderedHosts))
 	hostOrder := make(map[string]int, len(topo.orderedHosts))
 	for idx, host := range topo.orderedHosts {
 		hostOrder[host] = idx
 
-		// Resolve canonical name: prefer MNDP identity over bare IP
+		// Resolve canonical name: prefer MNDP/LLDP identity over bare IP.
+		// Disambiguate collisions where multiple hosts share the same identity.
 		canonicalName := host
 		if topo.ipToIdentity != nil {
 			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
-				canonicalName = id
+				if identityOccurrences[id] > 1 {
+					identityCounter[id]++
+					canonicalName = fmt.Sprintf("%s #%d", id, identityCounter[id])
+				} else {
+					canonicalName = id
+				}
 			}
 		}
 		hostToNodeName[host] = canonicalName

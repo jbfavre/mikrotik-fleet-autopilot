@@ -70,15 +70,23 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string)
 			}
 
 			ips, lookupErr := lookupIPv4ByIdentity(ctx, lookupIdentity)
-			if lookupErr != nil {
-				slog.Warn("MNDP identity has no canonical DNS IPv4", "identity", d.Identity, "base_identity", lookupIdentity, "error", lookupErr)
-				continue
-			}
-
 			canonicalIPv4 := firstIPv4String(ips)
-			if canonicalIPv4 == "" {
-				slog.Warn("MNDP identity resolved without IPv4 addresses", "identity", d.Identity, "base_identity", lookupIdentity)
-				continue
+			if lookupErr != nil || canonicalIPv4 == "" {
+				if d.IPv4Address != "" {
+					if lookupErr != nil {
+						slog.Warn("MNDP identity DNS lookup failed; falling back to MNDP-reported IPv4", "identity", d.Identity, "base_identity", lookupIdentity, "fallback_ipv4", d.IPv4Address, "error", lookupErr)
+					} else {
+						slog.Warn("MNDP identity resolved without IPv4 addresses; falling back to MNDP-reported IPv4", "identity", d.Identity, "base_identity", lookupIdentity, "fallback_ipv4", d.IPv4Address)
+					}
+					canonicalIPv4 = d.IPv4Address
+				} else {
+					if lookupErr != nil {
+						slog.Warn("MNDP identity has no canonical DNS IPv4 and no MNDP IPv4 fallback", "identity", d.Identity, "base_identity", lookupIdentity, "error", lookupErr)
+					} else {
+						slog.Warn("MNDP identity resolved without IPv4 addresses and no MNDP IPv4 fallback", "identity", d.Identity, "base_identity", lookupIdentity)
+					}
+					continue
+				}
 			}
 
 			d.CanonicalIPv4 = canonicalIPv4

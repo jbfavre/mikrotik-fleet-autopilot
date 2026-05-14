@@ -641,10 +641,43 @@ func TestRunDiscoverForHosts_MNDPUsesFirstCanonicalIPv4(t *testing.T) {
 	}
 }
 
-func TestRunDiscoverForHosts_MNDPDNSFailureExcludesDevice(t *testing.T) {
+func TestRunDiscoverForHosts_MNDPDNSFailureFallsBackToMNDPIPv4(t *testing.T) {
 	originalListen := listenMNDP
 	listenMNDP = func(_ context.Context, _ string, _ time.Duration) ([]*mndp.Device, error) {
 		return []*mndp.Device{{MACAddress: "aa:bb:cc:dd:ee:ff", Identity: "router.home", BaseIdentity: "router.home", IPv4Address: "10.0.0.10"}}, nil
+	}
+	defer func() { listenMNDP = originalListen }()
+
+	originalLookup := lookupIPv4ByIdentity
+	lookupIPv4ByIdentity = func(_ context.Context, _ string) ([]net.IP, error) {
+		return nil, errors.New("no such host")
+	}
+	defer func() { lookupIPv4ByIdentity = originalLookup }()
+
+	var connectedHosts []string
+	originalSSH := createSSHConnection
+	createSSHConnection = func(_ context.Context, host string) (ssh.RunnerInterface, error) {
+		connectedHosts = append(connectedHosts, host)
+		return &stubRunner{runOutput: ""}, nil
+	}
+	defer func() { createSSHConnection = originalSSH }()
+
+	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
+	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
+
+	if err := runDiscoverForHosts(ctx, io.Discard, ""); err != nil {
+		t.Fatalf("runDiscoverForHosts() unexpected error when DNS fails but MNDP IPv4 is available: %v", err)
+	}
+	if !reflect.DeepEqual(connectedHosts, []string{"10.0.0.10"}) {
+		t.Fatalf("expected SSH to fallback to MNDP-reported IPv4, got %v", connectedHosts)
+	}
+}
+
+func TestRunDiscoverForHosts_MNDPDNSFailureNoIPv4ExcludesDevice(t *testing.T) {
+	originalListen := listenMNDP
+	listenMNDP = func(_ context.Context, _ string, _ time.Duration) ([]*mndp.Device, error) {
+		// Device has no IPv4Address set
+		return []*mndp.Device{{MACAddress: "aa:bb:cc:dd:ee:ff", Identity: "router.home", BaseIdentity: "router.home"}}, nil
 	}
 	defer func() { listenMNDP = originalListen }()
 
@@ -659,7 +692,7 @@ func TestRunDiscoverForHosts_MNDPDNSFailureExcludesDevice(t *testing.T) {
 
 	err := runDiscoverForHosts(ctx, io.Discard, "")
 	if err == nil {
-		t.Fatal("runDiscoverForHosts() expected no hosts error when canonical DNS lookup fails")
+		t.Fatal("runDiscoverForHosts() expected error when DNS fails and no MNDP IPv4 is available")
 	}
 	if !strings.Contains(err.Error(), "no hosts") {
 		t.Fatalf("expected no hosts error, got %v", err)
@@ -802,6 +835,40 @@ func TestBuildTopologyGraph_MNDPDisambiguatedIdentityLabelsPreserved(t *testing.
 	}
 	if n := graph.nodes[name2]; n.sshReachable == nil || *n.sshReachable {
 		t.Fatalf("expected %q to be marked SSH unreachable", name2)
+	}
+}
+
+func TestBuildTopologyGraph_DuplicateIdentityCollisionDisambiguated(t *testing.T) {
+	// Both IPs share the same raw MNDP/LLDP identity; buildTopologyGraph must
+	// assign distinct node names instead of merging them into one node.
+	topo := &topology{
+		orderedHosts: []string{"192.168.1.1", "192.168.1.2"},
+		results: map[string]*lldp.ParseResult{
+			"192.168.1.1": {Neighbors: []*lldp.Neighbor{}},
+			"192.168.1.2": {Neighbors: []*lldp.Neighbor{}},
+		},
+		errors: map[string]error{},
+		ipToIdentity: map[string]string{
+			"192.168.1.1": "router.home",
+			"192.168.1.2": "router.home",
+		},
+	}
+
+	graph, err := buildTopologyGraph(topo, "")
+	if err != nil {
+		t.Fatalf("buildTopologyGraph() unexpected error = %v", err)
+	}
+
+	name1 := "router.home #1"
+	name2 := "router.home #2"
+	if _, ok := graph.nodes[name1]; !ok {
+		t.Fatalf("expected disambiguated node %q to exist, got nodes: %v", name1, graph.nodes)
+	}
+	if _, ok := graph.nodes[name2]; !ok {
+		t.Fatalf("expected disambiguated node %q to exist, got nodes: %v", name2, graph.nodes)
+	}
+	if _, ok := graph.nodes["router.home"]; ok {
+		t.Fatalf("expected raw identity 'router.home' to be replaced by disambiguated names")
 	}
 }
 

@@ -7,7 +7,7 @@ require (
 	github.com/kevinburke/ssh_config v1.6.0
 	github.com/urfave/cli/v3 v3.9.0
 	golang.org/x/crypto v0.50.0
-	golang.org/x/term v0.42.0
+	golang.org/x/term v0.43.0
 	gonum.org/v1/gonum v0.17.0
 )
 
@@ -20,5 +20,5 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 )

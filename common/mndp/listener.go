@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -234,10 +235,8 @@ func appendUnique(values []string, candidate string) []string {
 	if candidate == "" {
 		return values
 	}
-	for _, current := range values {
-		if current == candidate {
-			return values
-		}
+	if slices.Contains(values, candidate) {
+		return values
 	}
 	return append(values, candidate)
 }

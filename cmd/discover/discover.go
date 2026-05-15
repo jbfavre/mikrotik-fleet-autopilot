@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"os"
 	"sort"
@@ -199,12 +200,8 @@ func expandTopologyFromLLDP(ctx context.Context, topo *topology) error {
 			added = true
 		}
 
-		for host, result := range nextTopo.results {
-			topo.results[host] = result
-		}
-		for host, err := range nextTopo.errors {
-			topo.errors[host] = err
-		}
+		maps.Copy(topo.results, nextTopo.results)
+		maps.Copy(topo.errors, nextTopo.errors)
 
 		if !added {
 			return nil

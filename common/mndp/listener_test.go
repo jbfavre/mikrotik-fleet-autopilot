@@ -84,107 +84,69 @@ func TestSendProbe_SendsToBroadcast(t *testing.T) {
 	}
 }
 
-func TestDeduplicateDevices_LastSeenWins(t *testing.T) {
-	mac := []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF}
-
-	pkt1 := buildTestPacket(mac, "first-identity", "", "", 0, "", "", nil, nil)
-	pkt2 := buildTestPacket(mac, "last-identity", "", "", 0, "", "", nil, nil)
-
-	devByMAC := make(map[string]*Device)
-
-	dev1, err := ParsePacket(pkt1)
-	if err != nil {
-		t.Fatalf("ParsePacket(pkt1) error = %v", err)
-	}
-	devByMAC[dev1.MACAddress] = dev1
-
-	dev2, err := ParsePacket(pkt2)
-	if err != nil {
-		t.Fatalf("ParsePacket(pkt2) error = %v", err)
-	}
-	devByMAC[dev2.MACAddress] = dev2 // overwrites dev1 (last-seen wins)
-
-	result := deduplicateDevices(devByMAC)
-	if len(result) != 1 {
-		t.Fatalf("deduplicateDevices() returned %d devices, want 1", len(result))
-	}
-	if result[0].Identity != "last-identity" {
-		t.Errorf("deduplicateDevices() identity = %q, want %q", result[0].Identity, "last-identity")
-	}
-}
-
-func TestDeduplicateDevices_SortedByIdentity(t *testing.T) {
-	devByMAC := map[string]*Device{
-		"aa:bb:cc:dd:ee:01": {MACAddress: "aa:bb:cc:dd:ee:01", Identity: "zebra"},
-		"aa:bb:cc:dd:ee:02": {MACAddress: "aa:bb:cc:dd:ee:02", Identity: "apple"},
-		"aa:bb:cc:dd:ee:03": {MACAddress: "aa:bb:cc:dd:ee:03", Identity: "mango"},
+func TestDeduplicateDevices_IdentityCollisionsDisambiguatedWithStableSuffix(t *testing.T) {
+	devByIdentity := map[string]map[string]*Device{
+		"router.home": {
+			"aa:bb:cc:dd:ee:02": {MACAddress: "aa:bb:cc:dd:ee:02", Identity: "router.home", BaseIdentity: "router.home"},
+			"aa:bb:cc:dd:ee:01": {MACAddress: "aa:bb:cc:dd:ee:01", Identity: "router.home", BaseIdentity: "router.home"},
+		},
+		"switch.home": {
+			"aa:bb:cc:dd:ee:03": {MACAddress: "aa:bb:cc:dd:ee:03", Identity: "switch.home", BaseIdentity: "switch.home"},
+		},
 	}
 
-	result := deduplicateDevices(devByMAC)
+	result := deduplicateDevices(devByIdentity)
 	if len(result) != 3 {
 		t.Fatalf("deduplicateDevices() returned %d devices, want 3", len(result))
 	}
-	if result[0].Identity != "apple" || result[1].Identity != "mango" || result[2].Identity != "zebra" {
-		t.Errorf("deduplicateDevices() not sorted: got %q, %q, %q",
-			result[0].Identity, result[1].Identity, result[2].Identity)
+	if result[0].Identity != "router.home #1" || result[1].Identity != "router.home #2" || result[2].Identity != "switch.home" {
+		t.Fatalf("deduplicateDevices() got identities %q, %q, %q", result[0].Identity, result[1].Identity, result[2].Identity)
+	}
+	if result[0].MACAddress != "aa:bb:cc:dd:ee:01" || result[1].MACAddress != "aa:bb:cc:dd:ee:02" {
+		t.Fatalf("expected deterministic MAC ordering in collision suffix assignment, got %q then %q", result[0].MACAddress, result[1].MACAddress)
 	}
 }
 
-func TestShouldReplaceDevice(t *testing.T) {
-	withIPv4 := &Device{IPv4Address: "192.168.1.10"}
-	withoutIPv4 := &Device{}
+func TestAddObservation_MergesSameMACAndAccumulatesIPv4s(t *testing.T) {
+	devByIdentity := make(map[string]map[string]*Device)
 
-	tests := []struct {
-		name      string
-		seen      bool
-		existing  *Device
-		candidate *Device
-		want      bool
-	}{
-		{
-			name:      "unseen device is always accepted",
-			seen:      false,
-			existing:  nil,
-			candidate: withoutIPv4,
-			want:      true,
-		},
-		{
-			name:      "candidate with IPv4 replaces existing without IPv4",
-			seen:      true,
-			existing:  withoutIPv4,
-			candidate: withIPv4,
-			want:      true,
-		},
-		{
-			name:      "candidate without IPv4 does not replace existing with IPv4",
-			seen:      true,
-			existing:  withIPv4,
-			candidate: withoutIPv4,
-			want:      false,
-		},
-		{
-			name:      "candidate with IPv4 replaces existing with IPv4 as newer record",
-			seen:      true,
-			existing:  withIPv4,
-			candidate: withIPv4,
-			want:      true,
-		},
-		{
-			name:      "candidate without IPv4 replaces existing without IPv4 as newer record",
-			seen:      true,
-			existing:  withoutIPv4,
-			candidate: withoutIPv4,
-			want:      true,
-		},
+	first := &Device{
+		MACAddress:    "aa:bb:cc:dd:ee:ff",
+		Identity:      "router.home",
+		BaseIdentity:  "router.home",
+		IPv4Address:   "192.168.1.10",
+		IPv4Addresses: []string{"192.168.1.10"},
+	}
+	second := &Device{
+		MACAddress:    "aa:bb:cc:dd:ee:ff",
+		Identity:      "router.home",
+		BaseIdentity:  "router.home",
+		IPv4Address:   "192.168.1.11",
+		IPv4Addresses: []string{"192.168.1.11"},
+	}
+	duplicate := &Device{
+		MACAddress:   "aa:bb:cc:dd:ee:ff",
+		Identity:     "router.home",
+		BaseIdentity: "router.home",
+		IPv4Address:  "192.168.1.11",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := shouldReplaceDevice(tt.seen, tt.existing, tt.candidate)
-			if got != tt.want {
-				t.Fatalf("shouldReplaceDevice() = %v, want %v", got, tt.want)
-			}
-		})
+	addObservation(devByIdentity, first)
+	addObservation(devByIdentity, second)
+	addObservation(devByIdentity, duplicate)
+
+	result := deduplicateDevices(devByIdentity)
+	if len(result) != 1 {
+		t.Fatalf("deduplicateDevices() returned %d devices, want 1", len(result))
+	}
+	if result[0].IPv4Address != "192.168.1.11" {
+		t.Fatalf("expected last seen IPv4Address to be retained, got %q", result[0].IPv4Address)
+	}
+	if len(result[0].IPv4Addresses) != 2 {
+		t.Fatalf("expected 2 unique observed IPv4 addresses, got %v", result[0].IPv4Addresses)
+	}
+	if result[0].IPv4Addresses[0] != "192.168.1.10" || result[0].IPv4Addresses[1] != "192.168.1.11" {
+		t.Fatalf("unexpected observed IPv4 order/content: %v", result[0].IPv4Addresses)
 	}
 }
 

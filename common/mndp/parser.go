@@ -70,6 +70,7 @@ func ParsePacket(data []byte) (*Device, error) {
 			}
 		case tlvIdentity:
 			dev.Identity = string(value)
+			dev.BaseIdentity = dev.Identity
 		case tlvVersion:
 			dev.Version = string(value)
 		case tlvPlatform:
@@ -96,6 +97,7 @@ func ParsePacket(data []byte) (*Device, error) {
 		case tlvIPv4:
 			if tlvLen == 4 {
 				dev.IPv4Address = net.IP(value).String()
+				dev.IPv4Addresses = []string{dev.IPv4Address}
 			}
 		case tlvUnknown18:
 			// Observed but undocumented; silently skip

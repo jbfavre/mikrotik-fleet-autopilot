@@ -14,12 +14,13 @@ import (
 const mfaNodeName = "mfa"
 
 type topologyNode struct {
-	name         string
-	isSource     bool
-	sourceOrder  int
-	firstSeen    int
-	graphID      int64
-	sshReachable *bool // nil = not attempted; &true = ok; &false = failed
+	name           string
+	isSource       bool
+	autoDiscovered bool
+	sourceOrder    int
+	firstSeen      int
+	graphID        int64
+	sshReachable   *bool // nil = not attempted; &true = ok; &false = failed
 }
 
 type linkDetail struct {
@@ -112,26 +113,32 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		undirected: make(map[string][]*linkDetail),
 	}
 
-	identityHostCounts := make(map[string]int)
+	// Pre-scan identities to detect collisions (same identity for multiple hosts).
+	// Collisions are disambiguated with a stable " #N" ordinal suffix assigned in
+	// orderedHosts traversal order.
+	identityOccurrences := make(map[string]int)
 	if topo.ipToIdentity != nil {
 		for _, host := range topo.orderedHosts {
 			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
-				identityHostCounts[id]++
+				identityOccurrences[id]++
 			}
 		}
 	}
+	identityCounter := make(map[string]int)
 
 	hostToNodeName := make(map[string]string, len(topo.orderedHosts))
 	hostOrder := make(map[string]int, len(topo.orderedHosts))
 	for idx, host := range topo.orderedHosts {
 		hostOrder[host] = idx
 
-		// Resolve canonical name: prefer MNDP identity over bare IP
+		// Resolve canonical name: prefer MNDP/LLDP identity over bare IP.
+		// Disambiguate collisions where multiple hosts share the same identity.
 		canonicalName := host
 		if topo.ipToIdentity != nil {
 			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
-				if identityHostCounts[id] > 1 {
-					canonicalName = fmt.Sprintf("%s (%s)", id, host)
+				if identityOccurrences[id] > 1 {
+					identityCounter[id]++
+					canonicalName = fmt.Sprintf("%s #%d", id, identityCounter[id])
 				} else {
 					canonicalName = id
 				}
@@ -139,6 +146,11 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		}
 		hostToNodeName[host] = canonicalName
 		node := graph.getOrCreateNode(canonicalName, true, idx)
+		if topo.lldpPromoted != nil {
+			if _, ok := topo.lldpPromoted[host]; ok {
+				node.autoDiscovered = true
+			}
+		}
 
 		// Mark SSH reachability
 		if _, failed := topo.errors[host]; failed {
@@ -190,15 +202,6 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		// Fallback for IP values that can be canonicalized by MNDP identity but
 		// are not part of orderedHosts (for example, external caller inputs).
 		if id, ok := topo.ipToIdentity[connectedTo]; ok && id != "" {
-			if identityHostCounts[id] > 1 {
-				hint := disambiguatedIdentityHint(id, topo.orderedHosts, topo.ipToIdentity)
-				return nil, fmt.Errorf(
-					"connected-to target %q resolves to duplicate identity %q; choose one source name: %s",
-					connectedTo,
-					id,
-					hint,
-				)
-			}
 			canonicalConnectedTo = id
 		}
 	}
@@ -219,19 +222,6 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 	})
 
 	return graph, nil
-}
-
-func disambiguatedIdentityHint(identity string, orderedHosts []string, ipToIdentity map[string]string) string {
-	var names []string
-	for _, host := range orderedHosts {
-		if ipToIdentity[host] == identity {
-			names = append(names, fmt.Sprintf("%s (%s)", identity, host))
-		}
-	}
-	if len(names) == 0 {
-		return identity
-	}
-	return strings.Join(names, ", ")
 }
 
 func (g *topologyGraph) getOrCreateNode(name string, isSource bool, sourceOrder int) *topologyNode {
@@ -478,7 +468,11 @@ func renderComponent(out io.Writer, graph *topologyGraph, component []string, ro
 	if n := graph.nodes[root]; n != nil && n.sshReachable != nil && !*n.sshReachable {
 		statusPrefix = "❓ "
 	}
-	_, _ = fmt.Fprintf(out, "[%s%s]\n", statusPrefix, graph.nodes[root].name)
+	rootTag := ""
+	if n := graph.nodes[root]; n != nil && n.autoDiscovered {
+		rootTag = " [LLDP]"
+	}
+	_, _ = fmt.Fprintf(out, "[%s%s%s]\n", statusPrefix, graph.nodes[root].name, rootTag)
 	renderChildren(out, graph, root, children, "  ")
 
 	crossLinks := make([]string, 0)
@@ -522,7 +516,11 @@ func renderChildren(out io.Writer, graph *topologyGraph, parent string, children
 		if n := graph.nodes[child]; n.sshReachable != nil && !*n.sshReachable {
 			childStatusPrefix = "❓ "
 		}
-		_, _ = fmt.Fprintf(out, "%s%s[%s%s]\n", indent, branch, childStatusPrefix, childName)
+		childTag := ""
+		if n := graph.nodes[child]; n != nil && n.autoDiscovered {
+			childTag = " [LLDP]"
+		}
+		_, _ = fmt.Fprintf(out, "%s%s[%s%s%s]\n", indent, branch, childStatusPrefix, childName, childTag)
 
 		// Filter renderable edges (skip if both interfaces are empty)
 		renderableEdges := make([]*linkDetail, 0)
@@ -679,6 +677,18 @@ func printSummary(out io.Writer, graph *topologyGraph, treeEdgeCount int, plan *
 	_, _ = fmt.Fprintf(out, "  Total devices        : %d\n", len(graph.nodes))
 	_, _ = fmt.Fprintf(out, "  Rendered forest edges: %d\n", treeEdgeCount)
 	_, _ = fmt.Fprintf(out, "  Stored LLDP records  : %d\n", totalLinks)
+
+	autoDiscovered := make([]string, 0)
+	for name, node := range graph.nodes {
+		if node.autoDiscovered {
+			autoDiscovered = append(autoDiscovered, name)
+		}
+	}
+	sort.Strings(autoDiscovered)
+	if len(autoDiscovered) > 0 {
+		_, _ = fmt.Fprintf(out, "  LLDP auto-discovered : %d\n", len(autoDiscovered))
+		_, _ = fmt.Fprintf(out, "  LLDP nodes           : %s\n", strings.Join(autoDiscovered, ", "))
+	}
 
 	unreachable := 0
 	for _, node := range graph.nodes {

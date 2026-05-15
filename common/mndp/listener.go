@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +17,9 @@ const listenReadPollInterval = 250 * time.Millisecond
 
 // Listen sends an MNDP probe on ifaceName (or all eligible interfaces when empty)
 // and collects responses for the duration of timeout.
-// Devices are deduplicated by MACAddress (IPv4 wins over empty IP address, newer IPv4 wins).
+// Devices are grouped by identity and deduplicated by MAC address inside each identity group.
+// If multiple MAC addresses share the same identity, returned device identities are disambiguated
+// deterministically as "<identity> #<n>" using MAC lexical ordering.
 // Returns the deduplicated slice, sorted by Identity.
 func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*Device, error) {
 	if timeout <= 0 {
@@ -51,7 +54,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 	}
 
 	var mu sync.Mutex
-	devByMAC := make(map[string]*Device)
+	devByIdentity := make(map[string]map[string]*Device)
 
 	var wg sync.WaitGroup
 
@@ -129,10 +132,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 				dev.InterfaceName = ifName
 
 				mu.Lock()
-				existing, seen := devByMAC[dev.MACAddress]
-				if shouldReplaceDevice(seen, existing, dev) {
-					devByMAC[dev.MACAddress] = dev
-				}
+				addObservation(devByIdentity, dev)
 				mu.Unlock()
 			}
 		}(conn, iface.Name)
@@ -140,24 +140,44 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 
 	wg.Wait()
 
-	return deduplicateDevices(devByMAC), nil
+	return deduplicateDevices(devByIdentity), nil
 }
 
-func shouldReplaceDevice(seen bool, existing, candidate *Device) bool {
-	if !seen {
-		return true
+func addObservation(devByIdentity map[string]map[string]*Device, candidate *Device) {
+	identity := strings.TrimSpace(candidate.BaseIdentity)
+	if identity == "" {
+		identity = strings.TrimSpace(candidate.Identity)
 	}
-	existingHasIPv4 := existing.IPv4Address != ""
-	candidateHasIPv4 := candidate.IPv4Address != ""
+	candidate.BaseIdentity = identity
 
-	// Prefer the record that carries an IPv4 address; if both (or neither) have IPv4, prefer the newer record.
-	if !existingHasIPv4 && candidateHasIPv4 {
-		return true
+	devByMAC, ok := devByIdentity[identity]
+	if !ok {
+		devByMAC = make(map[string]*Device)
+		devByIdentity[identity] = devByMAC
 	}
-	if existingHasIPv4 && !candidateHasIPv4 {
-		return false
+
+	existing, seen := devByMAC[candidate.MACAddress]
+	if !seen {
+		if candidate.IPv4Address != "" && len(candidate.IPv4Addresses) == 0 {
+			candidate.IPv4Addresses = []string{candidate.IPv4Address}
+		}
+		devByMAC[candidate.MACAddress] = candidate
+		return
 	}
-	return true
+
+	if candidate.InterfaceName != "" {
+		existing.InterfaceName = candidate.InterfaceName
+	}
+	if candidate.SourceInterfaceName != "" {
+		existing.SourceInterfaceName = candidate.SourceInterfaceName
+	}
+	if candidate.IPv4Address != "" {
+		existing.IPv4Address = candidate.IPv4Address
+		existing.IPv4Addresses = appendUnique(existing.IPv4Addresses, candidate.IPv4Address)
+	}
+	if candidate.IPv6Address != "" {
+		existing.IPv6Address = candidate.IPv6Address
+	}
 }
 
 // SendProbe sends an MNDP discovery request packet on conn.
@@ -179,14 +199,44 @@ func SendProbe(conn net.PacketConn) error {
 	return nil
 }
 
-// deduplicateDevices takes the last-seen-wins map, builds a slice, and sorts it by Identity.
-func deduplicateDevices(devByMAC map[string]*Device) []*Device {
-	devices := make([]*Device, 0, len(devByMAC))
-	for _, d := range devByMAC {
-		devices = append(devices, d)
+func deduplicateDevices(devByIdentity map[string]map[string]*Device) []*Device {
+	identities := make([]string, 0, len(devByIdentity))
+	for identity := range devByIdentity {
+		identities = append(identities, identity)
 	}
-	slices.SortFunc(devices, func(a, b *Device) int {
-		return strings.Compare(a.Identity, b.Identity)
-	})
+	sort.Strings(identities)
+
+	devices := make([]*Device, 0)
+	for _, identity := range identities {
+		byMAC := devByIdentity[identity]
+		macs := make([]string, 0, len(byMAC))
+		for mac := range byMAC {
+			macs = append(macs, mac)
+		}
+		sort.Strings(macs)
+
+		collision := len(macs) > 1
+		for idx, mac := range macs {
+			d := byMAC[mac]
+			d.BaseIdentity = identity
+			if collision {
+				d.Identity = fmt.Sprintf("%s #%d", identity, idx+1)
+			} else {
+				d.Identity = identity
+			}
+			devices = append(devices, d)
+		}
+	}
+
 	return devices
+}
+
+func appendUnique(values []string, candidate string) []string {
+	if candidate == "" {
+		return values
+	}
+	if slices.Contains(values, candidate) {
+		return values
+	}
+	return append(values, candidate)
 }

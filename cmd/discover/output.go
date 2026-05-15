@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"gonum.org/v1/gonum/graph/simple"
+	"jb.favre/mikrotik-fleet-autopilot/common/lldp"
 )
 
 const mfaNodeName = "mfa"
@@ -113,39 +114,10 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		undirected: make(map[string][]*linkDetail),
 	}
 
-	// Pre-scan identities to detect collisions (same identity for multiple hosts).
-	// Collisions are disambiguated with a stable " #N" ordinal suffix assigned in
-	// orderedHosts traversal order.
-	identityOccurrences := make(map[string]int)
-	if topo.ipToIdentity != nil {
-		for _, host := range topo.orderedHosts {
-			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
-				identityOccurrences[id]++
-			}
-		}
-	}
-	identityCounter := make(map[string]int)
-
-	hostToNodeName := make(map[string]string, len(topo.orderedHosts))
 	hostOrder := make(map[string]int, len(topo.orderedHosts))
 	for idx, host := range topo.orderedHosts {
 		hostOrder[host] = idx
-
-		// Resolve canonical name: prefer MNDP/LLDP identity over bare IP.
-		// Disambiguate collisions where multiple hosts share the same identity.
-		canonicalName := host
-		if topo.ipToIdentity != nil {
-			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
-				if identityOccurrences[id] > 1 {
-					identityCounter[id]++
-					canonicalName = fmt.Sprintf("%s #%d", id, identityCounter[id])
-				} else {
-					canonicalName = id
-				}
-			}
-		}
-		hostToNodeName[host] = canonicalName
-		node := graph.getOrCreateNode(canonicalName, true, idx)
+		node := graph.getOrCreateNode(host, true, idx)
 		if topo.lldpPromoted != nil {
 			if _, ok := topo.lldpPromoted[host]; ok {
 				node.autoDiscovered = true
@@ -168,17 +140,11 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		if result == nil {
 			continue
 		}
-		canonicalSource := hostToNodeName[sourceHost]
-		sourceNode := graph.getOrCreateNode(canonicalSource, true, hostOrder[sourceHost])
+		sourceNode := graph.getOrCreateNode(sourceHost, true, hostOrder[sourceHost])
 		for neighborIdx, neighbor := range result.Neighbors {
 			identity := strings.TrimSpace(neighbor.Identity)
-			localInterface := strings.TrimSpace(neighbor.LocalInterface)
-			// Avoid collapsing distinct neighbors with missing identity into a
-			// single shared "unknown" node by generating a scoped placeholder.
-			// We use canonicalSource (MNDP identity when available) so the
-			// placeholder matches the node name already used in the graph.
 			if identity == "" {
-				identity = fmt.Sprintf("unknown (%s:%s#%d)", canonicalSource, localInterface, neighborIdx)
+				identity = displayOnlyNeighborName(sourceNode.name, neighbor, neighborIdx)
 			}
 			destination := graph.getOrCreateNode(identity, false, -1)
 			graph.addLink(sourceNode.name, destination.name, &linkDetail{
@@ -195,33 +161,42 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		return graph, nil
 	}
 
-	canonicalConnectedTo := connectedTo
-	if resolved, ok := hostToNodeName[connectedTo]; ok {
-		canonicalConnectedTo = resolved
-	} else if topo.ipToIdentity != nil {
-		// Fallback for IP values that can be canonicalized by MNDP identity but
-		// are not part of orderedHosts (for example, external caller inputs).
-		if id, ok := topo.ipToIdentity[connectedTo]; ok && id != "" {
-			canonicalConnectedTo = id
-		}
-	}
-
-	if _, ok := graph.nodes[canonicalConnectedTo]; !ok {
-		if canonicalConnectedTo != connectedTo {
-			return nil, fmt.Errorf("connected-to target %q (resolved from IP to identity %q) was not found in the topology; use a configured source host or a discovered device identity", connectedTo, canonicalConnectedTo)
-		}
+	if _, ok := graph.nodes[connectedTo]; !ok {
 		return nil, fmt.Errorf("connected-to target %q was not found in the topology; use a configured source host or a discovered device identity", connectedTo)
 	}
 
 	// mfa is a synthetic graph-only node representing the computer running the tool.
 	// It must never be added to discovery inputs or any SSH connection path.
 	mfaNode := graph.getOrCreateNode(mfaNodeName, false, -1)
-	graph.addLink(mfaNode.name, canonicalConnectedTo, &linkDetail{
+	graph.addLink(mfaNode.name, connectedTo, &linkDetail{
 		from: mfaNode.name,
-		to:   canonicalConnectedTo,
+		to:   connectedTo,
 	})
 
 	return graph, nil
+}
+
+func displayOnlyNeighborName(source string, neighbor *lldp.Neighbor, index int) string {
+	if neighbor == nil {
+		return fmt.Sprintf("unknown (%s#%d) [LLDP-only]", source, index)
+	}
+	if address := strings.TrimSpace(neighbor.Address); address != "" {
+		return fmt.Sprintf("%s [LLDP-only]", address)
+	}
+	if address6 := strings.TrimSpace(neighbor.Address6); address6 != "" {
+		return fmt.Sprintf("%s [LLDP-only]", address6)
+	}
+	if mac := strings.TrimSpace(neighbor.MacAddress); mac != "" {
+		return fmt.Sprintf("%s [LLDP-only]", mac)
+	}
+	if platform := strings.TrimSpace(neighbor.Platform); platform != "" {
+		return fmt.Sprintf("%s (%s#%d) [LLDP-only]", platform, source, index)
+	}
+	localInterface := strings.TrimSpace(neighbor.LocalInterface)
+	if localInterface == "" {
+		localInterface = "unknown"
+	}
+	return fmt.Sprintf("unknown (%s:%s#%d) [LLDP-only]", source, localInterface, index)
 }
 
 func (g *topologyGraph) getOrCreateNode(name string, isSource bool, sourceOrder int) *topologyNode {

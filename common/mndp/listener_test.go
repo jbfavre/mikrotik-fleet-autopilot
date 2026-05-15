@@ -84,7 +84,7 @@ func TestSendProbe_SendsToBroadcast(t *testing.T) {
 	}
 }
 
-func TestDeduplicateDevices_IdentityCollisionsDisambiguatedWithStableSuffix(t *testing.T) {
+func TestDeduplicateDevices_IdentityCollisionReturnsError(t *testing.T) {
 	devByIdentity := map[string]map[string]*Device{
 		"router.home": {
 			"aa:bb:cc:dd:ee:02": {MACAddress: "aa:bb:cc:dd:ee:02", Identity: "router.home", BaseIdentity: "router.home"},
@@ -95,15 +95,12 @@ func TestDeduplicateDevices_IdentityCollisionsDisambiguatedWithStableSuffix(t *t
 		},
 	}
 
-	result := deduplicateDevices(devByIdentity)
-	if len(result) != 3 {
-		t.Fatalf("deduplicateDevices() returned %d devices, want 3", len(result))
+	_, err := deduplicateDevices(devByIdentity)
+	if err == nil {
+		t.Fatal("deduplicateDevices() expected duplicate identity error, got nil")
 	}
-	if result[0].Identity != "router.home #1" || result[1].Identity != "router.home #2" || result[2].Identity != "switch.home" {
-		t.Fatalf("deduplicateDevices() got identities %q, %q, %q", result[0].Identity, result[1].Identity, result[2].Identity)
-	}
-	if result[0].MACAddress != "aa:bb:cc:dd:ee:01" || result[1].MACAddress != "aa:bb:cc:dd:ee:02" {
-		t.Fatalf("expected deterministic MAC ordering in collision suffix assignment, got %q then %q", result[0].MACAddress, result[1].MACAddress)
+	if !strings.Contains(err.Error(), `duplicate identity "router.home"`) {
+		t.Fatalf("expected duplicate identity error, got %v", err)
 	}
 }
 
@@ -135,7 +132,10 @@ func TestAddObservation_MergesSameMACAndAccumulatesIPv4s(t *testing.T) {
 	addObservation(devByIdentity, second)
 	addObservation(devByIdentity, duplicate)
 
-	result := deduplicateDevices(devByIdentity)
+	result, err := deduplicateDevices(devByIdentity)
+	if err != nil {
+		t.Fatalf("deduplicateDevices() unexpected error = %v", err)
+	}
 	if len(result) != 1 {
 		t.Fatalf("deduplicateDevices() returned %d devices, want 1", len(result))
 	}

@@ -18,9 +18,8 @@ const listenReadPollInterval = 250 * time.Millisecond
 // Listen sends an MNDP probe on ifaceName (or all eligible interfaces when empty)
 // and collects responses for the duration of timeout.
 // Devices are grouped by identity and deduplicated by MAC address inside each identity group.
-// If multiple MAC addresses share the same identity, returned device identities are disambiguated
-// deterministically as "<identity> #<n>" using MAC lexical ordering.
-// Returns the deduplicated slice, sorted by Identity.
+// If multiple MAC addresses share the same identity, Listen fails because device identities must
+// be unique across the fleet. Returns the deduplicated slice, sorted by Identity.
 func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*Device, error) {
 	if timeout <= 0 {
 		return nil, fmt.Errorf("mndp: timeout must be greater than 0")
@@ -140,7 +139,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 
 	wg.Wait()
 
-	return deduplicateDevices(devByIdentity), nil
+	return deduplicateDevices(devByIdentity)
 }
 
 func addObservation(devByIdentity map[string]map[string]*Device, candidate *Device) {
@@ -199,7 +198,7 @@ func SendProbe(conn net.PacketConn) error {
 	return nil
 }
 
-func deduplicateDevices(devByIdentity map[string]map[string]*Device) []*Device {
+func deduplicateDevices(devByIdentity map[string]map[string]*Device) ([]*Device, error) {
 	identities := make([]string, 0, len(devByIdentity))
 	for identity := range devByIdentity {
 		identities = append(identities, identity)
@@ -215,20 +214,19 @@ func deduplicateDevices(devByIdentity map[string]map[string]*Device) []*Device {
 		}
 		sort.Strings(macs)
 
-		collision := len(macs) > 1
-		for idx, mac := range macs {
+		if len(macs) > 1 {
+			return nil, fmt.Errorf("mndp: duplicate identity %q found on %d devices (MACs: %s) — device identities must be unique", identity, len(macs), strings.Join(macs, ", "))
+		}
+
+		for _, mac := range macs {
 			d := byMAC[mac]
 			d.BaseIdentity = identity
-			if collision {
-				d.Identity = fmt.Sprintf("%s #%d", identity, idx+1)
-			} else {
-				d.Identity = identity
-			}
+			d.Identity = identity
 			devices = append(devices, d)
 		}
 	}
 
-	return devices
+	return devices, nil
 }
 
 func appendUnique(values []string, candidate string) []string {

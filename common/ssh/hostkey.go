@@ -194,6 +194,11 @@ func LoadHostKeyInfo(host string) (*HostKeyInfo, error) {
 
 // BuildHostKeyCallback creates a host key callback function that integrates with the host key manager
 func BuildHostKeyCallback(ctx context.Context, host string, manager HostKeyManager) HostKeyCallback {
+	keyHost := host
+	if alias, ok := ctx.Value(core.HostKeyAliasKey).(string); ok && alias != "" {
+		keyHost = alias
+	}
+
 	return func(hostname string, remote any, key ssh.PublicKey) error {
 		// Extract config from context to check SkipHostKeyCheck
 		type configGetter interface {
@@ -203,6 +208,7 @@ func BuildHostKeyCallback(ctx context.Context, host string, manager HostKeyManag
 		// Debug: check what's in the context
 		slog.Debug("host key callback invoked",
 			"host", host,
+			"key_host", keyHost,
 			"configKey", ctx.Value(core.ConfigKey) != nil,
 			"enrollmentKey", ctx.Value(core.EnrollmentKey) != nil)
 
@@ -225,15 +231,15 @@ func BuildHostKeyCallback(ctx context.Context, host string, manager HostKeyManag
 				}
 			}
 
-			if !manager.Exists(host) && isEnrollment {
+			if !manager.Exists(keyHost) && isEnrollment {
 				fp := manager.GetFingerprint(key)
 				slog.Info("capturing host key for first time (verification skipped)",
-					"host", host,
+					"host", keyHost,
 					"algorithm", key.Type(),
 					"fingerprint", fp)
-				if err := manager.Capture(host, key); err != nil {
+				if err := manager.Capture(keyHost, key); err != nil {
 					slog.Error("failed to capture host key while SkipHostKeyCheck is enabled",
-						"host", host,
+						"host", keyHost,
 						"algorithm", key.Type(),
 						"fingerprint", fp,
 						"error", err)
@@ -243,17 +249,17 @@ func BuildHostKeyCallback(ctx context.Context, host string, manager HostKeyManag
 		}
 
 		// Check if host key exists for this host
-		if manager.Exists(host) {
+		if manager.Exists(keyHost) {
 			// Host key exists - always verify
-			if err := manager.Verify(host, key); err != nil {
+			if err := manager.Verify(keyHost, key); err != nil {
 				fp := manager.GetFingerprint(key)
 				slog.Error("host key verification failed",
-					"host", host,
+					"host", keyHost,
 					"fingerprint", fp,
 					"error", err)
 				return fmt.Errorf("host key verification failed: %w", err)
 			}
-			slog.Debug("host key verified successfully", "host", host)
+			slog.Debug("host key verified successfully", "host", keyHost)
 			return nil
 		}
 
@@ -269,17 +275,17 @@ func BuildHostKeyCallback(ctx context.Context, host string, manager HostKeyManag
 			// Enrollment mode - capture the host key
 			fp := manager.GetFingerprint(key)
 			slog.Info("capturing host key for first time",
-				"host", host,
+				"host", keyHost,
 				"algorithm", key.Type(),
 				"fingerprint", fp)
-			if err := manager.Capture(host, key); err != nil {
+			if err := manager.Capture(keyHost, key); err != nil {
 				return fmt.Errorf("failed to capture host key: %w", err)
 			}
 			return nil
 		}
 
 		// Not in enrollment mode and no host key - fail securely
-		slog.Error("no host key found", "host", host)
-		return fmt.Errorf("no host key found for %s - run 'enroll' command first to capture the host key", host)
+		slog.Error("no host key found", "host", keyHost)
+		return fmt.Errorf("no host key found for %s - run 'enroll' command first to capture the host key", keyHost)
 	}
 }

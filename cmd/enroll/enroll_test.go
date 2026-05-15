@@ -371,6 +371,40 @@ func TestUpdateHostKey_ReturnsOpenConnection(t *testing.T) {
 	}
 }
 
+func TestUpdateHostKey_UsesHostKeyAlias(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(originalWd) }()
+	_ = os.Chdir(tmpDir)
+
+	ctx := context.WithValue(context.Background(), core.EnrollmentKey, true)
+	ctx = context.WithValue(ctx, core.HostKeyAliasKey, "router1")
+
+	deps := EnrollDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
+			dstFile := ssh.HostKeyFilePath("router1")
+			if err := copyFile(srcFile, dstFile); err != nil {
+				return nil, err
+			}
+			return &sshmocks_test.MockRunner{
+				CloseFunc: func() error { return nil },
+			}, nil
+		},
+	}
+
+	_, _, err := updateHostKey(ctx, "192.168.1.1", deps)
+	if err != nil {
+		t.Fatalf("updateHostKey() unexpected error = %v", err)
+	}
+	if !ssh.HostKeyExists("router1") {
+		t.Fatal("expected host key to be saved under the hostname alias")
+	}
+	if ssh.HostKeyExists("192.168.1.1") {
+		t.Fatal("did not expect host key to be saved under the IP address")
+	}
+}
+
 func TestRunEnrollForHosts_RequiresNewPassword(t *testing.T) {
 	cfg := EnrollConfig{
 		Hostname:           "router1",
@@ -491,6 +525,60 @@ func TestEnroll_PasswordChangeStepAndManagerRotation(t *testing.T) {
 	}
 }
 
+func TestEnroll_PropagatesHostKeyAliasForIPEnrollment(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(originalWd) }()
+	_ = os.Chdir(tmpDir)
+
+	if err := os.WriteFile("pre.rsc", []byte(""), 0644); err != nil {
+		t.Fatalf("failed to create pre script: %v", err)
+	}
+	if err := os.WriteFile("post.rsc", []byte(""), 0644); err != nil {
+		t.Fatalf("failed to create post script: %v", err)
+	}
+
+	aliasSeen := false
+	deps := EnrollDependencies{
+		SSHConnectionFactory: func(ctx context.Context, host string) (ssh.RunnerInterface, error) {
+			if alias, _ := ctx.Value(core.HostKeyAliasKey).(string); alias == "router1" {
+				aliasSeen = true
+			}
+			srcFile := filepath.Join(originalWd, "testdata/hostkeys/router1.hostkey")
+			dstFile := ssh.HostKeyFilePath("router1")
+			if err := copyFile(srcFile, dstFile); err != nil {
+				return nil, err
+			}
+			return &sshmocks_test.MockRunner{
+				RunInteractiveFunc: func(input string) (string, error) { return "", nil },
+				RunFunc:            func(cmd string) (string, error) { return "", nil },
+				CloseFunc:          func() error { return nil },
+			}, nil
+		},
+		ApplyUpdatesFunc: func(context.Context, string) error { return nil },
+		ExportConfigFunc: func(context.Context, string, string, bool, string) error { return nil },
+	}
+
+	ctx := context.WithValue(context.Background(), core.SshManagerKey, ssh.NewSshManager("admin", new(""), nil))
+	cfg := EnrollConfig{
+		Hostname:           "router1",
+		NewPassword:        "new-password",
+		PreEnrollScript:    "pre.rsc",
+		PostEnrollScript:   "post.rsc",
+		SkipUpdates:        true,
+		SkipExport:         true,
+		MaxConcurrentHosts: 1,
+		PreferLiveMode:     true,
+	}
+
+	if err := enroll(ctx, "192.168.1.1", cfg, deps, nil); err != nil {
+		t.Fatalf("enroll() unexpected error = %v", err)
+	}
+	if !aliasSeen {
+		t.Fatal("expected enrollment SSH connections to receive the host key alias")
+	}
+}
+
 func TestEnroll_PasswordChangeFailureStopsEnrollment(t *testing.T) {
 	tmpDir := t.TempDir()
 	originalWd, _ := os.Getwd()
@@ -600,7 +688,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 
 			// Setup host key if needed
 			if tt.setupHostKey {
-				hostKeyFile := ssh.HostKeyFilePath(tt.host)
+				hostKeyFile := ssh.HostKeyFilePath(tt.hostname)
 				err := os.WriteFile(hostKeyFile, []byte(`{"host":"test","algorithm":"ssh-rsa","fingerprint":"SHA256:test","publicKey":"dummy","capturedAt":"2025-12-18T00:00:00Z"}`), 0600)
 				if err != nil {
 					t.Fatalf("Failed to setup test host key: %v", err)
@@ -609,7 +697,7 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 
 			// Setup config file if needed
 			if tt.setupConfigFile {
-				parsedHost := ssh.ParseHost(tt.host)
+				parsedHost := ssh.ParseHost(tt.hostname)
 				configFile := fmt.Sprintf("%s.rsc", parsedHost.ShortName)
 				err := os.WriteFile(configFile, []byte("# test config"), 0600)
 				if err != nil {
@@ -644,14 +732,14 @@ func TestDeleteExistingEnrollment(t *testing.T) {
 
 			// Verify host key was deleted
 			if !tt.wantErr && tt.setupHostKey {
-				if ssh.HostKeyExists(tt.host) {
+				if ssh.HostKeyExists(tt.hostname) {
 					t.Error("Expected host key to be deleted, but it still exists")
 				}
 			}
 
 			// Verify config file was deleted
 			if !tt.wantErr && tt.setupConfigFile {
-				parsedHost := ssh.ParseHost(tt.host)
+				parsedHost := ssh.ParseHost(tt.hostname)
 				configFile := fmt.Sprintf("%s.rsc", parsedHost.ShortName)
 				if _, err := os.Stat(configFile); !os.IsNotExist(err) {
 					t.Error("Expected config file to be deleted, but it still exists")

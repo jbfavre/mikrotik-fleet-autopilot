@@ -202,6 +202,43 @@ func TestBuildHostKeyCallback_HostnameHandling(t *testing.T) {
 	}
 }
 
+func TestBuildHostKeyCallback_HostKeyAliasOverride(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate test key: %v", err)
+	}
+	publicKey, err := ssh.NewPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		t.Fatalf("failed to create SSH public key: %v", err)
+	}
+
+	var existsHost string
+	var verifyHost string
+	manager := &mockTestHostKeyManager{
+		existsFunc: func(host string) bool {
+			existsHost = host
+			return true
+		},
+		verifyFunc: func(host string, key ssh.PublicKey) error {
+			verifyHost = host
+			return nil
+		},
+	}
+
+	ctx := context.WithValue(context.Background(), core.HostKeyAliasKey, "router1")
+	callback := BuildHostKeyCallback(ctx, "192.168.1.1", manager)
+
+	if err := callback("192.168.1.1", nil, publicKey); err != nil {
+		t.Fatalf("BuildHostKeyCallback() unexpected error = %v", err)
+	}
+	if existsHost != "router1" {
+		t.Fatalf("Exists() host = %q, want %q", existsHost, "router1")
+	}
+	if verifyHost != "router1" {
+		t.Fatalf("Verify() host = %q, want %q", verifyHost, "router1")
+	}
+}
+
 func TestBuildHostKeyCallback_EnrollmentModeDetection(t *testing.T) {
 	// Generate test key
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)

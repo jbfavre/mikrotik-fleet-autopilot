@@ -22,6 +22,8 @@ const (
 	SshManagerKey ContextKey = "ssh_manager"
 	// EnrollmentKey is the context key for storing enrollment mode
 	EnrollmentKey ContextKey = "enrollment"
+	// HostKeyAliasKey is the context key for storing the device identity used for host key lookups.
+	HostKeyAliasKey ContextKey = "host_key_alias"
 )
 
 type slogRouterWriter struct {

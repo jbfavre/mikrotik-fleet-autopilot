@@ -223,6 +223,9 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 
 	// Set enrollment mode in context to allow host key capture
 	ctx = context.WithValue(ctx, core.EnrollmentKey, true)
+	if !enrollCfg.UpdateHostKeyOnly && enrollCfg.Hostname != "" {
+		ctx = context.WithValue(ctx, core.HostKeyAliasKey, enrollCfg.Hostname)
+	}
 	slog.Debug("enrollment mode enabled in context")
 
 	hostname := enrollCfg.Hostname
@@ -492,13 +495,14 @@ func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (s
 	}
 
 	slog.Info("starting host key update", "host", host)
+	keyHost := hostKeyLookupHost(ctx, host)
 
 	// Load existing host key info if it exists
-	oldInfo, err := ssh.LoadHostKeyInfo(host)
+	oldInfo, err := ssh.LoadHostKeyInfo(keyHost)
 	if err == nil {
-		slog.Debug("loaded existing host key", "host", host, "algorithm", oldInfo.Algorithm, "fingerprint", oldInfo.Fingerprint)
+		slog.Debug("loaded existing host key", "host", host, "key_host", keyHost, "algorithm", oldInfo.Algorithm, "fingerprint", oldInfo.Fingerprint)
 	} else {
-		slog.Debug("no existing host key found", "host", host)
+		slog.Debug("no existing host key found", "host", host, "key_host", keyHost)
 	}
 
 	// Create SSH connection (this will capture the new host key)
@@ -511,9 +515,9 @@ func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (s
 	slog.Debug("successfully connected and captured host key", "host", host)
 
 	// Load new host key info
-	newInfo, err := ssh.LoadHostKeyInfo(host)
+	newInfo, err := ssh.LoadHostKeyInfo(keyHost)
 	if err != nil {
-		slog.Error("failed to load new host key", "host", host, "error", err)
+		slog.Error("failed to load new host key", "host", host, "key_host", keyHost, "error", err)
 		_ = conn.Close()
 		return nil, "", fmt.Errorf("failed to load new host key: %w", err)
 	}
@@ -538,11 +542,15 @@ func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (s
 func deleteExistingEnrollment(host string, hostname string) (deleteExistingEnrollmentResult, error) {
 	slog.Info("deleting existing enrollment artifacts", "host", host, "hostname", hostname)
 	result := deleteExistingEnrollmentResult{}
+	artifactHost := hostname
+	if artifactHost == "" {
+		artifactHost = host
+	}
 
 	// Delete host key
-	if ssh.HostKeyExists(host) {
-		slog.Debug("deleting host key", "host", host, "hostname", hostname)
-		if err := ssh.DeleteHostKey(host); err != nil {
+	if ssh.HostKeyExists(artifactHost) {
+		slog.Debug("deleting host key", "host", host, "hostname", hostname, "artifact_host", artifactHost)
+		if err := ssh.DeleteHostKey(artifactHost); err != nil {
 			slog.Error("failed to delete host key", "host", host, "hostname", hostname, "error", err)
 			return result, fmt.Errorf("failed to delete host key: %w", err)
 		}
@@ -550,7 +558,7 @@ func deleteExistingEnrollment(host string, hostname string) (deleteExistingEnrol
 	}
 
 	// Delete config file
-	parsedHost := ssh.ParseHost(host)
+	parsedHost := ssh.ParseHost(artifactHost)
 	configFile := fmt.Sprintf("%s.rsc", parsedHost.ShortName)
 	if _, err := os.Stat(configFile); err == nil {
 		slog.Debug("deleting config file", "host", host, "hostname", hostname, "file", configFile)
@@ -563,4 +571,11 @@ func deleteExistingEnrollment(host string, hostname string) (deleteExistingEnrol
 
 	slog.Info("existing enrollment artifacts deleted", "host", host, "hostname", hostname)
 	return result, nil
+}
+
+func hostKeyLookupHost(ctx context.Context, host string) string {
+	if alias, ok := ctx.Value(core.HostKeyAliasKey).(string); ok && alias != "" {
+		return alias
+	}
+	return host
 }

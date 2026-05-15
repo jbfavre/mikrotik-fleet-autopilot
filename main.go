@@ -19,11 +19,8 @@ import (
 func main() {
 	var globalConfig core.Config
 	var hosts string
-	// SSH credentials - kept separate from config for security
-	var sshPassword string
-	var sshPassphrase string
 
-	cmd := buildCommand(&globalConfig, &hosts, &sshPassword, &sshPassphrase)
+	cmd := buildCommand(&globalConfig, &hosts)
 
 	if err := cmd.Run(context.WithValue(context.Background(), core.ConfigKey, &globalConfig), os.Args); err != nil {
 		slog.Error("command failed", "error", err)
@@ -32,7 +29,7 @@ func main() {
 
 // buildCommand creates and configures the CLI command structure.
 // This function is extracted to make the CLI testable.
-func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *string) *cli.Command {
+func buildCommand(globalConfig *core.Config, hosts *string) *cli.Command {
 	return &cli.Command{
 		Name:    "mikrotik-fleet-autopilot",
 		Version: "0.1.0",
@@ -58,20 +55,16 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				Destination: &globalConfig.User,
 			},
 			&cli.StringFlag{
-				Name:        "ssh-password",
-				Aliases:     []string{"p"},
-				Category:    "ssh",
-				Value:       "",
-				Usage:       "MikroTik router SSH password",
-				Destination: sshPassword,
+				Name:     "ssh-password",
+				Aliases:  []string{"p"},
+				Category: "ssh",
+				Usage:    "MikroTik router SSH password",
 			},
 			&cli.StringFlag{
-				Name:        "ssh-passphrase",
-				Aliases:     []string{"P"},
-				Category:    "ssh",
-				Value:       "",
-				Usage:       "User private SSH key passphrase",
-				Destination: sshPassphrase,
+				Name:     "ssh-passphrase",
+				Aliases:  []string{"P"},
+				Category: "ssh",
+				Usage:    "User private SSH key passphrase",
 			},
 			&cli.BoolFlag{
 				Name:        "skip-hostkey-check",
@@ -186,7 +179,17 @@ func buildCommand(globalConfig *core.Config, hosts, sshPassword, sshPassphrase *
 				}
 			}
 			// Create SSH manager with credentials (credentials stay encapsulated)
-			sshManager := ssh.NewSshManager(globalConfig.User, *sshPassword, *sshPassphrase)
+			var passwordPtr *string
+			if cmd.IsSet("ssh-password") {
+				v := cmd.String("ssh-password")
+				passwordPtr = &v
+			}
+			var passphrasePtr *string
+			if cmd.IsSet("ssh-passphrase") {
+				v := cmd.String("ssh-passphrase")
+				passphrasePtr = &v
+			}
+			sshManager := ssh.NewSshManager(globalConfig.User, passwordPtr, passphrasePtr)
 
 			// Make global config (without credentials) and SSH manager available in context
 			ctx = context.WithValue(ctx, core.ConfigKey, globalConfig)

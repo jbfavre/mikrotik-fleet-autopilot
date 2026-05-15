@@ -107,15 +107,15 @@ func CreateConnection(ctx context.Context, host string) (RunnerInterface, error)
 }
 
 // buildAuthMethods builds SSH authentication methods based on available credentials
-func buildAuthMethods(hostInfo *HostInfo, password, passphrase string) ([]ssh.AuthMethod, error) {
+func buildAuthMethods(hostInfo *HostInfo, password, passphrase *string) ([]ssh.AuthMethod, error) {
 	var authMethods []ssh.AuthMethod
 	var sshSigner ssh.Signer
 
-	// Try to load SSH key if passphrase is provided
-	if passphrase != "" && hostInfo.IdentityFile != "" {
+	// Try to load SSH key if passphrase is provided (even if empty)
+	if passphrase != nil && hostInfo.IdentityFile != "" {
 		slog.Debug("attempting to unlock private key with passphrase")
 		var err error
-		sshSigner, err = parseSshPrivateKey(hostInfo.IdentityFile, passphrase)
+		sshSigner, err = parseSshPrivateKey(hostInfo.IdentityFile, *passphrase)
 		if err != nil {
 			slog.Warn("failed to parse SSH private key with provided passphrase", "error", err)
 			return nil, err
@@ -124,21 +124,21 @@ func buildAuthMethods(hostInfo *HostInfo, password, passphrase string) ([]ssh.Au
 	}
 
 	// Build authentication methods
-	if sshSigner != nil && password != "" {
+	if sshSigner != nil && password != nil {
 		slog.Debug("using both SSH key and password authentication")
 		authMethods = []ssh.AuthMethod{
 			ssh.PublicKeys(sshSigner),
-			ssh.Password(password),
+			ssh.Password(*password),
 		}
 	} else if sshSigner != nil {
 		slog.Debug("using SSH key authentication")
 		authMethods = []ssh.AuthMethod{
 			ssh.PublicKeys(sshSigner),
 		}
-	} else if password != "" {
+	} else if password != nil {
 		slog.Debug("using password authentication")
 		authMethods = []ssh.AuthMethod{
-			ssh.Password(password),
+			ssh.Password(*password),
 		}
 	} else {
 		slog.Debug("no authentication method provided (need password or SSH key with passphrase)")

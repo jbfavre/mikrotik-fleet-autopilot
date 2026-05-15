@@ -24,6 +24,10 @@ func (s *stubRunner) Run(cmd string) (string, error) {
 	return s.runOutput, nil
 }
 
+func (s *stubRunner) RunInteractive(input string) (string, error) {
+	return s.runOutput, nil
+}
+
 func (s *stubRunner) Close() error {
 	return nil
 }

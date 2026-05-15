@@ -397,7 +397,7 @@ func TestBuild_HostKeyRejection(t *testing.T) {
 	}
 
 	address := fmt.Sprintf("127.0.0.1:%d", port)
-	_, err := buildTestConnection(ctx, address, "admin", "testpass", "", hostKeyCallback)
+	_, err := buildTestConnection(ctx, address, "admin", new("testpass"), nil, hostKeyCallback)
 	if err == nil {
 		t.Error("Build() expected error for rejected host key, got nil")
 	}

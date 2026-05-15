@@ -3,6 +3,7 @@ package ssh
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 
@@ -14,6 +15,7 @@ type RunnerInterface interface {
 	Close() error
 	IsAlreadyClosedError(err error) bool
 	Run(cmd string) (string, error)
+	RunInteractive(input string) (string, error)
 }
 
 // Runner implements RunnerInterface using an SSH client
@@ -64,6 +66,46 @@ func (r *Runner) Run(cmd string) (string, error) {
 		return "", fmt.Errorf("failed to run command: %v", err)
 	}
 	return b.String(), nil
+}
+
+func (r *Runner) RunInteractive(input string) (string, error) {
+	if r.client == nil {
+		slog.Warn("SSH connection not established")
+		return "", fmt.Errorf("SSH connection not established")
+	}
+
+	session, err := r.client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("failed to create session: %w", err)
+	}
+	defer session.Close()
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to get stdin pipe: %w", err)
+	}
+
+	var stdout bytes.Buffer
+	session.Stdout = &stdout
+
+	if err := session.RequestPty("xterm", 80, 40, ssh.TerminalModes{}); err != nil {
+		return "", fmt.Errorf("failed to request PTY: %w", err)
+	}
+
+	if err := session.Shell(); err != nil {
+		return "", fmt.Errorf("failed to start shell: %w", err)
+	}
+
+	if _, err := io.WriteString(stdin, input); err != nil {
+		return "", fmt.Errorf("failed to write input: %w", err)
+	}
+	_ = stdin.Close()
+
+	if err := session.Wait(); err != nil {
+		return stdout.String(), fmt.Errorf("interactive session failed: %w", err)
+	}
+
+	return stdout.String(), nil
 }
 
 // getClient returns the underlying SSH client

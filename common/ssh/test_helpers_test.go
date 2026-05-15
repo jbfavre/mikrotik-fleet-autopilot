@@ -138,7 +138,7 @@ func (s *mockSSHServer) stop() {
 // buildTestConnection is a helper function for tests to build SSH connections
 // with explicit control over parameters. It provides low-level access for testing
 // connection establishment with specific configurations.
-func buildTestConnection(ctx context.Context, host, username, password, passphrase string, hostKeyCallback HostKeyCallback) (Runner, error) {
+func buildTestConnection(ctx context.Context, host, username string, password, passphrase *string, hostKeyCallback HostKeyCallback) (Runner, error) {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return Runner{}, fmt.Errorf("context cancelled before connection: %w", err)

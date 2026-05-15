@@ -22,6 +22,7 @@ import (
 // EnrollConfig holds all enrollment configuration options
 type EnrollConfig struct {
 	Hostname           string
+	NewPassword        string
 	PreEnrollScript    string
 	PostEnrollScript   string
 	SkipUpdates        bool
@@ -55,6 +56,10 @@ var Command = []*cli.Command{
 				Name:  "hostname",
 				Value: "",
 				Usage: "Router hostname/identity to set (e.g., router1). Required for enrollment, not needed when using --update-hostkey-only.",
+			},
+			&cli.StringFlag{
+				Name:  "new-password",
+				Usage: "New password to set for the admin user (required — RouterOS mandates password change on factory-reset devices)",
 			},
 			&cli.StringFlag{
 				Name:  "pre-enroll-script",
@@ -103,6 +108,7 @@ var Command = []*cli.Command{
 			// Build enrollment configuration from CLI flags
 			enrollCfg := EnrollConfig{
 				Hostname:           cmd.String("hostname"),
+				NewPassword:        cmd.String("new-password"),
 				PreEnrollScript:    cmd.String("pre-enroll-script"),
 				PostEnrollScript:   cmd.String("post-enroll-script"),
 				SkipUpdates:        cmd.Bool("skip-updates"),
@@ -140,6 +146,9 @@ func runEnrollForHosts(ctx context.Context, hosts []string, cfg EnrollConfig, de
 		}
 		if cfg.Hostname == "" {
 			return fmt.Errorf("--hostname is required for enrollment")
+		}
+		if cfg.NewPassword == "" {
+			return fmt.Errorf("--new-password is required for enrollment (RouterOS mandates password change on factory-reset devices)")
 		}
 	}
 
@@ -248,13 +257,18 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 
 	// Step 1: Always update host key first
 	reportStep("⏳", "Updating SSH host key…")
-	fingerprint, err := updateHostKey(ctx, host, deps)
+	conn, fingerprint, err := updateHostKey(ctx, host, deps)
 	if err != nil {
 		slog.Error("failed to capture host key", "host", host, "error", err)
 		return fmt.Errorf("failed to capture host key: %w", err)
 	}
 	reportStep("✅", "SSH host key successfully updated")
 	slog.Debug("host key captured", "host", host, "hostname", hostname, "fingerprint", fingerprint)
+	defer func() {
+		if conn != nil {
+			_ = conn.Close()
+		}
+	}()
 
 	// Handle update-hostkey-only mode
 	if enrollCfg.UpdateHostKeyOnly {
@@ -262,20 +276,36 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 		return nil
 	}
 
-	// Step 2: Establish connection
+	// Step 2: Set admin password via mandatory interactive prompt
+	reportStep("⏳", "Setting admin password…")
+	if err := setAdminPassword(conn, enrollCfg.NewPassword); err != nil {
+		return err
+	}
+	reportStep("✅", "Admin password set successfully")
+	_ = conn.Close()
+	conn = nil
+
+	// Rebuild context with new password for all subsequent connections
+	oldManagerAny, err := core.GetSshManager(ctx)
+	if err != nil {
+		return err
+	}
+	oldManager, ok := oldManagerAny.(*ssh.SshManager)
+	if !ok || oldManager == nil {
+		return fmt.Errorf("failed to get manager from context")
+	}
+	newManager := oldManager.CloneWithPassword(new(enrollCfg.NewPassword))
+	ctx = context.WithValue(ctx, core.SshManagerKey, newManager)
+
+	// Step 3: Establish connection
 	reportStep("⏳", "Connecting to router…")
-	conn, err := connectToRouter(ctx, host, hostname, deps)
+	conn, err = connectToRouter(ctx, host, hostname, deps)
 	if err != nil {
 		return err
 	}
 	reportStep("✅", "Connected")
-	defer func() {
-		if conn != nil {
-			_ = conn.Close()
-		}
-	}()
 
-	// Step 3: Apply pre-enrollment script
+	// Step 4: Apply pre-enrollment script
 	reportStep("⏳", "Applying pre-enroll script…")
 	if err := applyPreEnrollScript(conn, enrollCfg); err != nil {
 		slog.Error("pre-enroll script failed", "host", host, "hostname", hostname, "error", err)
@@ -283,7 +313,7 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	}
 	reportStep("✅", "Pre-enroll script applied successfully")
 
-	// Step 4: Set router identity
+	// Step 5: Set router identity
 	reportStep("⏳", "Setting router identity…")
 	if err := setRouterIdentity(conn, hostname); err != nil {
 		slog.Error("failed to set router identity", "host", host, "hostname", hostname, "error", err)
@@ -291,7 +321,7 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	}
 	reportStep("✅", "Router identity set successfully")
 
-	// Step 5: Apply updates (optional)
+	// Step 6: Apply updates (optional)
 	if enrollCfg.SkipUpdates {
 		reportStep("❓", "Skipping updates…")
 		slog.Warn("skipping updates", "host", host, "hostname", hostname, "--skip-updates value", enrollCfg.SkipUpdates)
@@ -305,7 +335,7 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 		reportStep("✅", "Updates applied successfully")
 	}
 
-	// Step 6: Export configuration (optional)
+	// Step 7: Export configuration (optional)
 	if enrollCfg.SkipExport {
 		reportStep("❓", "Skipping export…")
 		slog.Warn("skipping export", "host", host, "hostname", hostname, "--skip-export value", enrollCfg.SkipExport)
@@ -319,7 +349,7 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 		reportStep("✅", "Configuration successfully exported")
 	}
 
-	// Step 7: Apply post-enrollment script
+	// Step 8: Apply post-enrollment script
 	reportStep("⏳", "Applying post-enroll script…")
 	if err := applyPostEnrollScript(conn, enrollCfg); err != nil {
 		slog.Error("post-enroll script failed", "host", host, "hostname", hostname, "error", err)
@@ -327,6 +357,15 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	}
 	reportStep("✅", "Post-enroll script applied successfully")
 
+	return nil
+}
+
+func setAdminPassword(conn ssh.RunnerInterface, newPassword string) error {
+	input := fmt.Sprintf("%s\n%s\n", newPassword, newPassword)
+	_, err := conn.RunInteractive(input)
+	if err != nil {
+		return fmt.Errorf("failed to set admin password: %w", err)
+	}
 	return nil
 }
 
@@ -446,10 +485,10 @@ func setRouterIdentity(conn ssh.RunnerInterface, hostname string) error {
 
 // updateHostKey captures the SSH host key for the first time or updates an existing one,
 // without performing full enrollment.
-func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (string, error) {
+func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (ssh.RunnerInterface, string, error) {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
-		return "", fmt.Errorf("context cancelled: %w", err)
+		return nil, "", fmt.Errorf("context cancelled: %w", err)
 	}
 
 	slog.Info("starting host key update", "host", host)
@@ -467,18 +506,16 @@ func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (s
 	conn, err := deps.SSHConnectionFactory(ctx, host)
 	if err != nil {
 		slog.Error("failed to connect to router", "host", host, "error", err)
-		return "", fmt.Errorf("failed to connect to device: %w", err)
+		return nil, "", fmt.Errorf("failed to connect to device: %w", err)
 	}
-	defer func() {
-		_ = conn.Close()
-	}()
 	slog.Debug("successfully connected and captured host key", "host", host)
 
 	// Load new host key info
 	newInfo, err := ssh.LoadHostKeyInfo(host)
 	if err != nil {
 		slog.Error("failed to load new host key", "host", host, "error", err)
-		return "", fmt.Errorf("failed to load new host key: %w", err)
+		_ = conn.Close()
+		return nil, "", fmt.Errorf("failed to load new host key: %w", err)
 	}
 
 	// Log the details
@@ -492,7 +529,7 @@ func updateHostKey(ctx context.Context, host string, deps EnrollDependencies) (s
 		slog.Info("host key captured for first time", "host", host, "algorithm", newInfo.Algorithm, "fingerprint", newInfo.Fingerprint)
 	}
 
-	return newInfo.Fingerprint, nil
+	return conn, newInfo.Fingerprint, nil
 }
 
 // deleteExistingEnrollment removes all enrollment artifacts for a host.

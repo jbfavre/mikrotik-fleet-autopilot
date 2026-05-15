@@ -410,7 +410,7 @@ Host testhost
 	}
 
 	// Use alias from SSH config
-	conn, err := buildTestConnection(ctx, "testhost", "", "testpass", "", hostKeyCallback)
+	conn, err := buildTestConnection(ctx, "testhost", "", new("testpass"), nil, hostKeyCallback)
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}

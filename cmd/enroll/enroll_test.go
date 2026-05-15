@@ -469,7 +469,7 @@ func TestEnroll_PasswordChangeStepAndManagerRotation(t *testing.T) {
 		ExportConfigFunc: func(context.Context, string, string, bool, string) error { return nil },
 	}
 
-	ctx := context.WithValue(context.Background(), core.SshManagerKey, ssh.NewSshManager("admin", core.StringPtr(""), nil))
+	ctx := context.WithValue(context.Background(), core.SshManagerKey, ssh.NewSshManager("admin", new(""), nil))
 	cfg := EnrollConfig{
 		Hostname:           "router1",
 		NewPassword:        "new-password",
@@ -511,7 +511,7 @@ func TestEnroll_PasswordChangeFailureStopsEnrollment(t *testing.T) {
 			}, nil
 		},
 	}
-	ctx := context.WithValue(context.Background(), core.SshManagerKey, ssh.NewSshManager("admin", core.StringPtr(""), nil))
+	ctx := context.WithValue(context.Background(), core.SshManagerKey, ssh.NewSshManager("admin", new(""), nil))
 	cfg := EnrollConfig{
 		Hostname:           "router1",
 		NewPassword:        "new-password",
@@ -2353,7 +2353,7 @@ func TestEnrollWorkflow(t *testing.T) {
 				Hosts: hosts,
 			}
 			ctx = context.WithValue(ctx, core.ConfigKey, coreConfig)
-			ctx = context.WithValue(ctx, core.SshManagerKey, ssh.NewSshManager("admin", core.StringPtr(""), nil))
+			ctx = context.WithValue(ctx, core.SshManagerKey, ssh.NewSshManager("admin", new(""), nil))
 
 			// Execute enroll
 			err := enroll(ctx, tt.host, cfg, deps, nil)

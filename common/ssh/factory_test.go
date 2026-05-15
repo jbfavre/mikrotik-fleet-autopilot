@@ -106,8 +106,8 @@ func TestCreateConnection_CredentialsFlow(t *testing.T) {
 			name: "with all credentials",
 			manager: SshManager{
 				user:       "admin",
-				password:   core.StringPtr("password123"),
-				passphrase: core.StringPtr("passphrase123"),
+				password:   new("password123"),
+				passphrase: new("passphrase123"),
 			},
 			expectError: true, // Will fail connection but credentials are extracted
 		},
@@ -260,7 +260,7 @@ func TestCreateConnection_ErrorPaths(t *testing.T) {
 			host: "",
 			manager: SshManager{
 				user:     "admin",
-				password: core.StringPtr("pass"),
+				password: new("pass"),
 			},
 			wantErr: true,
 		},
@@ -269,7 +269,7 @@ func TestCreateConnection_ErrorPaths(t *testing.T) {
 			host: ":::invalid",
 			manager: SshManager{
 				user:     "admin",
-				password: core.StringPtr("pass"),
+				password: new("pass"),
 			},
 			wantErr: true,
 		},
@@ -302,7 +302,7 @@ func TestBuildAuthMethods_PasswordOnly(t *testing.T) {
 		User:     "admin",
 	}
 
-	methods, err := buildAuthMethods(hostInfo, core.StringPtr("testpass123"), nil)
+	methods, err := buildAuthMethods(hostInfo, new("testpass123"), nil)
 	if err != nil {
 		t.Fatalf("buildAuthMethods() unexpected error = %v", err)
 	}
@@ -339,7 +339,7 @@ func TestBuildAuthMethods_WithKey(t *testing.T) {
 	}
 
 	// With password only (no passphrase), should use password auth
-	methods, err := buildAuthMethods(hostInfo, core.StringPtr("testpass"), nil)
+	methods, err := buildAuthMethods(hostInfo, new("testpass"), nil)
 	if err != nil {
 		t.Errorf("buildAuthMethods() unexpected error with password: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestBuildAuthMethods_WithBothKeyAndPassword(t *testing.T) {
 
 	// With both passphrase and password, should attempt key loading first
 	// Will fail because key doesn't exist, but tests the logic path
-	methods, err := buildAuthMethods(hostInfo, core.StringPtr("testpass"), core.StringPtr("testphrase"))
+	methods, err := buildAuthMethods(hostInfo, new("testpass"), new("testphrase"))
 	if err == nil {
 		t.Error("buildAuthMethods() expected error with nonexistent key file, got nil")
 	}
@@ -372,7 +372,7 @@ func TestBuildAuthMethods_WithBothKeyAndPassword(t *testing.T) {
 func TestCreateConnection_ContextCancellation(t *testing.T) {
 	manager := SshManager{
 		user:     "admin",
-		password: core.StringPtr("testpass"),
+		password: new("testpass"),
 	}
 	// Test that CreateConnection respects context cancellation
 	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), core.SshManagerKey, &manager))
@@ -427,7 +427,7 @@ func TestBuildAuthMethods_KeyOnly(t *testing.T) {
 	}
 
 	// With only passphrase (no password), should attempt key auth
-	methods, err := buildAuthMethods(hostInfo, nil, core.StringPtr("testphrase"))
+	methods, err := buildAuthMethods(hostInfo, nil, new("testphrase"))
 	// Should fail because key is invalid
 	if err == nil {
 		t.Error("buildAuthMethods() expected error with invalid key, got nil")
@@ -447,7 +447,7 @@ func TestBuildAuthMethods_EmptyIdentityFile(t *testing.T) {
 	}
 
 	// With passphrase but no identity file, can't use key auth, should use password
-	methods, err := buildAuthMethods(hostInfo, core.StringPtr("testpass"), core.StringPtr("testphrase"))
+	methods, err := buildAuthMethods(hostInfo, new("testpass"), new("testphrase"))
 	if err != nil {
 		t.Errorf("buildAuthMethods() unexpected error with password: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestBuildAuthMethods_EmptyPasswordProvided(t *testing.T) {
 		User:     "admin",
 	}
 
-	methods, err := buildAuthMethods(hostInfo, core.StringPtr(""), nil)
+	methods, err := buildAuthMethods(hostInfo, new(""), nil)
 	if err != nil {
 		t.Fatalf("buildAuthMethods() unexpected error = %v", err)
 	}
@@ -480,7 +480,7 @@ func TestBuildAuthMethods_EmptyPassphraseWithIdentityFileAttemptsParse(t *testin
 		IdentityFile: "/nonexistent/key",
 	}
 
-	_, err := buildAuthMethods(hostInfo, nil, core.StringPtr(""))
+	_, err := buildAuthMethods(hostInfo, nil, new(""))
 	if err == nil {
 		t.Fatal("buildAuthMethods() expected key parse error for empty passphrase with identity file")
 	}

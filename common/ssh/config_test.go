@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
-	"jb.favre/mikrotik-fleet-autopilot/common/core"
 )
 
 func TestDefaultConfigReader_ReadConfig(t *testing.T) {
@@ -411,7 +410,7 @@ Host testhost
 	}
 
 	// Use alias from SSH config
-	conn, err := buildTestConnection(ctx, "testhost", "", core.StringPtr("testpass"), nil, hostKeyCallback)
+	conn, err := buildTestConnection(ctx, "testhost", "", new("testpass"), nil, hostKeyCallback)
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}

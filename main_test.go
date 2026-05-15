@@ -323,7 +323,7 @@ func TestSshManagerCreation(t *testing.T) {
 	password := "test-pass"
 	passphrase := "test-phrase"
 
-	sshManager := ssh.NewSshManager(user, core.StringPtr(password), core.StringPtr(passphrase))
+	sshManager := ssh.NewSshManager(user, new(password), new(passphrase))
 
 	if sshManager == nil {
 		t.Error("NewSshManager returned nil")
@@ -357,7 +357,7 @@ func TestBuildCommandWithEmptyCredentials(t *testing.T) {
 	}
 
 	// SSH manager should be creatable with empty credentials
-	sshManager := ssh.NewSshManager("admin", core.StringPtr(""), core.StringPtr(""))
+	sshManager := ssh.NewSshManager("admin", new(""), new(""))
 	if sshManager == nil {
 		t.Error("NewSshManager failed with empty credentials")
 	}

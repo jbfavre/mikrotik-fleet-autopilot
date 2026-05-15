@@ -294,7 +294,7 @@ func enroll(ctx context.Context, host string, enrollCfg EnrollConfig, deps Enrol
 	if !ok || oldManager == nil {
 		return fmt.Errorf("failed to get manager from context")
 	}
-	newManager := oldManager.CloneWithPassword(core.StringPtr(enrollCfg.NewPassword))
+	newManager := oldManager.CloneWithPassword(new(enrollCfg.NewPassword))
 	ctx = context.WithValue(ctx, core.SshManagerKey, newManager)
 
 	// Step 3: Establish connection

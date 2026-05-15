@@ -3,13 +3,11 @@ package ssh
 import (
 	"strings"
 	"testing"
-
-	"jb.favre/mikrotik-fleet-autopilot/common/core"
 )
 
 func TestNewSshManager(t *testing.T) {
-	password := core.StringPtr("password123")
-	passphrase := core.StringPtr("keypass456")
+	password := new("password123")
+	passphrase := new("keypass456")
 
 	manager := NewSshManager("admin", password, passphrase)
 	if manager == nil {
@@ -43,15 +41,15 @@ func TestSshManager_String(t *testing.T) {
 		},
 		{
 			name:       "empty credentials",
-			password:   core.StringPtr(""),
-			passphrase: core.StringPtr(""),
+			password:   new(""),
+			passphrase: new(""),
 			wantPass:   "empty (hidden)",
 			wantPhrase: "empty (hidden)",
 		},
 		{
 			name:       "non-empty credentials",
-			password:   core.StringPtr("secretpassword123"),
-			passphrase: core.StringPtr("keypassphrase456"),
+			password:   new("secretpassword123"),
+			passphrase: new("keypassphrase456"),
 			wantPass:   "yes (hidden)",
 			wantPhrase: "yes (hidden)",
 		},
@@ -82,9 +80,9 @@ func TestSshManager_String(t *testing.T) {
 }
 
 func TestSshManager_CloneWithPassword(t *testing.T) {
-	oldPassword := core.StringPtr("")
-	passphrase := core.StringPtr("ssh-key-passphrase")
-	newPassword := core.StringPtr("new-password")
+	oldPassword := new("")
+	passphrase := new("ssh-key-passphrase")
+	newPassword := new("new-password")
 
 	manager := NewSshManager("admin", oldPassword, passphrase)
 	cloned := manager.CloneWithPassword(newPassword)
@@ -105,12 +103,12 @@ func TestSshManager_CloneWithPassword(t *testing.T) {
 
 func BenchmarkNewSshManager(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_ = NewSshManager("admin", core.StringPtr("password123"), core.StringPtr("passphrase456"))
+		_ = NewSshManager("admin", new("password123"), new("passphrase456"))
 	}
 }
 
 func BenchmarkSshManager_GetUser(b *testing.B) {
-	manager := NewSshManager("admin", core.StringPtr("password"), core.StringPtr("passphrase"))
+	manager := NewSshManager("admin", new("password"), new("passphrase"))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
-	"jb.favre/mikrotik-fleet-autopilot/common/core"
 )
 
 func TestDefaultRunner_IsAlreadyClosedError(t *testing.T) {
@@ -129,7 +128,7 @@ func TestConnection_Run_WithMockServer(t *testing.T) {
 	}
 
 	address := fmt.Sprintf("127.0.0.1:%d", port)
-	conn, err := buildTestConnection(ctx, address, "admin", core.StringPtr("testpass"), nil, hostKeyCallback)
+	conn, err := buildTestConnection(ctx, address, "admin", new("testpass"), nil, hostKeyCallback)
 	if err != nil {
 		t.Fatalf("Failed to build connection: %v", err)
 	}
@@ -162,7 +161,7 @@ func TestConnection_Close_WithMockServer(t *testing.T) {
 	}
 
 	address := fmt.Sprintf("127.0.0.1:%d", port)
-	conn, err := buildTestConnection(ctx, address, "admin", core.StringPtr("testpass"), nil, hostKeyCallback)
+	conn, err := buildTestConnection(ctx, address, "admin", new("testpass"), nil, hostKeyCallback)
 	if err != nil {
 		t.Fatalf("Failed to build connection: %v", err)
 	}

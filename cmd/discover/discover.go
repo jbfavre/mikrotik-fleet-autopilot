@@ -2,6 +2,7 @@ package discover
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -58,6 +59,9 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string)
 		slog.Info("starting MNDP discovery", "interface", cfg.Interface, "timeout", cfg.MNDPTimeout)
 		devices, err := listenMNDP(ctx, cfg.Interface, cfg.MNDPTimeout)
 		if err != nil {
+			if errors.Is(err, mndp.ErrDuplicateIdentity) {
+				return err
+			}
 			slog.Warn("MNDP discovery failed", "error", err)
 			// non-fatal: continue with empty host list (will error below)
 		}
@@ -160,7 +164,10 @@ func expandTopologyFromLLDP(ctx context.Context, topo *topology) error {
 	}
 
 	for {
-		candidates := collectLLDPTargets(ctx, topo, seen)
+		candidates, err := collectLLDPTargets(ctx, topo, seen)
+		if err != nil {
+			return err
+		}
 		if len(candidates) == 0 {
 			return nil
 		}
@@ -211,18 +218,22 @@ func expandTopologyFromLLDP(ctx context.Context, topo *topology) error {
 }
 
 type lldpDiscoveryCandidate struct {
-	target string
-	ip     string
-	order  int
+	target     string
+	ip         string
+	order      int
+	sourceHost string
+	address    string
+	address6   string
+	mac        string
 }
 
-func collectLLDPTargets(ctx context.Context, topo *topology, seen map[string]struct{}) []lldpDiscoveryCandidate {
+func collectLLDPTargets(ctx context.Context, topo *topology, seen map[string]struct{}) ([]lldpDiscoveryCandidate, error) {
 	if topo == nil {
-		return nil
+		return nil, nil
 	}
 
 	candidates := make([]lldpDiscoveryCandidate, 0)
-	seenTargets := make(map[string]struct{})
+	seenTargets := make(map[string]lldpDiscoveryCandidate)
 	order := 0
 
 	for _, sourceHost := range topo.orderedHosts {
@@ -238,11 +249,23 @@ func collectLLDPTargets(ctx context.Context, topo *topology, seen map[string]str
 			if _, ok := seen[target]; ok {
 				continue
 			}
-			if _, ok := seenTargets[target]; ok {
+			candidate := lldpDiscoveryCandidate{
+				target:     target,
+				ip:         resolvedIP,
+				order:      order,
+				sourceHost: sourceHost,
+				address:    strings.TrimSpace(neighbor.Address),
+				address6:   strings.TrimSpace(neighbor.Address6),
+				mac:        strings.TrimSpace(neighbor.MacAddress),
+			}
+			if existing, ok := seenTargets[target]; ok {
+				if conflictingLLDPTarget(existing, candidate) {
+					return nil, fmt.Errorf("duplicate device identity %q discovered via LLDP with conflicting metadata (%s vs %s) — identities must be unique across the fleet", target, describeLLDPTarget(existing), describeLLDPTarget(candidate))
+				}
 				continue
 			}
-			seenTargets[target] = struct{}{}
-			candidates = append(candidates, lldpDiscoveryCandidate{target: target, ip: resolvedIP, order: order})
+			seenTargets[target] = candidate
+			candidates = append(candidates, candidate)
 			order++
 		}
 	}
@@ -251,7 +274,34 @@ func collectLLDPTargets(ctx context.Context, topo *topology, seen map[string]str
 		return candidates[i].order < candidates[j].order
 	})
 
-	return candidates
+	return candidates, nil
+}
+
+func conflictingLLDPTarget(first lldpDiscoveryCandidate, second lldpDiscoveryCandidate) bool {
+	return conflictingNonEmptyValue(first.address, second.address) ||
+		conflictingNonEmptyValue(first.address6, second.address6) ||
+		conflictingNonEmptyValue(first.mac, second.mac)
+}
+
+func conflictingNonEmptyValue(first string, second string) bool {
+	return first != "" && second != "" && first != second
+}
+
+func describeLLDPTarget(candidate lldpDiscoveryCandidate) string {
+	parts := []string{fmt.Sprintf("source=%s", candidate.sourceHost)}
+	if candidate.address != "" {
+		parts = append(parts, fmt.Sprintf("address=%s", candidate.address))
+	}
+	if candidate.address6 != "" {
+		parts = append(parts, fmt.Sprintf("address6=%s", candidate.address6))
+	}
+	if candidate.mac != "" {
+		parts = append(parts, fmt.Sprintf("mac=%s", candidate.mac))
+	}
+	if candidate.ip != "" {
+		parts = append(parts, fmt.Sprintf("dns-ip=%s", candidate.ip))
+	}
+	return strings.Join(parts, " ")
 }
 
 func resolveLLDPTarget(ctx context.Context, neighbor *lldp.Neighbor) (string, string) {

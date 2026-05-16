@@ -133,7 +133,7 @@ mikrotik-fleet-autopilot --host <ip-or-identity> enroll [options]
 # Initial enrollment by IP before DNS exists
 mikrotik-fleet-autopilot --host 192.168.1.1 enroll --hostname router1 --new-password secret
 
-# Re-enroll a device by IP while keeping identity-based artifacts
+# Re-enroll a device by IP after removing the existing identity-based artifacts
 mikrotik-fleet-autopilot --host 192.168.1.1 enroll --hostname router1 --new-password secret --force
 
 # Refresh host keys for already enrolled devices by identity

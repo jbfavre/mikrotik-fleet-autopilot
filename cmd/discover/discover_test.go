@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"reflect"
@@ -743,6 +744,24 @@ func TestRunDiscoverForHosts_MNDPListenError(t *testing.T) {
 	}
 }
 
+func TestRunDiscoverForHosts_MNDPDuplicateIdentityListenerErrorPropagates(t *testing.T) {
+	originalListen := listenMNDP
+	listenMNDP = func(_ context.Context, _ string, _ time.Duration) ([]*mndp.Device, error) {
+		return nil, fmt.Errorf("%w %q found on 2 devices (MACs: aa:bb:cc:dd:ee:01, aa:bb:cc:dd:ee:02) — device identities must be unique", mndp.ErrDuplicateIdentity, "router.home")
+	}
+	defer func() { listenMNDP = originalListen }()
+
+	ctx := context.WithValue(context.Background(), core.ConfigKey, &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second})
+
+	err := runDiscoverForHosts(ctx, io.Discard, "")
+	if err == nil {
+		t.Fatal("runDiscoverForHosts() expected duplicate identity listener error, got nil")
+	}
+	if !errors.Is(err, mndp.ErrDuplicateIdentity) {
+		t.Fatalf("expected duplicate identity listener error to propagate, got %v", err)
+	}
+}
+
 func TestBuildTopologyGraph_ConnectedToUsesIdentity(t *testing.T) {
 	topo := &topology{
 		orderedHosts: []string{"router.home"},
@@ -935,5 +954,37 @@ func TestRunDiscoverForHosts_LLDPPromotedHostIsSSHTarget(t *testing.T) {
 
 	if !reflect.DeepEqual(connectedHosts, []string{"router1", "router2"}) {
 		t.Fatalf("expected second-pass SSH target to be promoted LLDP identity, got %v", connectedHosts)
+	}
+}
+
+func TestExpandTopologyFromLLDP_ConflictingDuplicateIdentityReturnsError(t *testing.T) {
+	originalLookup := lookupIPv4ByIdentity
+	lookupIPv4ByIdentity = func(_ context.Context, identity string) ([]net.IP, error) {
+		if identity != "router2" {
+			return nil, errors.New("not found")
+		}
+		return []net.IP{net.ParseIP("192.168.1.2")}, nil
+	}
+	defer func() { lookupIPv4ByIdentity = originalLookup }()
+
+	topo := &topology{
+		orderedHosts: []string{"router1"},
+		results: map[string]*lldp.ParseResult{
+			"router1": {
+				Neighbors: []*lldp.Neighbor{
+					{Identity: "router2", Address: "192.168.1.2", MacAddress: "aa:bb:cc:dd:ee:01"},
+					{Identity: "router2", Address: "192.168.1.3", MacAddress: "aa:bb:cc:dd:ee:02"},
+				},
+			},
+		},
+		errors: map[string]error{},
+	}
+
+	err := expandTopologyFromLLDP(context.Background(), topo)
+	if err == nil {
+		t.Fatal("expandTopologyFromLLDP() expected conflicting duplicate identity error, got nil")
+	}
+	if !strings.Contains(err.Error(), `duplicate device identity "router2" discovered via LLDP`) {
+		t.Fatalf("expected conflicting duplicate identity error, got %v", err)
 	}
 }

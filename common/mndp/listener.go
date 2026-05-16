@@ -15,6 +15,9 @@ import (
 
 const listenReadPollInterval = 250 * time.Millisecond
 
+// ErrDuplicateIdentity indicates that MNDP observed multiple devices sharing the same identity.
+var ErrDuplicateIdentity = errors.New("mndp: duplicate identity")
+
 // Listen sends an MNDP probe on ifaceName (or all eligible interfaces when empty)
 // and collects responses for the duration of timeout.
 // Devices are grouped by identity and deduplicated by MAC address inside each identity group.
@@ -215,7 +218,7 @@ func deduplicateDevices(devByIdentity map[string]map[string]*Device) ([]*Device,
 		sort.Strings(macs)
 
 		if len(macs) > 1 {
-			return nil, fmt.Errorf("mndp: duplicate identity %q found on %d devices (MACs: %s) — device identities must be unique", identity, len(macs), strings.Join(macs, ", "))
+			return nil, fmt.Errorf("%w %q found on %d devices (MACs: %s) — device identities must be unique", ErrDuplicateIdentity, identity, len(macs), strings.Join(macs, ", "))
 		}
 
 		for _, mac := range macs {

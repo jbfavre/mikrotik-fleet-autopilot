@@ -1,7 +1,9 @@
 package mndp
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net"
 	"strings"
 	"testing"
@@ -84,26 +86,29 @@ func TestSendProbe_SendsToBroadcast(t *testing.T) {
 	}
 }
 
-func TestDeduplicateDevices_IdentityCollisionsDisambiguatedWithStableSuffix(t *testing.T) {
+func TestDeduplicateDevices_MultiHomedIdentityMergedWithoutDisambiguation(t *testing.T) {
 	devByIdentity := map[string]map[string]*Device{
 		"router.home": {
-			"aa:bb:cc:dd:ee:02": {MACAddress: "aa:bb:cc:dd:ee:02", Identity: "router.home", BaseIdentity: "router.home"},
-			"aa:bb:cc:dd:ee:01": {MACAddress: "aa:bb:cc:dd:ee:01", Identity: "router.home", BaseIdentity: "router.home"},
+			"aa:bb:cc:dd:ee:02": {MACAddress: "aa:bb:cc:dd:ee:02", Identity: "router.home", IPv4Address: "192.168.1.2", InterfaceName: "eth2", SourceInterfaceName: "ether2"},
+			"aa:bb:cc:dd:ee:01": {MACAddress: "aa:bb:cc:dd:ee:01", Identity: "router.home", IPv4Address: "192.168.1.1", InterfaceName: "eth1", SourceInterfaceName: "ether1"},
 		},
 		"switch.home": {
-			"aa:bb:cc:dd:ee:03": {MACAddress: "aa:bb:cc:dd:ee:03", Identity: "switch.home", BaseIdentity: "switch.home"},
+			"aa:bb:cc:dd:ee:03": {MACAddress: "aa:bb:cc:dd:ee:03", Identity: "switch.home", IPv4Address: "192.168.2.1"},
 		},
 	}
 
 	result := deduplicateDevices(devByIdentity)
-	if len(result) != 3 {
-		t.Fatalf("deduplicateDevices() returned %d devices, want 3", len(result))
+	if len(result) != 2 {
+		t.Fatalf("deduplicateDevices() returned %d devices, want 2", len(result))
 	}
-	if result[0].Identity != "router.home #1" || result[1].Identity != "router.home #2" || result[2].Identity != "switch.home" {
-		t.Fatalf("deduplicateDevices() got identities %q, %q, %q", result[0].Identity, result[1].Identity, result[2].Identity)
+	if result[0].Identity != "router.home" || result[1].Identity != "switch.home" {
+		t.Fatalf("deduplicateDevices() got identities %q and %q", result[0].Identity, result[1].Identity)
 	}
-	if result[0].MACAddress != "aa:bb:cc:dd:ee:01" || result[1].MACAddress != "aa:bb:cc:dd:ee:02" {
-		t.Fatalf("expected deterministic MAC ordering in collision suffix assignment, got %q then %q", result[0].MACAddress, result[1].MACAddress)
+	if len(result[0].Interfaces) != 2 {
+		t.Fatalf("expected 2 interfaces for merged multi-homed device, got %d", len(result[0].Interfaces))
+	}
+	if result[0].Interfaces[0].MACAddress != "aa:bb:cc:dd:ee:01" || result[0].Interfaces[1].MACAddress != "aa:bb:cc:dd:ee:02" {
+		t.Fatalf("expected stable interface ordering by MAC, got %q then %q", result[0].Interfaces[0].MACAddress, result[0].Interfaces[1].MACAddress)
 	}
 }
 
@@ -113,22 +118,19 @@ func TestAddObservation_MergesSameMACAndAccumulatesIPv4s(t *testing.T) {
 	first := &Device{
 		MACAddress:    "aa:bb:cc:dd:ee:ff",
 		Identity:      "router.home",
-		BaseIdentity:  "router.home",
 		IPv4Address:   "192.168.1.10",
 		IPv4Addresses: []string{"192.168.1.10"},
 	}
 	second := &Device{
 		MACAddress:    "aa:bb:cc:dd:ee:ff",
 		Identity:      "router.home",
-		BaseIdentity:  "router.home",
 		IPv4Address:   "192.168.1.11",
 		IPv4Addresses: []string{"192.168.1.11"},
 	}
 	duplicate := &Device{
-		MACAddress:   "aa:bb:cc:dd:ee:ff",
-		Identity:     "router.home",
-		BaseIdentity: "router.home",
-		IPv4Address:  "192.168.1.11",
+		MACAddress:  "aa:bb:cc:dd:ee:ff",
+		Identity:    "router.home",
+		IPv4Address: "192.168.1.11",
 	}
 
 	addObservation(devByIdentity, first)
@@ -147,6 +149,27 @@ func TestAddObservation_MergesSameMACAndAccumulatesIPv4s(t *testing.T) {
 	}
 	if result[0].IPv4Addresses[0] != "192.168.1.10" || result[0].IPv4Addresses[1] != "192.168.1.11" {
 		t.Fatalf("unexpected observed IPv4 order/content: %v", result[0].IPv4Addresses)
+	}
+	if len(result[0].Interfaces) != 2 {
+		t.Fatalf("expected 2 interface records for merged observations, got %d", len(result[0].Interfaces))
+	}
+}
+
+func TestDeduplicateDevices_WarnsOnMetadataConflict(t *testing.T) {
+	devByIdentity := map[string]map[string]*Device{
+		"router.home": {
+			"aa:bb:cc:dd:ee:01": {MACAddress: "aa:bb:cc:dd:ee:01", Identity: "router.home", Board: "RB5009", Version: "7.18.2", Platform: "MikroTik"},
+			"aa:bb:cc:dd:ee:02": {MACAddress: "aa:bb:cc:dd:ee:02", Identity: "router.home", Board: "CCR2116", Version: "7.18.2", Platform: "MikroTik"},
+		},
+	}
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	defer slog.SetDefault(old)
+
+	deduplicateDevices(devByIdentity)
+	if !strings.Contains(logs.String(), "inconsistent metadata across interfaces for identity") {
+		t.Fatalf("expected warning log about metadata conflict, got %q", logs.String())
 	}
 }
 

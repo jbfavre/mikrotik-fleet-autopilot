@@ -18,8 +18,9 @@ const listenReadPollInterval = 250 * time.Millisecond
 // Listen sends an MNDP probe on ifaceName (or all eligible interfaces when empty)
 // and collects responses for the duration of timeout.
 // Devices are grouped by identity and deduplicated by MAC address inside each identity group.
-// If multiple MAC addresses share the same identity, returned device identities are disambiguated
-// deterministically as "<identity> #<n>" using MAC lexical ordering.
+// If multiple MAC addresses share the same identity (multi-homed device), the
+// returned device merges observations under the same identity and keeps all
+// interface records in Device.Interfaces.
 // Returns the deduplicated slice, sorted by Identity.
 func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*Device, error) {
 	if timeout <= 0 {
@@ -144,11 +145,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 }
 
 func addObservation(devByIdentity map[string]map[string]*Device, candidate *Device) {
-	identity := strings.TrimSpace(candidate.BaseIdentity)
-	if identity == "" {
-		identity = strings.TrimSpace(candidate.Identity)
-	}
-	candidate.BaseIdentity = identity
+	identity := strings.TrimSpace(candidate.Identity)
 
 	devByMAC, ok := devByIdentity[identity]
 	if !ok {
@@ -161,6 +158,7 @@ func addObservation(devByIdentity map[string]map[string]*Device, candidate *Devi
 		if candidate.IPv4Address != "" && len(candidate.IPv4Addresses) == 0 {
 			candidate.IPv4Addresses = []string{candidate.IPv4Address}
 		}
+		candidate.Interfaces = mergeInterfaces(candidate.Interfaces, buildCandidateInterfaces(candidate))
 		devByMAC[candidate.MACAddress] = candidate
 		return
 	}
@@ -178,6 +176,7 @@ func addObservation(devByIdentity map[string]map[string]*Device, candidate *Devi
 	if candidate.IPv6Address != "" {
 		existing.IPv6Address = candidate.IPv6Address
 	}
+	existing.Interfaces = mergeInterfaces(existing.Interfaces, buildCandidateInterfaces(candidate))
 }
 
 // SendProbe sends an MNDP discovery request packet on conn.
@@ -206,7 +205,7 @@ func deduplicateDevices(devByIdentity map[string]map[string]*Device) []*Device {
 	}
 	sort.Strings(identities)
 
-	devices := make([]*Device, 0)
+	devices := make([]*Device, 0, len(identities))
 	for _, identity := range identities {
 		byMAC := devByIdentity[identity]
 		macs := make([]string, 0, len(byMAC))
@@ -215,17 +214,40 @@ func deduplicateDevices(devByIdentity map[string]map[string]*Device) []*Device {
 		}
 		sort.Strings(macs)
 
-		collision := len(macs) > 1
-		for idx, mac := range macs {
+		merged := byMAC[macs[0]]
+		merged.Identity = identity
+		merged.Interfaces = mergeInterfaces(merged.Interfaces, buildCandidateInterfaces(merged))
+		for _, mac := range macs[1:] {
 			d := byMAC[mac]
-			d.BaseIdentity = identity
-			if collision {
-				d.Identity = fmt.Sprintf("%s #%d", identity, idx+1)
-			} else {
-				d.Identity = identity
+			merged.Interfaces = mergeInterfaces(merged.Interfaces, buildCandidateInterfaces(d))
+			merged.IPv4Addresses = mergeIPv4Addresses(merged.IPv4Addresses, d.IPv4Addresses, d.IPv4Address)
+			if d.IPv4Address != "" {
+				merged.IPv4Address = d.IPv4Address
 			}
-			devices = append(devices, d)
+			if d.IPv6Address != "" {
+				merged.IPv6Address = d.IPv6Address
+			}
+			if d.SourceInterfaceName != "" {
+				merged.SourceInterfaceName = d.SourceInterfaceName
+			}
+			if d.InterfaceName != "" {
+				merged.InterfaceName = d.InterfaceName
+			}
+			if metadataConflict(merged.Board, d.Board) || metadataConflict(merged.Version, d.Version) || metadataConflict(merged.Platform, d.Platform) {
+				slog.Warn("mndp: inconsistent metadata across interfaces for identity",
+					"identity", identity,
+					"mac_a", merged.MACAddress,
+					"mac_b", d.MACAddress,
+					"board_a", merged.Board,
+					"board_b", d.Board,
+					"version_a", merged.Version,
+					"version_b", d.Version,
+					"platform_a", merged.Platform,
+					"platform_b", d.Platform,
+				)
+			}
 		}
+		devices = append(devices, merged)
 	}
 
 	return devices
@@ -239,4 +261,69 @@ func appendUnique(values []string, candidate string) []string {
 		return values
 	}
 	return append(values, candidate)
+}
+
+func metadataConflict(left, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	return left != "" && right != "" && left != right
+}
+
+func buildCandidateInterfaces(device *Device) []InterfaceRecord {
+	if device == nil {
+		return nil
+	}
+	if len(device.Interfaces) > 0 {
+		return device.Interfaces
+	}
+	record := InterfaceRecord{
+		MACAddress:          strings.TrimSpace(device.MACAddress),
+		IPv4Address:         strings.TrimSpace(device.IPv4Address),
+		InterfaceName:       strings.TrimSpace(device.InterfaceName),
+		SourceInterfaceName: strings.TrimSpace(device.SourceInterfaceName),
+	}
+	if record.MACAddress == "" && record.IPv4Address == "" && record.InterfaceName == "" && record.SourceInterfaceName == "" {
+		return nil
+	}
+	return []InterfaceRecord{record}
+}
+
+func mergeInterfaces(existing []InterfaceRecord, candidates []InterfaceRecord) []InterfaceRecord {
+	for _, candidate := range candidates {
+		if candidate.MACAddress == "" && candidate.IPv4Address == "" && candidate.InterfaceName == "" && candidate.SourceInterfaceName == "" {
+			continue
+		}
+		duplicate := false
+		for _, record := range existing {
+			if record == candidate {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			existing = append(existing, candidate)
+		}
+	}
+	sort.Slice(existing, func(i, j int) bool {
+		left := existing[i]
+		right := existing[j]
+		if left.MACAddress != right.MACAddress {
+			return left.MACAddress < right.MACAddress
+		}
+		if left.IPv4Address != right.IPv4Address {
+			return left.IPv4Address < right.IPv4Address
+		}
+		if left.InterfaceName != right.InterfaceName {
+			return left.InterfaceName < right.InterfaceName
+		}
+		return left.SourceInterfaceName < right.SourceInterfaceName
+	})
+	return existing
+}
+
+func mergeIPv4Addresses(existing []string, fromSlice []string, direct string) []string {
+	for _, ip := range fromSlice {
+		existing = appendUnique(existing, ip)
+	}
+	return appendUnique(existing, direct)
 }

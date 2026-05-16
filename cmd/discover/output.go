@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"gonum.org/v1/gonum/graph/simple"
+	"jb.favre/mikrotik-fleet-autopilot/common/mndp"
 )
 
 const mfaNodeName = "mfa"
@@ -21,6 +22,7 @@ type topologyNode struct {
 	firstSeen      int
 	graphID        int64
 	sshReachable   *bool // nil = not attempted; &true = ok; &false = failed
+	mndpDevice     *mndp.Device
 }
 
 type linkDetail struct {
@@ -113,43 +115,18 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		undirected: make(map[string][]*linkDetail),
 	}
 
-	// Pre-scan identities to detect collisions (same identity for multiple hosts).
-	// Collisions are disambiguated with a stable " #N" ordinal suffix assigned in
-	// orderedHosts traversal order.
-	identityOccurrences := make(map[string]int)
-	if topo.ipToIdentity != nil {
-		for _, host := range topo.orderedHosts {
-			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
-				identityOccurrences[id]++
-			}
-		}
-	}
-	identityCounter := make(map[string]int)
-
-	hostToNodeName := make(map[string]string, len(topo.orderedHosts))
 	hostOrder := make(map[string]int, len(topo.orderedHosts))
 	for idx, host := range topo.orderedHosts {
 		hostOrder[host] = idx
 
-		// Resolve canonical name: prefer MNDP/LLDP identity over bare IP.
-		// Disambiguate collisions where multiple hosts share the same identity.
-		canonicalName := host
-		if topo.ipToIdentity != nil {
-			if id, ok := topo.ipToIdentity[host]; ok && id != "" {
-				if identityOccurrences[id] > 1 {
-					identityCounter[id]++
-					canonicalName = fmt.Sprintf("%s #%d", id, identityCounter[id])
-				} else {
-					canonicalName = id
-				}
-			}
-		}
-		hostToNodeName[host] = canonicalName
-		node := graph.getOrCreateNode(canonicalName, true, idx)
+		node := graph.getOrCreateNode(host, true, idx)
 		if topo.lldpPromoted != nil {
 			if _, ok := topo.lldpPromoted[host]; ok {
 				node.autoDiscovered = true
 			}
+		}
+		if topo.mndpByIdentity != nil {
+			node.mndpDevice = topo.mndpByIdentity[host]
 		}
 
 		// Mark SSH reachability
@@ -168,17 +145,14 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		if result == nil {
 			continue
 		}
-		canonicalSource := hostToNodeName[sourceHost]
-		sourceNode := graph.getOrCreateNode(canonicalSource, true, hostOrder[sourceHost])
+		sourceNode := graph.getOrCreateNode(sourceHost, true, hostOrder[sourceHost])
 		for neighborIdx, neighbor := range result.Neighbors {
 			identity := strings.TrimSpace(neighbor.Identity)
 			localInterface := strings.TrimSpace(neighbor.LocalInterface)
 			// Avoid collapsing distinct neighbors with missing identity into a
 			// single shared "unknown" node by generating a scoped placeholder.
-			// We use canonicalSource (MNDP identity when available) so the
-			// placeholder matches the node name already used in the graph.
 			if identity == "" {
-				identity = fmt.Sprintf("unknown (%s:%s#%d)", canonicalSource, localInterface, neighborIdx)
+				identity = fmt.Sprintf("unknown (%s:%s#%d)", sourceNode.name, localInterface, neighborIdx)
 			}
 			destination := graph.getOrCreateNode(identity, false, -1)
 			graph.addLink(sourceNode.name, destination.name, &linkDetail{
@@ -195,30 +169,16 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		return graph, nil
 	}
 
-	canonicalConnectedTo := connectedTo
-	if resolved, ok := hostToNodeName[connectedTo]; ok {
-		canonicalConnectedTo = resolved
-	} else if topo.ipToIdentity != nil {
-		// Fallback for IP values that can be canonicalized by MNDP identity but
-		// are not part of orderedHosts (for example, external caller inputs).
-		if id, ok := topo.ipToIdentity[connectedTo]; ok && id != "" {
-			canonicalConnectedTo = id
-		}
-	}
-
-	if _, ok := graph.nodes[canonicalConnectedTo]; !ok {
-		if canonicalConnectedTo != connectedTo {
-			return nil, fmt.Errorf("connected-to target %q (resolved from IP to identity %q) was not found in the topology; use a configured source host or a discovered device identity", connectedTo, canonicalConnectedTo)
-		}
+	if _, ok := graph.nodes[connectedTo]; !ok {
 		return nil, fmt.Errorf("connected-to target %q was not found in the topology; use a configured source host or a discovered device identity", connectedTo)
 	}
 
 	// mfa is a synthetic graph-only node representing the computer running the tool.
 	// It must never be added to discovery inputs or any SSH connection path.
 	mfaNode := graph.getOrCreateNode(mfaNodeName, false, -1)
-	graph.addLink(mfaNode.name, canonicalConnectedTo, &linkDetail{
+	graph.addLink(mfaNode.name, connectedTo, &linkDetail{
 		from: mfaNode.name,
-		to:   canonicalConnectedTo,
+		to:   connectedTo,
 	})
 
 	return graph, nil
@@ -473,6 +433,7 @@ func renderComponent(out io.Writer, graph *topologyGraph, component []string, ro
 		rootTag = " [LLDP]"
 	}
 	_, _ = fmt.Fprintf(out, "[%s%s%s]\n", statusPrefix, graph.nodes[root].name, rootTag)
+	renderMNDPInterfaces(out, graph.nodes[root], "  ")
 	renderChildren(out, graph, root, children, "  ")
 
 	crossLinks := make([]string, 0)
@@ -521,6 +482,7 @@ func renderChildren(out io.Writer, graph *topologyGraph, parent string, children
 			childTag = " [LLDP]"
 		}
 		_, _ = fmt.Fprintf(out, "%s%s[%s%s%s]\n", indent, branch, childStatusPrefix, childName, childTag)
+		renderMNDPInterfaces(out, graph.nodes[child], indent+vertBar+"   ")
 
 		// Filter renderable edges (skip if both interfaces are empty)
 		renderableEdges := make([]*linkDetail, 0)
@@ -562,6 +524,47 @@ func renderChildren(out io.Writer, graph *topologyGraph, parent string, children
 
 		nextIndent := indent + vertBar + "   "
 		renderChildren(out, graph, child, children, nextIndent)
+	}
+}
+
+func renderMNDPInterfaces(out io.Writer, node *topologyNode, indent string) {
+	if node == nil || node.mndpDevice == nil {
+		return
+	}
+	interfaces := append([]mndp.InterfaceRecord(nil), node.mndpDevice.Interfaces...)
+	sort.Slice(interfaces, func(i, j int) bool {
+		left := interfaces[i]
+		right := interfaces[j]
+		if left.MACAddress != right.MACAddress {
+			return left.MACAddress < right.MACAddress
+		}
+		if left.IPv4Address != right.IPv4Address {
+			return left.IPv4Address < right.IPv4Address
+		}
+		if left.InterfaceName != right.InterfaceName {
+			return left.InterfaceName < right.InterfaceName
+		}
+		return left.SourceInterfaceName < right.SourceInterfaceName
+	})
+	for _, iface := range interfaces {
+		parts := make([]string, 0, 3)
+		if iface.MACAddress != "" {
+			parts = append(parts, "mac="+iface.MACAddress)
+		}
+		if iface.IPv4Address != "" {
+			parts = append(parts, "ip="+iface.IPv4Address)
+		}
+		ifname := strings.TrimSpace(iface.InterfaceName)
+		remoteIfname := strings.TrimSpace(iface.SourceInterfaceName)
+		switch {
+		case ifname != "" && remoteIfname != "":
+			parts = append(parts, "if="+ifname+"↔"+remoteIfname)
+		case ifname != "":
+			parts = append(parts, "if="+ifname)
+		case remoteIfname != "":
+			parts = append(parts, "if="+remoteIfname)
+		}
+		_, _ = fmt.Fprintf(out, "%s📡 %s\n", indent, strings.Join(parts, ", "))
 	}
 }
 

@@ -2,6 +2,7 @@ package mndp
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 )
 
@@ -257,4 +258,109 @@ func TestParsePacket_TLVEndiannessIsBigEndian(t *testing.T) {
 			t.Fatal("ParsePacket() expected error for little-endian TLV header, got nil")
 		}
 	})
+}
+
+func appendRawTLV(pkt []byte, tlvType uint16, value []byte) []byte {
+	hdr := make([]byte, 4)
+	binary.BigEndian.PutUint16(hdr[0:2], tlvType)
+	binary.BigEndian.PutUint16(hdr[2:4], uint16(len(value)))
+	pkt = append(pkt, hdr...)
+	pkt = append(pkt, value...)
+	return pkt
+}
+
+func TestParsePacket_MACLengthEdgeCases(t *testing.T) {
+	t.Run("wrong-length-mac-skipped-and-missing-required-mac-error", func(t *testing.T) {
+		pkt := []byte{0x00, 0x00, 0x00, 0x00}
+		pkt = appendRawTLV(pkt, tlvMAC, []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee})
+		pkt = appendRawTLV(pkt, tlvIdentity, []byte("router.home"))
+		_, err := ParsePacket(pkt)
+		if err == nil || !strings.Contains(err.Error(), "missing required MAC address TLV") {
+			t.Fatalf("ParsePacket() error = %v", err)
+		}
+	})
+
+	t.Run("mac-length-6-parses", func(t *testing.T) {
+		pkt := buildTestPacket([]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}, "router.home", "", "", 0, "", "", nil, nil)
+		dev, err := ParsePacket(pkt)
+		if err != nil {
+			t.Fatalf("ParsePacket() unexpected error = %v", err)
+		}
+		if dev.MACAddress != "aa:bb:cc:dd:ee:ff" {
+			t.Fatalf("MACAddress = %q", dev.MACAddress)
+		}
+	})
+}
+
+func TestParsePacket_UptimeAndIPv6EdgeCases(t *testing.T) {
+	pkt := []byte{0x00, 0x00, 0x00, 0x00}
+	pkt = appendRawTLV(pkt, tlvMAC, []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
+	pkt = appendRawTLV(pkt, tlvIdentity, []byte("router.home"))
+	pkt = appendRawTLV(pkt, tlvUptime, []byte{0x01, 0x02, 0x03})
+	pkt = appendRawTLV(pkt, tlvIPv6, []byte{0x20, 0x01})
+
+	dev, err := ParsePacket(pkt)
+	if err != nil {
+		t.Fatalf("ParsePacket() unexpected error = %v", err)
+	}
+	if dev.Uptime != 0 {
+		t.Fatalf("Uptime = %d, want 0 for invalid length", dev.Uptime)
+	}
+	if dev.IPv6Address != "" {
+		t.Fatalf("IPv6Address = %q, want empty for invalid length", dev.IPv6Address)
+	}
+}
+
+func TestParsePacket_UptimeLittleEndianAndUnpack(t *testing.T) {
+	base := []byte{0x00, 0x00, 0x00, 0x00}
+	base = appendRawTLV(base, tlvMAC, []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
+	base = appendRawTLV(base, tlvIdentity, []byte("router.home"))
+	uptime := make([]byte, 4)
+	binary.LittleEndian.PutUint32(uptime, 0x78563412)
+	base = appendRawTLV(base, tlvUptime, uptime)
+
+	pktFalse := appendRawTLV(append([]byte(nil), base...), tlvUnpack, []byte{0x00})
+	devFalse, err := ParsePacket(pktFalse)
+	if err != nil {
+		t.Fatalf("ParsePacket() unexpected error = %v", err)
+	}
+	if devFalse.Uptime != 0x78563412 {
+		t.Fatalf("Uptime = %#x, want %#x", devFalse.Uptime, uint32(0x78563412))
+	}
+	if devFalse.Unpack {
+		t.Fatalf("Unpack = true, want false")
+	}
+
+	pktTrue := appendRawTLV(append([]byte(nil), base...), tlvUnpack, []byte{0x01})
+	devTrue, err := ParsePacket(pktTrue)
+	if err != nil {
+		t.Fatalf("ParsePacket() unexpected error = %v", err)
+	}
+	if !devTrue.Unpack {
+		t.Fatalf("Unpack = false, want true")
+	}
+}
+
+func TestParsePacket_SourceInterfaceDuplicateMACAndEmptyStrings(t *testing.T) {
+	pkt := []byte{0x00, 0x00, 0x00, 0x00}
+	pkt = appendRawTLV(pkt, tlvMAC, []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01})
+	pkt = appendRawTLV(pkt, tlvMAC, []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x02})
+	pkt = appendRawTLV(pkt, tlvIdentity, []byte("router.home"))
+	pkt = appendRawTLV(pkt, tlvVersion, []byte{})
+	pkt = appendRawTLV(pkt, tlvPlatform, []byte{})
+	pkt = appendRawTLV(pkt, tlvSourceInterfaceName, []byte("ether1"))
+
+	dev, err := ParsePacket(pkt)
+	if err != nil {
+		t.Fatalf("ParsePacket() unexpected error = %v", err)
+	}
+	if dev.MACAddress != "aa:bb:cc:dd:ee:02" {
+		t.Fatalf("MACAddress = %q, want last TLV value", dev.MACAddress)
+	}
+	if dev.SourceInterfaceName != "ether1" {
+		t.Fatalf("SourceInterfaceName = %q", dev.SourceInterfaceName)
+	}
+	if dev.Version != "" || dev.Platform != "" {
+		t.Fatalf("expected empty strings preserved, got version=%q platform=%q", dev.Version, dev.Platform)
+	}
 }

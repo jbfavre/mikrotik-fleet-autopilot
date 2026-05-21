@@ -15,6 +15,13 @@ import (
 
 const listenReadPollInterval = 250 * time.Millisecond
 
+var (
+	interfaceByNameFn = net.InterfaceByName
+	interfacesFn      = net.Interfaces
+	listenPacketFn    = net.ListenPacket
+	timeNowFn         = time.Now
+)
+
 // Listen sends an MNDP probe on ifaceName (or all eligible interfaces when empty)
 // and collects responses for the duration of timeout.
 // Devices are grouped by identity and deduplicated by MAC address inside each identity group.
@@ -30,13 +37,13 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 	var ifaces []net.Interface
 
 	if ifaceName != "" {
-		iface, err := net.InterfaceByName(ifaceName)
+		iface, err := interfaceByNameFn(ifaceName)
 		if err != nil {
 			return nil, fmt.Errorf("mndp: interface %q not found: %w", ifaceName, err)
 		}
 		ifaces = []net.Interface{*iface}
 	} else {
-		all, err := net.Interfaces()
+		all, err := interfacesFn()
 		if err != nil {
 			return nil, fmt.Errorf("mndp: failed to list interfaces: %w", err)
 		}
@@ -61,7 +68,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 
 	for _, iface := range ifaces {
 		addr := "0.0.0.0:5678"
-		conn, err := net.ListenPacket("udp4", addr)
+		conn, err := listenPacketFn("udp4", addr)
 		if err != nil {
 			if ifaceName != "" {
 				return nil, fmt.Errorf("mndp: failed to bind to interface %q (%s): %w", iface.Name, addr, err)
@@ -82,7 +89,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 			continue
 		}
 
-		deadline := time.Now().Add(timeout)
+		deadline := timeNowFn().Add(timeout)
 		wg.Add(1)
 		go func(conn net.PacketConn, ifName string) {
 			defer wg.Done()
@@ -100,7 +107,7 @@ func Listen(ctx context.Context, ifaceName string, timeout time.Duration) ([]*De
 
 			buf := make([]byte, 4096)
 			for {
-				readDeadline := time.Now().Add(listenReadPollInterval)
+				readDeadline := timeNowFn().Add(listenReadPollInterval)
 				if readDeadline.After(deadline) {
 					readDeadline = deadline
 				}

@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"maps"
-	"net"
 	"os"
 	"sort"
 	"strings"
@@ -39,11 +38,6 @@ var createSSHConnection = ssh.CreateConnection
 // listenMNDP is the MNDP listener function; injectable for testing.
 var listenMNDP = mndp.Listen
 
-// lookupIPv4ByIdentity resolves identity to canonical IPv4 addresses; injectable for testing.
-var lookupIPv4ByIdentity = func(ctx context.Context, identity string) ([]net.IP, error) {
-	return net.DefaultResolver.LookupIP(ctx, "ip4", identity)
-}
-
 func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string) error {
 	cfg, err := core.GetConfig(ctx)
 	if err != nil {
@@ -51,8 +45,11 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string)
 	}
 
 	hosts := cfg.Hosts
-	var mndpByIP map[string]*mndp.Device
-	var ipToIdentity map[string]string
+	hostSeen := make(map[string]struct{}, len(hosts))
+	for _, host := range hosts {
+		hostSeen[host] = struct{}{}
+	}
+	var mndpByIdentity map[string]*mndp.Device
 
 	if cfg.UseMNDP {
 		slog.Info("starting MNDP discovery", "interface", cfg.Interface, "timeout", cfg.MNDPTimeout)
@@ -61,36 +58,19 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string)
 			slog.Warn("MNDP discovery failed", "error", err)
 			// non-fatal: continue with empty host list (will error below)
 		}
-		mndpByIP = make(map[string]*mndp.Device, len(devices))
-		ipToIdentity = make(map[string]string, len(devices))
-		canonicalSeen := make(map[string]struct{}, len(devices))
+		mndpByIdentity = make(map[string]*mndp.Device, len(devices))
 		for _, d := range devices {
-			lookupIdentity := d.BaseIdentity
-			if lookupIdentity == "" {
-				lookupIdentity = d.Identity
-			}
-
-			ips, lookupErr := lookupIPv4ByIdentity(ctx, lookupIdentity)
-			canonicalIPv4 := firstIPv4String(ips)
-			if lookupErr != nil || canonicalIPv4 == "" {
-				if d.IPv4Address == "" {
-					slog.Warn("MNDP identity lookup failed with no MNDP IPv4 fallback", "identity", d.Identity, "base_identity", lookupIdentity, "dns_error", lookupErr)
-					continue
-				}
-				slog.Warn("MNDP identity lookup failed; falling back to MNDP-reported IPv4", "identity", d.Identity, "base_identity", lookupIdentity, "fallback_ipv4", d.IPv4Address, "dns_error", lookupErr)
-				canonicalIPv4 = d.IPv4Address
-			}
-
-			d.CanonicalIPv4 = canonicalIPv4
-			if _, seen := canonicalSeen[canonicalIPv4]; seen {
-				slog.Warn("duplicate canonical IPv4 from MNDP identities; skipping duplicate addressable host", "identity", d.Identity, "canonical_ipv4", canonicalIPv4)
+			identity := strings.TrimSpace(d.Identity)
+			if identity == "" {
+				slog.Warn("MNDP device with empty identity skipped", "mac", d.MACAddress)
 				continue
 			}
-			canonicalSeen[canonicalIPv4] = struct{}{}
-
-			mndpByIP[canonicalIPv4] = d
-			ipToIdentity[canonicalIPv4] = d.Identity
-			hosts = append(hosts, canonicalIPv4)
+			mndpByIdentity[identity] = d
+			if _, seen := hostSeen[identity]; seen {
+				continue
+			}
+			hostSeen[identity] = struct{}{}
+			hosts = append(hosts, identity)
 		}
 		slog.Info("MNDP discovery complete", "devices", len(devices), "addressable", len(hosts))
 	}
@@ -105,8 +85,7 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string)
 	if err != nil {
 		return fmt.Errorf("discovery failed: %w", err)
 	}
-	topo.mndpByIP = mndpByIP
-	topo.ipToIdentity = ipToIdentity
+	topo.mndpByIdentity = mndpByIdentity
 
 	if err := expandTopologyFromLLDP(ctx, topo); err != nil {
 		return fmt.Errorf("lldp expansion failed: %w", err)
@@ -125,25 +104,13 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string)
 	return outputTopology(out, topo, connectedTo)
 }
 
-func firstIPv4String(ips []net.IP) string {
-	for _, ip := range ips {
-		ipv4 := ip.To4()
-		if ipv4 == nil {
-			continue
-		}
-		return ipv4.String()
-	}
-	return ""
-}
-
 // topology holds discovery results indexed by source host
 type topology struct {
-	orderedHosts []string
-	results      map[string]*lldp.ParseResult
-	errors       map[string]error
-	mndpByIP     map[string]*mndp.Device // IPv4Address → Device
-	ipToIdentity map[string]string       // IPv4Address → MNDP Identity
-	lldpPromoted map[string]struct{}
+	orderedHosts   []string
+	results        map[string]*lldp.ParseResult
+	errors         map[string]error
+	mndpByIdentity map[string]*mndp.Device // Identity → Device
+	lldpPromoted   map[string]struct{}
 }
 
 func expandTopologyFromLLDP(ctx context.Context, topo *topology) error {
@@ -163,17 +130,6 @@ func expandTopologyFromLLDP(ctx context.Context, topo *topology) error {
 		candidates := collectLLDPTargets(ctx, topo, seen)
 		if len(candidates) == 0 {
 			return nil
-		}
-
-		for _, candidate := range candidates {
-			if candidate.identity != "" {
-				if topo.ipToIdentity == nil {
-					topo.ipToIdentity = make(map[string]string)
-				}
-				if _, ok := topo.ipToIdentity[candidate.target]; !ok {
-					topo.ipToIdentity[candidate.target] = candidate.identity
-				}
-			}
 		}
 
 		hosts := make([]string, 0, len(candidates))
@@ -210,9 +166,8 @@ func expandTopologyFromLLDP(ctx context.Context, topo *topology) error {
 }
 
 type lldpDiscoveryCandidate struct {
-	target   string
-	identity string
-	order    int
+	target string
+	order  int
 }
 
 func collectLLDPTargets(ctx context.Context, topo *topology, seen map[string]struct{}) []lldpDiscoveryCandidate {
@@ -241,7 +196,7 @@ func collectLLDPTargets(ctx context.Context, topo *topology, seen map[string]str
 				continue
 			}
 			seenTargets[target] = struct{}{}
-			candidates = append(candidates, lldpDiscoveryCandidate{target: target, identity: strings.TrimSpace(neighbor.Identity), order: order})
+			candidates = append(candidates, lldpDiscoveryCandidate{target: target, order: order})
 			order++
 		}
 	}
@@ -253,41 +208,16 @@ func collectLLDPTargets(ctx context.Context, topo *topology, seen map[string]str
 	return candidates
 }
 
-func resolveLLDPTarget(ctx context.Context, neighbor *lldp.Neighbor) string {
+func resolveLLDPTarget(_ context.Context, neighbor *lldp.Neighbor) string {
 	if neighbor == nil {
 		return ""
 	}
 
 	if identity := strings.TrimSpace(neighbor.Identity); identity != "" {
-		if ips, err := lookupIPv4ByIdentity(ctx, identity); err == nil {
-			if ip := firstIPv4String(ips); ip != "" {
-				return ip
-			}
-		}
-	}
-
-	if ip := usableIP(neighbor.Address); ip != "" {
-		return ip
-	}
-	if ip := usableIP(neighbor.Address6); ip != "" {
-		return ip
+		return identity
 	}
 
 	return ""
-}
-
-func usableIP(value string) string {
-	parsed := net.ParseIP(strings.TrimSpace(value))
-	if parsed == nil {
-		return ""
-	}
-	if parsed.To4() != nil {
-		return parsed.String()
-	}
-	if parsed.IsLinkLocalUnicast() {
-		return ""
-	}
-	return parsed.String()
 }
 
 func discoverTopology(ctx context.Context, hosts []string) (*topology, error) {

@@ -70,7 +70,6 @@ func ParsePacket(data []byte) (*Device, error) {
 			}
 		case tlvIdentity:
 			dev.Identity = string(value)
-			dev.BaseIdentity = dev.Identity
 		case tlvVersion:
 			dev.Version = string(value)
 		case tlvPlatform:

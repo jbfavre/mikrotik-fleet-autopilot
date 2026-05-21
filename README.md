@@ -12,11 +12,18 @@ Automate. Control. Scale. Your MikroTik fleet on autopilot.
 ./mikrotik-fleet-autopilot --help
 ```
 
+## Prerequisites
+
+- Router identity is the unique fleet key and **must** match the DNS shortname (for example identity `router1` must resolve through your SSH config to `router1.<your-domain>`).
+- Device identities must be unique across the fleet.
+- DNS records are an administrator responsibility and must be maintained before using non-enroll workflows.
+- All commands expect identity-based hosts. The only exception is `enroll`, which may initially connect by IP before identity/DNS are in place.
+
 ### Global Options
 
 Available for all commands:
 
-- `--host <host>`, `-H <host>`  MikroTik router hostname or IP address (comma-separated for multiple routers). If not provided, will auto-discover from `router*.rsc` files in current directory
+- `--host <host>`, `-H <host>`  MikroTik router identities (comma-separated for multiple routers). If not provided, will auto-discover from `router*.rsc` files in current directory
 - `--ssh-user <username>`, `-u <username>` - MikroTik router SSH username (default: "admin")
 - `--ssh-password <password>`, `-p <password>` - MikroTik router SSH password
 - `--ssh-passphrase <passphrase>`, `-P <passphrase>` - User private SSH key passphrase
@@ -25,7 +32,7 @@ Available for all commands:
 
 **Example:**
 ```bash
-mikrotik-fleet-autopilot --host router1.local,192.168.1.1 --ssh-user admin --ssh-password secret --debug export
+mikrotik-fleet-autopilot --host router1,router2 --ssh-user admin --ssh-password secret --debug export
 ```
 
 ### Available Commands
@@ -37,6 +44,12 @@ Discover LLDP topology across the configured routers.
 mikrotik-fleet-autopilot discover [options]
 ```
 
+MNDP handling is identity-centric and multi-homed aware:
+- one node per identity
+- all MNDP interface sightings are merged for that identity
+- every MNDP node always renders interface metadata lines prefixed with `📡`
+- LLDP edge metadata remains independent from MNDP node metadata
+
 **Options:**
 - `--connected-to <device-identity>` - Add a synthetic `mfa` node to the topology graph and show it as connected to the specified topology node identity. This can be a discovered LLDP device identity or a configured source host already present in the graph.
 
@@ -46,7 +59,7 @@ mikrotik-fleet-autopilot discover [options]
 mikrotik-fleet-autopilot discover
 
 # Show the local mfa computer as connected to a topology node identity
-mikrotik-fleet-autopilot discover --connected-to router1.home
+mikrotik-fleet-autopilot discover --connected-to router1
 ```
 
 #### export
@@ -69,7 +82,7 @@ mikrotik-fleet-autopilot export
 mikrotik-fleet-autopilot export --show-sensitive --output-dir ./backups
 
 # Export specific routers
-mikrotik-fleet-autopilot --host router1.home,router2.home export
+mikrotik-fleet-autopilot --host router1,router2 export
 ```
 
 #### updates
@@ -91,7 +104,7 @@ mikrotik-fleet-autopilot updates
 mikrotik-fleet-autopilot updates --updates-apply
 
 # Update specific routers
-mikrotik-fleet-autopilot --host 192.168.1.1 updates --updates-apply
+mikrotik-fleet-autopilot --host router1 updates --updates-apply
 ```
 
 ## Building

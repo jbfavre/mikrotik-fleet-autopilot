@@ -24,7 +24,7 @@ var Command = []*cli.Command{
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return runDiscoverForHosts(ctx, os.Stdout, cmd.String("connected-to"))
+			return runTopologyForHosts(ctx, os.Stdout, cmd.String("connected-to"))
 		},
 	},
 }
@@ -34,7 +34,7 @@ var createSSHConnection = ssh.CreateConnection
 // listenMNDP is the MNDP listener function; injectable for testing.
 var listenMNDP = mndp.Listen
 
-func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string) error {
+func runTopologyForHosts(ctx context.Context, out io.Writer, connectedTo string) error {
 	cfg, err := core.GetConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get config: %w", err)

@@ -214,8 +214,8 @@ func TestRunDiscoverForHosts_DoesNotConnectToSyntheticMFANode(t *testing.T) {
 		createSSHConnection = originalFactory
 	}()
 
-	if err := runDiscoverForHosts(ctx, io.Discard, "router1"); err != nil {
-		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	if err := runTopologyForHosts(ctx, io.Discard, "router1"); err != nil {
+		t.Fatalf("runTopologyForHosts() unexpected error = %v", err)
 	}
 
 	if !reflect.DeepEqual(connectedHosts, []string{"router1"}) {
@@ -550,8 +550,8 @@ func TestRunDiscoverForHosts_MNDPSuccessfulDiscovery(t *testing.T) {
 	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
 
 	var out bytes.Buffer
-	if err := runDiscoverForHosts(ctx, &out, ""); err != nil {
-		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	if err := runTopologyForHosts(ctx, &out, ""); err != nil {
+		t.Fatalf("runTopologyForHosts() unexpected error = %v", err)
 	}
 	if !reflect.DeepEqual(connectedHosts, []string{"router.home"}) {
 		t.Fatalf("expected SSH to use MNDP identity target, got %v", connectedHosts)
@@ -582,8 +582,8 @@ func TestRunDiscoverForHosts_MNDPSSHFails(t *testing.T) {
 
 	var out bytes.Buffer
 	// Should not return an error (SSH failure is recorded, not fatal)
-	if err := runDiscoverForHosts(ctx, &out, ""); err != nil {
-		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	if err := runTopologyForHosts(ctx, &out, ""); err != nil {
+		t.Fatalf("runTopologyForHosts() unexpected error = %v", err)
 	}
 	// The error section should appear in the output
 	output := out.String()
@@ -610,8 +610,8 @@ func TestRunDiscoverForHosts_MNDPUsesIdentityAsSSHTarget(t *testing.T) {
 	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
 	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
 
-	if err := runDiscoverForHosts(ctx, io.Discard, ""); err != nil {
-		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	if err := runTopologyForHosts(ctx, io.Discard, ""); err != nil {
+		t.Fatalf("runTopologyForHosts() unexpected error = %v", err)
 	}
 
 	if !reflect.DeepEqual(connectedHosts, []string{"router.home"}) {
@@ -640,8 +640,8 @@ func TestRunDiscoverForHosts_MNDPMultiHomedSameIdentityOnlyConnectsOnce(t *testi
 	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
 	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
 
-	if err := runDiscoverForHosts(ctx, io.Discard, ""); err != nil {
-		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	if err := runTopologyForHosts(ctx, io.Discard, ""); err != nil {
+		t.Fatalf("runTopologyForHosts() unexpected error = %v", err)
 	}
 	if !reflect.DeepEqual(connectedHosts, []string{"router.home"}) {
 		t.Fatalf("expected one SSH attempt for merged identity, got %v", connectedHosts)
@@ -658,9 +658,9 @@ func TestRunDiscoverForHosts_MNDPZeroDevices(t *testing.T) {
 	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
 	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
 
-	err := runDiscoverForHosts(ctx, io.Discard, "")
+	err := runTopologyForHosts(ctx, io.Discard, "")
 	if err == nil {
-		t.Fatal("runDiscoverForHosts() expected error for zero MNDP devices, got nil")
+		t.Fatal("runTopologyForHosts() expected error for zero MNDP devices, got nil")
 	}
 	if !strings.Contains(err.Error(), "no hosts") {
 		t.Errorf("expected 'no hosts' error, got: %v", err)
@@ -678,9 +678,9 @@ func TestRunDiscoverForHosts_MNDPListenError(t *testing.T) {
 	cfg := &core.Config{UseMNDP: true, MNDPTimeout: 5 * time.Second}
 	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
 
-	err := runDiscoverForHosts(ctx, io.Discard, "")
+	err := runTopologyForHosts(ctx, io.Discard, "")
 	if err == nil {
-		t.Fatal("runDiscoverForHosts() expected error after MNDP failure with empty hosts, got nil")
+		t.Fatal("runTopologyForHosts() expected error after MNDP failure with empty hosts, got nil")
 	}
 	if !strings.Contains(err.Error(), "mndp discovery failed") {
 		t.Errorf("expected MNDP discovery failure error, got: %v", err)
@@ -861,8 +861,8 @@ func TestRunDiscoverForHosts_LLDPPromotesNeighborHost(t *testing.T) {
 	ctx := context.WithValue(context.Background(), core.ConfigKey, &core.Config{Hosts: []string{"router1"}})
 
 	var out bytes.Buffer
-	if err := runDiscoverForHosts(ctx, &out, ""); err != nil {
-		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	if err := runTopologyForHosts(ctx, &out, ""); err != nil {
+		t.Fatalf("runTopologyForHosts() unexpected error = %v", err)
 	}
 
 	output := out.String()
@@ -892,8 +892,8 @@ func TestRunDiscoverForHosts_LLDPPromotedHostIsSSHTarget(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), core.ConfigKey, &core.Config{Hosts: []string{"router1"}})
 
-	if err := runDiscoverForHosts(ctx, io.Discard, ""); err != nil {
-		t.Fatalf("runDiscoverForHosts() unexpected error = %v", err)
+	if err := runTopologyForHosts(ctx, io.Discard, ""); err != nil {
+		t.Fatalf("runTopologyForHosts() unexpected error = %v", err)
 	}
 
 	if !reflect.DeepEqual(connectedHosts, []string{"router1", "router2"}) {

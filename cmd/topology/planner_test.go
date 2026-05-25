@@ -1,4 +1,4 @@
-package discover
+package topology
 
 import (
 	"testing"
@@ -7,13 +7,13 @@ import (
 )
 
 // buildGraphForPlannerTest is a test helper that constructs a topologyGraph
-// from LLDP results and fails the test on any error.
-func buildGraphForPlannerTest(t *testing.T, results map[string]*lldp.ParseResult, orderedHosts []string, connectedTo string) *topologyGraph {
+// from LLDP Results and fails the test on any error.
+func buildGraphForPlannerTest(t *testing.T, Results map[string]*lldp.ParseResult, OrderedHosts []string, connectedTo string) *topologyGraph {
 	t.Helper()
 	topo := &topology{
-		orderedHosts: orderedHosts,
-		results:      results,
-		errors:       map[string]error{},
+		OrderedHosts: OrderedHosts,
+		Results:      Results,
+		Errors:       map[string]error{},
 	}
 	graph, err := buildTopologyGraph(topo, connectedTo)
 	if err != nil {
@@ -40,15 +40,15 @@ func TestBuildUpgradePlan_LinearChain(t *testing.T) {
 	// Spanning tree: device2 → {device1, device3}
 	// Wave 1: device1 and device3 (leaves, not adjacent to each other)
 	// Wave 2: device2
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"device1": {Neighbors: []*lldp.Neighbor{{Identity: "device2"}}},
 		"device2": {Neighbors: []*lldp.Neighbor{{Identity: "device3"}}},
 		"device3": {Neighbors: []*lldp.Neighbor{}},
 	}
-	orderedHosts := []string{"device1", "device2", "device3"}
-	graph := buildGraphForPlannerTest(t, results, orderedHosts, "")
+	OrderedHosts := []string{"device1", "device2", "device3"}
+	graph := buildGraphForPlannerTest(t, Results, OrderedHosts, "")
 
-	plan := buildUpgradePlan(graph, orderedHosts)
+	plan := buildUpgradePlan(graph, OrderedHosts)
 
 	if len(plan.waves) != 3 {
 		t.Fatalf("expected 3 waves, got %d: %+v", len(plan.waves), plan.waves)
@@ -73,7 +73,7 @@ func TestBuildUpgradePlan_LinearChain(t *testing.T) {
 // TestBuildUpgradePlan_Star verifies that all leaves are scheduled in the first
 // wave and the hub (root) is scheduled last.
 func TestBuildUpgradePlan_Star(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"hub": {
 			Neighbors: []*lldp.Neighbor{
 				{Identity: "leaf1"},
@@ -85,10 +85,10 @@ func TestBuildUpgradePlan_Star(t *testing.T) {
 		"leaf2": {Neighbors: []*lldp.Neighbor{}},
 		"leaf3": {Neighbors: []*lldp.Neighbor{}},
 	}
-	orderedHosts := []string{"hub", "leaf1", "leaf2", "leaf3"}
-	graph := buildGraphForPlannerTest(t, results, orderedHosts, "")
+	OrderedHosts := []string{"hub", "leaf1", "leaf2", "leaf3"}
+	graph := buildGraphForPlannerTest(t, Results, OrderedHosts, "")
 
-	plan := buildUpgradePlan(graph, orderedHosts)
+	plan := buildUpgradePlan(graph, OrderedHosts)
 
 	if len(plan.waves) != 2 {
 		t.Fatalf("expected 2 waves, got %d: %+v", len(plan.waves), plan.waves)
@@ -109,7 +109,7 @@ func TestBuildUpgradePlan_CrossLinkedSiblings(t *testing.T) {
 	// Spanning tree: root → {nodeA, nodeB}
 	// nodeA and nodeB are directly connected, so they cannot share a wave.
 	// Expected: wave1=[nodeA], wave2=[nodeB], wave3=[root]
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"root": {
 			Neighbors: []*lldp.Neighbor{
 				{Identity: "nodeA"},
@@ -123,10 +123,10 @@ func TestBuildUpgradePlan_CrossLinkedSiblings(t *testing.T) {
 		},
 		"nodeB": {Neighbors: []*lldp.Neighbor{}},
 	}
-	orderedHosts := []string{"root", "nodeA", "nodeB"}
-	graph := buildGraphForPlannerTest(t, results, orderedHosts, "")
+	OrderedHosts := []string{"root", "nodeA", "nodeB"}
+	graph := buildGraphForPlannerTest(t, Results, OrderedHosts, "")
 
-	plan := buildUpgradePlan(graph, orderedHosts)
+	plan := buildUpgradePlan(graph, OrderedHosts)
 
 	if len(plan.waves) != 3 {
 		t.Fatalf("expected 3 waves (adjacency guard splits siblings), got %d: %+v", len(plan.waves), plan.waves)
@@ -154,17 +154,17 @@ func TestBuildUpgradePlan_CrossLinkedSiblings(t *testing.T) {
 // TestBuildUpgradePlan_NonSourceExclusion verifies that a discovered-only
 // (non-source) neighbor is excluded from all waves and listed in plan.excluded.
 func TestBuildUpgradePlan_NonSourceExclusion(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"source1": {
 			Neighbors: []*lldp.Neighbor{
 				{Identity: "discovered-neighbor"},
 			},
 		},
 	}
-	orderedHosts := []string{"source1"}
-	graph := buildGraphForPlannerTest(t, results, orderedHosts, "")
+	OrderedHosts := []string{"source1"}
+	graph := buildGraphForPlannerTest(t, Results, OrderedHosts, "")
 
-	plan := buildUpgradePlan(graph, orderedHosts)
+	plan := buildUpgradePlan(graph, OrderedHosts)
 
 	if len(plan.waves) != 1 {
 		t.Fatalf("expected 1 wave, got %d: %+v", len(plan.waves), plan.waves)
@@ -185,7 +185,7 @@ func TestBuildUpgradePlan_NonSourceExclusion(t *testing.T) {
 // upstream source waits for a downstream upgradeable source even when they are
 // connected through a discovered-only intermediary.
 func TestBuildUpgradePlan_IntermediaryNonSourceBetweenSources(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"source-root": {
 			Neighbors: []*lldp.Neighbor{
 				{Identity: "intermediate"},
@@ -197,10 +197,10 @@ func TestBuildUpgradePlan_IntermediaryNonSourceBetweenSources(t *testing.T) {
 			},
 		},
 	}
-	orderedHosts := []string{"source-root", "source-leaf"}
-	graph := buildGraphForPlannerTest(t, results, orderedHosts, "")
+	OrderedHosts := []string{"source-root", "source-leaf"}
+	graph := buildGraphForPlannerTest(t, Results, OrderedHosts, "")
 
-	plan := buildUpgradePlan(graph, orderedHosts)
+	plan := buildUpgradePlan(graph, OrderedHosts)
 
 	if len(plan.waves) != 2 {
 		t.Fatalf("expected 2 waves, got %d: %+v", len(plan.waves), plan.waves)
@@ -227,17 +227,17 @@ func TestBuildUpgradePlan_IntermediaryNonSourceBetweenSources(t *testing.T) {
 // TestBuildUpgradePlan_MultipleComponents verifies that waves from disconnected
 // components are merged correctly: all leaves in the first wave, all hubs last.
 func TestBuildUpgradePlan_MultipleComponents(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"hub1":   {Neighbors: []*lldp.Neighbor{{Identity: "leaf1a"}, {Identity: "leaf1b"}}},
 		"leaf1a": {Neighbors: []*lldp.Neighbor{}},
 		"leaf1b": {Neighbors: []*lldp.Neighbor{}},
 		"hub2":   {Neighbors: []*lldp.Neighbor{{Identity: "leaf2a"}}},
 		"leaf2a": {Neighbors: []*lldp.Neighbor{}},
 	}
-	orderedHosts := []string{"hub1", "leaf1a", "leaf1b", "hub2", "leaf2a"}
-	graph := buildGraphForPlannerTest(t, results, orderedHosts, "")
+	OrderedHosts := []string{"hub1", "leaf1a", "leaf1b", "hub2", "leaf2a"}
+	graph := buildGraphForPlannerTest(t, Results, OrderedHosts, "")
 
-	plan := buildUpgradePlan(graph, orderedHosts)
+	plan := buildUpgradePlan(graph, OrderedHosts)
 
 	// Expected: wave1=[leaf1a, leaf1b, leaf2a], wave2=[hub1, hub2]
 	if len(plan.waves) != 2 {
@@ -251,7 +251,7 @@ func TestBuildUpgradePlan_MultipleComponents(t *testing.T) {
 	}
 	// All 5 source nodes must be scheduled exactly once.
 	scheduled := devicesInWave(plan)
-	for _, host := range orderedHosts {
+	for _, host := range OrderedHosts {
 		if !scheduled[host] {
 			t.Fatalf("expected %q to be scheduled in a wave", host)
 		}
@@ -264,13 +264,13 @@ func TestBuildUpgradePlan_MultipleComponents(t *testing.T) {
 // TestBuildUpgradePlan_MFANodeNeverInWaves verifies that the synthetic mfa node
 // is never scheduled, even when it is the graph root (connected-to mode).
 func TestBuildUpgradePlan_MFANodeNeverInWaves(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"router1": {Neighbors: []*lldp.Neighbor{}},
 	}
-	orderedHosts := []string{"router1"}
-	graph := buildGraphForPlannerTest(t, results, orderedHosts, "router1")
+	OrderedHosts := []string{"router1"}
+	graph := buildGraphForPlannerTest(t, Results, OrderedHosts, "router1")
 
-	plan := buildUpgradePlan(graph, orderedHosts)
+	plan := buildUpgradePlan(graph, OrderedHosts)
 
 	for _, wave := range plan.waves {
 		for _, device := range wave.devices {
@@ -288,15 +288,15 @@ func TestBuildUpgradePlan_MFANodeNeverInWaves(t *testing.T) {
 // TestBuildUpgradePlan_WaveIndicesAreSequential verifies that wave index values
 // are contiguous starting from 1.
 func TestBuildUpgradePlan_WaveIndicesAreSequential(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"r1": {Neighbors: []*lldp.Neighbor{{Identity: "r2"}}},
 		"r2": {Neighbors: []*lldp.Neighbor{{Identity: "r3"}}},
 		"r3": {Neighbors: []*lldp.Neighbor{}},
 	}
-	orderedHosts := []string{"r1", "r2", "r3"}
-	graph := buildGraphForPlannerTest(t, results, orderedHosts, "")
+	OrderedHosts := []string{"r1", "r2", "r3"}
+	graph := buildGraphForPlannerTest(t, Results, OrderedHosts, "")
 
-	plan := buildUpgradePlan(graph, orderedHosts)
+	plan := buildUpgradePlan(graph, OrderedHosts)
 
 	for i, wave := range plan.waves {
 		if wave.index != i+1 {
@@ -308,13 +308,13 @@ func TestBuildUpgradePlan_WaveIndicesAreSequential(t *testing.T) {
 // TestBuildUpgradePlan_EmptyGraph verifies that an empty upgradeable set
 // produces a plan with no waves and no excluded nodes.
 func TestBuildUpgradePlan_EmptyUpgradeable(t *testing.T) {
-	// Build a graph where the only source has no results (so no source node is
-	// added by the neighbor loop), but we pass an empty orderedHosts.
-	results := map[string]*lldp.ParseResult{}
-	orderedHosts := []string{}
-	graph := buildGraphForPlannerTest(t, results, orderedHosts, "")
+	// Build a graph where the only source has no Results (so no source node is
+	// added by the neighbor loop), but we pass an empty OrderedHosts.
+	Results := map[string]*lldp.ParseResult{}
+	OrderedHosts := []string{}
+	graph := buildGraphForPlannerTest(t, Results, OrderedHosts, "")
 
-	plan := buildUpgradePlan(graph, orderedHosts)
+	plan := buildUpgradePlan(graph, OrderedHosts)
 
 	if len(plan.waves) != 0 {
 		t.Fatalf("expected 0 waves for empty graph, got %d", len(plan.waves))

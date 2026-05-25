@@ -12,6 +12,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/discover"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
@@ -746,7 +747,7 @@ func TestMNDPAndHostMutualExclusivity(t *testing.T) {
 	var hosts string
 
 	cmd := buildCommand(&globalConfig, &hosts)
-	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--mndp", "discover"})
+	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--mndp", "topology"})
 	if err == nil {
 		t.Fatal("cmd.Run() expected mutual exclusivity error, got nil")
 	}
@@ -762,7 +763,7 @@ func TestMNDPFlagAloneDoesNotError(t *testing.T) {
 	cmd := buildCommand(&globalConfig, &hosts)
 
 	// Use --help to stop after CLI parsing/validation so the test does not execute
-	// the real discover action or touch network interfaces.
+	// the real topology action or touch network interfaces.
 	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--mndp", "--help"})
 
 	if err != nil {
@@ -779,17 +780,40 @@ func TestMNDPFlagAloneDoesNotError(t *testing.T) {
 	}
 }
 
-func TestMNDPFlagRejectedForNonDiscoverSubcommands(t *testing.T) {
+func TestMNDPFlagAcceptedForNonTopologySubcommands(t *testing.T) {
+	var globalConfig core.Config
+	var hosts string
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp dir: %v", err)
+	}
+	if err := os.WriteFile("router1.rsc", []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create router1.rsc: %v", err)
+	}
+
+	cmd := buildCommand(&globalConfig, &hosts)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--mndp", "updates"})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Errorf("cmd.Run() unexpected error for --mndp with updates: %v", err)
+	}
+}
+
+func TestTopologyRequiresMNDP(t *testing.T) {
 	var globalConfig core.Config
 	var hosts string
 
 	cmd := buildCommand(&globalConfig, &hosts)
-	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--mndp", "updates"})
+	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "topology"})
 	if err == nil {
-		t.Fatal("cmd.Run() expected error for --mndp on non-discover subcommand, got nil")
+		t.Fatal("cmd.Run() expected error for topology without --mndp, got nil")
 	}
-	if !strings.Contains(err.Error(), "only supported with the discover subcommand") {
-		t.Errorf("unexpected error for --mndp with updates: %v", err)
+	if !strings.Contains(err.Error(), "--mndp is required with the topology subcommand") {
+		t.Errorf("unexpected error for topology without --mndp: %v", err)
 	}
 }
 
@@ -836,5 +860,292 @@ func TestMNDPTimeoutFlagNonPositive(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "must be greater than 0") {
 		t.Errorf("expected non-positive timeout error, got: %v", err)
+	}
+}
+
+// validParams returns a BeforeHookParams suitable for a subcommand with a valid timeout.
+// Callers can override individual fields as needed.
+func validParams(subcommand string) BeforeHookParams {
+	return BeforeHookParams{
+		HasSubcommand:  true,
+		Subcommand:     subcommand,
+		HostsRaw:       "",
+		MNDPTimeoutRaw: "15s",
+	}
+}
+
+// neverCalledDeps returns deps whose functions panic if invoked, making it explicit
+// when a test accidentally triggers host discovery.
+func neverCalledDeps(t *testing.T) BeforeHookDeps {
+	t.Helper()
+	return BeforeHookDeps{
+		ResolveHostsDiscoveryFirst: func(_ context.Context, _ discover.Config, _ discover.Dependencies) ([]string, error) {
+			t.Fatal("ResolveHostsDiscoveryFirst should not have been called")
+			return nil, nil
+		},
+		DiscoverLocalHosts: func() ([]string, error) {
+			t.Fatal("DiscoverLocalHosts should not have been called")
+			return nil, nil
+		},
+	}
+}
+
+func newCfg() *core.Config { return &core.Config{} }
+
+// --- MNDP timeout parsing ---
+
+func TestRunBeforeHookMNDPTimeoutInvalidFormat(t *testing.T) {
+	params := validParams("updates")
+	params.HostsRaw = "192.168.1.1"
+	params.MNDPTimeoutRaw = "bad"
+	_, err := runBeforeHook(context.Background(), newCfg(), params, neverCalledDeps(t))
+	if err == nil {
+		t.Fatal("expected error for invalid --mndp-timeout format")
+	}
+	if !strings.Contains(err.Error(), "invalid --mndp-timeout") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunBeforeHookMNDPTimeoutNonPositive(t *testing.T) {
+	params := validParams("updates")
+	params.HostsRaw = "192.168.1.1"
+	params.MNDPTimeoutRaw = "0s"
+	_, err := runBeforeHook(context.Background(), newCfg(), params, neverCalledDeps(t))
+	if err == nil {
+		t.Fatal("expected error for non-positive --mndp-timeout")
+	}
+	if !strings.Contains(err.Error(), "must be greater than 0") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunBeforeHookMNDPTimeoutEmpty(t *testing.T) {
+	params := validParams("updates")
+	params.HostsRaw = "192.168.1.1"
+	params.MNDPTimeoutRaw = ""
+	_, err := runBeforeHook(context.Background(), newCfg(), params, neverCalledDeps(t))
+	if err == nil {
+		t.Fatal("expected error for empty --mndp-timeout")
+	}
+	if !strings.Contains(err.Error(), "cannot be empty") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunBeforeHookMNDPTimeoutParsed(t *testing.T) {
+	cfg := newCfg()
+	params := validParams("updates")
+	params.HostsRaw = "192.168.1.1"
+	params.MNDPTimeoutRaw = "30s"
+	_, err := runBeforeHook(context.Background(), cfg, params, neverCalledDeps(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MNDPTimeout != 30*time.Second {
+		t.Errorf("MNDPTimeout = %v, want 30s", cfg.MNDPTimeout)
+	}
+}
+
+// --- Mutual exclusivity ---
+
+func TestRunBeforeHookMutualExclusivity(t *testing.T) {
+	cfg := newCfg()
+	cfg.UseMNDP = true
+	params := validParams("updates")
+	params.HostsRaw = "192.168.1.1"
+	_, err := runBeforeHook(context.Background(), cfg, params, neverCalledDeps(t))
+	if err == nil {
+		t.Fatal("expected mutual exclusivity error")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- Explicit --host flag ---
+
+func TestRunBeforeHookHostsFromFlag(t *testing.T) {
+	cfg := newCfg()
+	params := validParams("updates")
+	params.HostsRaw = "192.168.1.1,192.168.1.2"
+	_, err := runBeforeHook(context.Background(), cfg, params, neverCalledDeps(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Hosts) != 2 {
+		t.Errorf("Hosts = %v, want 2 entries", cfg.Hosts)
+	}
+}
+
+// --- Topology subcommand ---
+
+func TestRunBeforeHookTopologyRequiresMNDP(t *testing.T) {
+	// UseMNDP is false by default
+	_, err := runBeforeHook(context.Background(), newCfg(), validParams("topology"), neverCalledDeps(t))
+	if err == nil {
+		t.Fatal("expected error for topology without --mndp")
+	}
+	if !strings.Contains(err.Error(), "--mndp is required with the topology subcommand") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunBeforeHookTopologyWithMNDP(t *testing.T) {
+	cfg := newCfg()
+	cfg.UseMNDP = true
+	_, err := runBeforeHook(context.Background(), cfg, validParams("topology"), neverCalledDeps(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// topology performs discovery itself — no hosts required here
+}
+
+// --- MNDP discovery ---
+
+func TestRunBeforeHookMNDPDiscoverySuccess(t *testing.T) {
+	cfg := newCfg()
+	cfg.UseMNDP = true
+	discovered := []string{"192.168.1.1", "192.168.1.2"}
+	deps := BeforeHookDeps{
+		ResolveHostsDiscoveryFirst: func(_ context.Context, _ discover.Config, _ discover.Dependencies) ([]string, error) {
+			return discovered, nil
+		},
+		DiscoverLocalHosts: func() ([]string, error) {
+			t.Fatal("DiscoverLocalHosts should not be called when --mndp is set")
+			return nil, nil
+		},
+	}
+	_, err := runBeforeHook(context.Background(), cfg, validParams("updates"), deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Hosts) != 2 || cfg.Hosts[0] != "192.168.1.1" {
+		t.Errorf("Hosts = %v, want %v", cfg.Hosts, discovered)
+	}
+}
+
+func TestRunBeforeHookMNDPDiscoveryError(t *testing.T) {
+	cfg := newCfg()
+	cfg.UseMNDP = true
+	deps := BeforeHookDeps{
+		ResolveHostsDiscoveryFirst: func(_ context.Context, _ discover.Config, _ discover.Dependencies) ([]string, error) {
+			return nil, errors.New("mndp listener failed")
+		},
+		DiscoverLocalHosts: func() ([]string, error) {
+			t.Fatal("DiscoverLocalHosts should not be called when --mndp is set")
+			return nil, nil
+		},
+	}
+	_, err := runBeforeHook(context.Background(), cfg, validParams("updates"), deps)
+	if err == nil {
+		t.Fatal("expected error when MNDP discovery fails")
+	}
+	if !strings.Contains(err.Error(), "failed to resolve hosts from topology discovery") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- Local (default) discovery ---
+
+func TestRunBeforeHookLocalDiscoverySuccess(t *testing.T) {
+	cfg := newCfg()
+	local := []string{"192.168.88.1", "192.168.88.2"}
+	deps := BeforeHookDeps{
+		ResolveHostsDiscoveryFirst: func(_ context.Context, _ discover.Config, _ discover.Dependencies) ([]string, error) {
+			t.Fatal("ResolveHostsDiscoveryFirst should not be called without --mndp")
+			return nil, nil
+		},
+		DiscoverLocalHosts: func() ([]string, error) {
+			return local, nil
+		},
+	}
+	_, err := runBeforeHook(context.Background(), cfg, validParams("updates"), deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Hosts) != 2 || cfg.Hosts[0] != "192.168.88.1" {
+		t.Errorf("Hosts = %v, want %v", cfg.Hosts, local)
+	}
+}
+
+func TestRunBeforeHookLocalDiscoveryError(t *testing.T) {
+	deps := BeforeHookDeps{
+		ResolveHostsDiscoveryFirst: func(_ context.Context, _ discover.Config, _ discover.Dependencies) ([]string, error) {
+			t.Fatal("ResolveHostsDiscoveryFirst should not be called without --mndp")
+			return nil, nil
+		},
+		DiscoverLocalHosts: func() ([]string, error) {
+			return nil, errors.New("no router*.rsc files found")
+		},
+	}
+	_, err := runBeforeHook(context.Background(), newCfg(), validParams("updates"), deps)
+	if err == nil {
+		t.Fatal("expected error when local discovery fails")
+	}
+	if !strings.Contains(err.Error(), "failed to discover routers") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- No subcommand ---
+
+func TestRunBeforeHookNoSubcommand(t *testing.T) {
+	params := BeforeHookParams{
+		HasSubcommand:  false,
+		MNDPTimeoutRaw: "15s",
+	}
+	_, err := runBeforeHook(context.Background(), newCfg(), params, neverCalledDeps(t))
+	if err != nil {
+		t.Fatalf("unexpected error with no subcommand: %v", err)
+	}
+}
+
+// --- No hosts (non-topology) ---
+
+func TestRunBeforeHookNoHostsError(t *testing.T) {
+	deps := BeforeHookDeps{
+		ResolveHostsDiscoveryFirst: func(_ context.Context, _ discover.Config, _ discover.Dependencies) ([]string, error) {
+			t.Fatal("unexpected call")
+			return nil, nil
+		},
+		DiscoverLocalHosts: func() ([]string, error) {
+			return []string{}, nil // returns empty, not an error
+		},
+	}
+	_, err := runBeforeHook(context.Background(), newCfg(), validParams("updates"), deps)
+	if err == nil {
+		t.Fatal("expected error when no hosts discovered")
+	}
+	if !strings.Contains(err.Error(), "no routers specified or discovered") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- Context values ---
+
+func TestRunBeforeHookSSHManagerInContext(t *testing.T) {
+	cfg := newCfg()
+	params := validParams("updates")
+	params.HostsRaw = "192.168.1.1"
+	ctx, err := runBeforeHook(context.Background(), cfg, params, neverCalledDeps(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := core.GetSshManager(ctx); err != nil {
+		t.Errorf("SSH manager not found in context: %v", err)
+	}
+}
+
+func TestRunBeforeHookConfigInContext(t *testing.T) {
+	cfg := newCfg()
+	params := validParams("updates")
+	params.HostsRaw = "192.168.1.1"
+	ctx, err := runBeforeHook(context.Background(), cfg, params, neverCalledDeps(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ctx.Value(core.ConfigKey) == nil {
+		t.Error("globalConfig not found in context")
 	}
 }

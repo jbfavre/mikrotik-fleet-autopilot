@@ -1,4 +1,4 @@
-package discover
+package topology
 
 import (
 	"fmt"
@@ -43,14 +43,14 @@ type topologyGraph struct {
 }
 
 func outputTopology(out io.Writer, topo *topology, connectedTo string) error {
-	if len(topo.errors) > 0 {
+	if len(topo.Errors) > 0 {
 		if _, werr := fmt.Fprintf(out, "Discovery Errors:\n"); werr != nil {
 			return werr
 		}
 
-		printed := make(map[string]struct{}, len(topo.errors))
-		for _, host := range topo.orderedHosts {
-			err, ok := topo.errors[host]
+		printed := make(map[string]struct{}, len(topo.Errors))
+		for _, host := range topo.OrderedHosts {
+			err, ok := topo.Errors[host]
 			if !ok {
 				continue
 			}
@@ -61,7 +61,7 @@ func outputTopology(out io.Writer, topo *topology, connectedTo string) error {
 		}
 
 		var remainingHosts []string
-		for host := range topo.errors {
+		for host := range topo.Errors {
 			if _, ok := printed[host]; ok {
 				continue
 			}
@@ -69,7 +69,7 @@ func outputTopology(out io.Writer, topo *topology, connectedTo string) error {
 		}
 		sort.Strings(remainingHosts)
 		for _, host := range remainingHosts {
-			if _, werr := fmt.Fprintf(out, "  %s: %v\n", host, topo.errors[host]); werr != nil {
+			if _, werr := fmt.Fprintf(out, "  %s: %v\n", host, topo.Errors[host]); werr != nil {
 				return werr
 			}
 		}
@@ -78,7 +78,7 @@ func outputTopology(out io.Writer, topo *topology, connectedTo string) error {
 		}
 	}
 
-	if len(topo.results) == 0 {
+	if len(topo.Results) == 0 {
 		if _, werr := fmt.Fprintf(out, "No neighbors discovered.\n"); werr != nil {
 			return werr
 		}
@@ -98,9 +98,9 @@ func outputTopology(out io.Writer, topo *topology, connectedTo string) error {
 		return werr
 	}
 
-	plan := buildUpgradePlan(graph, topo.orderedHosts)
+	plan := buildUpgradePlan(graph, topo.OrderedHosts)
 
-	if err := renderTopologyGraph(out, graph, topo.orderedHosts, plan); err != nil {
+	if err := renderTopologyGraph(out, graph, topo.OrderedHosts, plan); err != nil {
 		return err
 	}
 	return nil
@@ -115,33 +115,33 @@ func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, err
 		undirected: make(map[string][]*linkDetail),
 	}
 
-	hostOrder := make(map[string]int, len(topo.orderedHosts))
-	for idx, host := range topo.orderedHosts {
+	hostOrder := make(map[string]int, len(topo.OrderedHosts))
+	for idx, host := range topo.OrderedHosts {
 		hostOrder[host] = idx
 
 		node := graph.getOrCreateNode(host, true, idx)
-		if topo.lldpPromoted != nil {
-			if _, ok := topo.lldpPromoted[host]; ok {
+		if topo.LLDPPromoted != nil {
+			if _, ok := topo.LLDPPromoted[host]; ok {
 				node.autoDiscovered = true
 			}
 		}
-		if topo.mndpByIdentity != nil {
-			node.mndpDevice = topo.mndpByIdentity[host]
+		if topo.MNDPByIdentity != nil {
+			node.mndpDevice = topo.MNDPByIdentity[host]
 		}
 
 		// Mark SSH reachability
-		if _, failed := topo.errors[host]; failed {
+		if _, failed := topo.Errors[host]; failed {
 			f := false
 			node.sshReachable = &f
-		} else if _, ok := topo.results[host]; ok {
+		} else if _, ok := topo.Results[host]; ok {
 			t := true
 			node.sshReachable = &t
 		}
 		// If neither result nor error exists for this host, sshReachable stays nil
 	}
 
-	for _, sourceHost := range topo.orderedHosts {
-		result := topo.results[sourceHost]
+	for _, sourceHost := range topo.OrderedHosts {
+		result := topo.Results[sourceHost]
 		if result == nil {
 			continue
 		}
@@ -252,10 +252,10 @@ func (w *errorTrackingWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func renderTopologyGraph(out io.Writer, graph *topologyGraph, orderedHosts []string, plan *upgradePlan) error {
+func renderTopologyGraph(out io.Writer, graph *topologyGraph, OrderedHosts []string, plan *upgradePlan) error {
 	trackedOut := &errorTrackingWriter{w: out}
 	components := connectedComponents(graph)
-	roots := selectRoots(graph, components, orderedHosts, preferredRoot(graph))
+	roots := selectRoots(graph, components, OrderedHosts, preferredRoot(graph))
 
 	totalTreeEdges := 0
 	for i, root := range roots {
@@ -264,7 +264,7 @@ func renderTopologyGraph(out io.Writer, graph *topologyGraph, orderedHosts []str
 				return err
 			}
 		}
-		treeEdges := renderComponent(trackedOut, graph, components[i], root, orderedHosts)
+		treeEdges := renderComponent(trackedOut, graph, components[i], root, OrderedHosts)
 		if trackedOut.err != nil {
 			return trackedOut.err
 		}
@@ -331,7 +331,7 @@ func connectedComponents(graph *topologyGraph) [][]string {
 	return components
 }
 
-func selectRoots(graph *topologyGraph, components [][]string, orderedHosts []string, preferred string) []string {
+func selectRoots(graph *topologyGraph, components [][]string, OrderedHosts []string, preferred string) []string {
 	roots := make([]string, 0, len(components))
 	for _, component := range components {
 		if preferred != "" && componentContains(component, preferred) {
@@ -340,7 +340,7 @@ func selectRoots(graph *topologyGraph, components [][]string, orderedHosts []str
 		}
 		best := component[0]
 		for _, candidate := range component[1:] {
-			if betterNode(graph, candidate, best, orderedHosts) {
+			if betterNode(graph, candidate, best, OrderedHosts) {
 				best = candidate
 			}
 		}
@@ -353,7 +353,7 @@ func componentContains(component []string, target string) bool {
 	return slices.Contains(component, target)
 }
 
-func betterNode(graph *topologyGraph, left, right string, orderedHosts []string) bool {
+func betterNode(graph *topologyGraph, left, right string, OrderedHosts []string) bool {
 	l := graph.nodes[left]
 	r := graph.nodes[right]
 	if l == nil || r == nil {
@@ -364,19 +364,19 @@ func betterNode(graph *topologyGraph, left, right string, orderedHosts []string)
 	if lDegree != rDegree {
 		return lDegree > rDegree
 	}
-	lOrder := tieOrder(l, orderedHosts)
-	rOrder := tieOrder(r, orderedHosts)
+	lOrder := tieOrder(l, OrderedHosts)
+	rOrder := tieOrder(r, OrderedHosts)
 	if lOrder != rOrder {
 		return lOrder < rOrder
 	}
 	return l.firstSeen < r.firstSeen
 }
 
-func tieOrder(node *topologyNode, orderedHosts []string) int {
+func tieOrder(node *topologyNode, OrderedHosts []string) int {
 	if node.sourceOrder >= 0 {
 		return node.sourceOrder
 	}
-	return len(orderedHosts) + node.firstSeen + 1
+	return len(OrderedHosts) + node.firstSeen + 1
 }
 
 func (g *topologyGraph) degree(name string) int {
@@ -411,13 +411,13 @@ func (g *topologyGraph) neighbors(name string) []string {
 	return neighbors
 }
 
-func renderComponent(out io.Writer, graph *topologyGraph, component []string, root string, orderedHosts []string) map[string]bool {
+func renderComponent(out io.Writer, graph *topologyGraph, component []string, root string, OrderedHosts []string) map[string]bool {
 	inComponent := make(map[string]bool)
 	for _, name := range component {
 		inComponent[name] = true
 	}
 
-	parent, children := buildSpanningTree(graph, root, inComponent, orderedHosts)
+	parent, children := buildSpanningTree(graph, root, inComponent, OrderedHosts)
 
 	treeEdges := make(map[string]bool)
 	for child, p := range parent {

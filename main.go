@@ -155,6 +155,22 @@ func buildCommand(globalConfig *core.Config, hosts *string) *cli.Command {
 					return ctx, fmt.Errorf("--host and --mndp are mutually exclusive: use --mndp for dynamic discovery or --host to target specific devices")
 				}
 
+				// Create SSH manager with credentials (credentials stay encapsulated)
+				var passwordPtr *string
+				if cmd.IsSet("ssh-password") {
+					v := cmd.String("ssh-password")
+					passwordPtr = &v
+				}
+				var passphrasePtr *string
+				if cmd.IsSet("ssh-passphrase") {
+					v := cmd.String("ssh-passphrase")
+					passphrasePtr = &v
+				}
+				sshManager := ssh.NewSshManager(globalConfig.User, passwordPtr, passphrasePtr)
+
+				// Make global config (without credentials) and SSH manager available in context
+				ctx = context.WithValue(ctx, core.SshManagerKey, sshManager)
+
 				// Setup hosts
 				if *hosts != "" {
 					// Split comma-separated hosts
@@ -192,22 +208,7 @@ func buildCommand(globalConfig *core.Config, hosts *string) *cli.Command {
 					return ctx, fmt.Errorf("no routers specified or discovered")
 				}
 			}
-			// Create SSH manager with credentials (credentials stay encapsulated)
-			var passwordPtr *string
-			if cmd.IsSet("ssh-password") {
-				v := cmd.String("ssh-password")
-				passwordPtr = &v
-			}
-			var passphrasePtr *string
-			if cmd.IsSet("ssh-passphrase") {
-				v := cmd.String("ssh-passphrase")
-				passphrasePtr = &v
-			}
-			sshManager := ssh.NewSshManager(globalConfig.User, passwordPtr, passphrasePtr)
-
-			// Make global config (without credentials) and SSH manager available in context
 			ctx = context.WithValue(ctx, core.ConfigKey, globalConfig)
-			ctx = context.WithValue(ctx, core.SshManagerKey, sshManager)
 			slog.Debug("global config available in context", "config", *globalConfig)
 			slog.Info("starting subcommand", "subcommand", cmd.Args().Get(0))
 			return ctx, nil

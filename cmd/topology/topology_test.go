@@ -1,4 +1,4 @@
-package discover
+package topology
 
 import (
 	"bytes"
@@ -37,7 +37,7 @@ func (s *stubRunner) IsAlreadyClosedError(err error) bool {
 }
 
 func TestBuildTopologyGraph_Basic(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"device1": {
 			Neighbors: []*lldp.Neighbor{
 				{
@@ -54,9 +54,9 @@ func TestBuildTopologyGraph_Basic(t *testing.T) {
 	}
 
 	topo := &topology{
-		orderedHosts: []string{"device1", "device2"},
-		results:      results,
-		errors:       map[string]error{},
+		OrderedHosts: []string{"device1", "device2"},
+		Results:      Results,
+		Errors:       map[string]error{},
 	}
 	graph, err := buildTopologyGraph(topo, "")
 	if err != nil {
@@ -76,7 +76,7 @@ func TestBuildTopologyGraph_Basic(t *testing.T) {
 }
 
 func TestBuildTopologyGraph_RedundantLinksMultiplicity(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"source": {
 			Neighbors: []*lldp.Neighbor{
 				{
@@ -94,9 +94,9 @@ func TestBuildTopologyGraph_RedundantLinksMultiplicity(t *testing.T) {
 	}
 
 	topo := &topology{
-		orderedHosts: []string{"source"},
-		results:      results,
-		errors:       map[string]error{},
+		OrderedHosts: []string{"source"},
+		Results:      Results,
+		Errors:       map[string]error{},
 	}
 	graph, err := buildTopologyGraph(topo, "")
 	if err != nil {
@@ -109,7 +109,7 @@ func TestBuildTopologyGraph_RedundantLinksMultiplicity(t *testing.T) {
 }
 
 func TestSelectRoots_PrefersHigherDegree(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"a": {
 			Neighbors: []*lldp.Neighbor{
 				{Identity: "b"},
@@ -121,9 +121,9 @@ func TestSelectRoots_PrefersHigherDegree(t *testing.T) {
 	}
 
 	topo := &topology{
-		orderedHosts: []string{"a", "b", "c"},
-		results:      results,
-		errors:       map[string]error{},
+		OrderedHosts: []string{"a", "b", "c"},
+		Results:      Results,
+		Errors:       map[string]error{},
 	}
 	graph, err := buildTopologyGraph(topo, "")
 	if err != nil {
@@ -140,7 +140,7 @@ func TestSelectRoots_PrefersHigherDegree(t *testing.T) {
 }
 
 func TestBuildTopologyGraph_ConnectedToAddsMFANode(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"router1": {
 			Neighbors: []*lldp.Neighbor{
 				{Identity: "router2"},
@@ -150,9 +150,9 @@ func TestBuildTopologyGraph_ConnectedToAddsMFANode(t *testing.T) {
 	}
 
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2"},
-		results:      results,
-		errors:       map[string]error{},
+		OrderedHosts: []string{"router1", "router2"},
+		Results:      Results,
+		Errors:       map[string]error{},
 	}
 	graph, err := buildTopologyGraph(topo, "router2")
 	if err != nil {
@@ -181,14 +181,14 @@ func TestBuildTopologyGraph_ConnectedToAddsMFANode(t *testing.T) {
 }
 
 func TestBuildTopologyGraph_ConnectedToUnknownTargetFails(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"router1": {Neighbors: []*lldp.Neighbor{}},
 	}
 
 	topo := &topology{
-		orderedHosts: []string{"router1"},
-		results:      results,
-		errors:       map[string]error{},
+		OrderedHosts: []string{"router1"},
+		Results:      Results,
+		Errors:       map[string]error{},
 	}
 	_, err := buildTopologyGraph(topo, "router2")
 	if err == nil {
@@ -230,8 +230,8 @@ func TestRunDiscoverForHosts_DoesNotConnectToSyntheticMFANode(t *testing.T) {
 
 func TestOutputTopology_ConnectedToRendersMFAAsRoot(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1", "router2"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {
 				Neighbors: []*lldp.Neighbor{
 					{Identity: "router2"},
@@ -239,7 +239,7 @@ func TestOutputTopology_ConnectedToRendersMFAAsRoot(t *testing.T) {
 			},
 			"router2": {Neighbors: []*lldp.Neighbor{}},
 		},
-		errors: map[string]error{},
+		Errors: map[string]error{},
 	}
 
 	var out bytes.Buffer
@@ -271,8 +271,8 @@ func TestOutputTopology_ConnectedToRendersMFAAsRoot(t *testing.T) {
 
 func TestOutputTopology_RendersViaLineForSingleLink(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1", "router2"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {
 				Neighbors: []*lldp.Neighbor{
 					{Identity: "router2", LocalInterface: "ether1", RemoteInterface: "sfp1"},
@@ -280,7 +280,7 @@ func TestOutputTopology_RendersViaLineForSingleLink(t *testing.T) {
 			},
 			"router2": {Neighbors: []*lldp.Neighbor{}},
 		},
-		errors: map[string]error{},
+		Errors: map[string]error{},
 	}
 
 	var out bytes.Buffer
@@ -295,8 +295,8 @@ func TestOutputTopology_RendersViaLineForSingleLink(t *testing.T) {
 
 func TestOutputTopology_RendersViaLinesForParallelLinks(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1", "router2"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {
 				Neighbors: []*lldp.Neighbor{
 					{Identity: "router2", LocalInterface: "ether1", RemoteInterface: "sfp1"},
@@ -305,7 +305,7 @@ func TestOutputTopology_RendersViaLinesForParallelLinks(t *testing.T) {
 			},
 			"router2": {Neighbors: []*lldp.Neighbor{}},
 		},
-		errors: map[string]error{},
+		Errors: map[string]error{},
 	}
 
 	var out bytes.Buffer
@@ -323,8 +323,8 @@ func TestOutputTopology_RendersViaLinesForParallelLinks(t *testing.T) {
 
 func TestOutputTopology_RendersViaFallbackForMissingLocalInterface(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1", "router2"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {
 				Neighbors: []*lldp.Neighbor{
 					{Identity: "router2", RemoteInterface: "sfp1"},
@@ -332,7 +332,7 @@ func TestOutputTopology_RendersViaFallbackForMissingLocalInterface(t *testing.T)
 			},
 			"router2": {Neighbors: []*lldp.Neighbor{}},
 		},
-		errors: map[string]error{},
+		Errors: map[string]error{},
 	}
 
 	var out bytes.Buffer
@@ -347,8 +347,8 @@ func TestOutputTopology_RendersViaFallbackForMissingLocalInterface(t *testing.T)
 
 func TestOutputTopology_ViaLineShowsVerticalBarWhenChildrenExist(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2", "router3", "router4"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1", "router2", "router3", "router4"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {
 				Neighbors: []*lldp.Neighbor{
 					{Identity: "router2", LocalInterface: "ether1", RemoteInterface: "sfp1"},
@@ -366,7 +366,7 @@ func TestOutputTopology_ViaLineShowsVerticalBarWhenChildrenExist(t *testing.T) {
 			},
 			"router4": {Neighbors: []*lldp.Neighbor{}},
 		},
-		errors: map[string]error{},
+		Errors: map[string]error{},
 	}
 
 	var out bytes.Buffer
@@ -390,8 +390,8 @@ func TestOutputTopology_ViaLineShowsVerticalBarWhenChildrenExist(t *testing.T) {
 
 func TestOutputTopology_ViaLineHasNoBarForLeafNode(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1", "router2"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {
 				Neighbors: []*lldp.Neighbor{
 					{Identity: "router2", LocalInterface: "ether1", RemoteInterface: "sfp1"},
@@ -399,7 +399,7 @@ func TestOutputTopology_ViaLineHasNoBarForLeafNode(t *testing.T) {
 			},
 			"router2": {Neighbors: []*lldp.Neighbor{}},
 		},
-		errors: map[string]error{},
+		Errors: map[string]error{},
 	}
 
 	var out bytes.Buffer
@@ -439,8 +439,8 @@ func TestShortName(t *testing.T) {
 
 func TestOutputTopology_RendersUpgradePlanSection(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1", "router2"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {
 				Neighbors: []*lldp.Neighbor{
 					{Identity: "router2"},
@@ -448,7 +448,7 @@ func TestOutputTopology_RendersUpgradePlanSection(t *testing.T) {
 			},
 			"router2": {Neighbors: []*lldp.Neighbor{}},
 		},
-		errors: map[string]error{},
+		Errors: map[string]error{},
 	}
 
 	var out bytes.Buffer
@@ -467,15 +467,15 @@ func TestOutputTopology_RendersUpgradePlanSection(t *testing.T) {
 
 func TestOutputTopology_UpgradePlanExcludesNonSourceNodes(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router1"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {
 				Neighbors: []*lldp.Neighbor{
 					{Identity: "external-switch"},
 				},
 			},
 		},
-		errors: map[string]error{},
+		Errors: map[string]error{},
 	}
 
 	var out bytes.Buffer
@@ -494,8 +494,8 @@ func TestOutputTopology_UpgradePlanExcludesNonSourceNodes(t *testing.T) {
 
 func TestOutputTopology_UpgradeSummaryMetrics(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2", "router3"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1", "router2", "router3"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {
 				Neighbors: []*lldp.Neighbor{
 					{Identity: "router2"},
@@ -505,7 +505,7 @@ func TestOutputTopology_UpgradeSummaryMetrics(t *testing.T) {
 			"router2": {Neighbors: []*lldp.Neighbor{}},
 			"router3": {Neighbors: []*lldp.Neighbor{}},
 		},
-		errors: map[string]error{},
+		Errors: map[string]error{},
 	}
 
 	var out bytes.Buffer
@@ -679,17 +679,16 @@ func TestRunDiscoverForHosts_MNDPListenError(t *testing.T) {
 	ctx := context.WithValue(context.Background(), core.ConfigKey, cfg)
 
 	err := runDiscoverForHosts(ctx, io.Discard, "")
-	// MNDP error is non-fatal (warn + empty host list → "no hosts" error)
 	if err == nil {
 		t.Fatal("runDiscoverForHosts() expected error after MNDP failure with empty hosts, got nil")
 	}
-	if !strings.Contains(err.Error(), "no hosts") {
-		t.Errorf("expected 'no hosts' error after MNDP failure, got: %v", err)
+	if !strings.Contains(err.Error(), "mndp discovery failed") {
+		t.Errorf("expected MNDP discovery failure error, got: %v", err)
 	}
 }
 
 func TestBuildTopologyGraph_MNDPIdentityMetadataAttached(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"router.home": {
 			Neighbors: []*lldp.Neighbor{
 				{Identity: "switch1"},
@@ -698,10 +697,10 @@ func TestBuildTopologyGraph_MNDPIdentityMetadataAttached(t *testing.T) {
 	}
 
 	topo := &topology{
-		orderedHosts: []string{"router.home"},
-		results:      results,
-		errors:       map[string]error{},
-		mndpByIdentity: map[string]*mndp.Device{
+		OrderedHosts: []string{"router.home"},
+		Results:      Results,
+		Errors:       map[string]error{},
+		MNDPByIdentity: map[string]*mndp.Device{
 			"router.home": {
 				Identity: "router.home",
 				Interfaces: []mndp.InterfaceRecord{
@@ -726,11 +725,11 @@ func TestBuildTopologyGraph_MNDPIdentityMetadataAttached(t *testing.T) {
 
 func TestBuildTopologyGraph_ConnectedToUsesIdentityNode(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router.home"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router.home"},
+		Results: map[string]*lldp.ParseResult{
 			"router.home": {Neighbors: []*lldp.Neighbor{}},
 		},
-		errors: map[string]error{},
+		Errors: map[string]error{},
 	}
 
 	graph, err := buildTopologyGraph(topo, "router.home")
@@ -745,7 +744,7 @@ func TestBuildTopologyGraph_ConnectedToUsesIdentityNode(t *testing.T) {
 }
 
 func TestBuildTopologyGraph_SSHReachabilityMarked(t *testing.T) {
-	results := map[string]*lldp.ParseResult{
+	Results := map[string]*lldp.ParseResult{
 		"router1": {Neighbors: []*lldp.Neighbor{}},
 	}
 	errs := map[string]error{
@@ -753,9 +752,9 @@ func TestBuildTopologyGraph_SSHReachabilityMarked(t *testing.T) {
 	}
 
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2"},
-		results:      results,
-		errors:       errs,
+		OrderedHosts: []string{"router1", "router2"},
+		Results:      Results,
+		Errors:       errs,
 	}
 	graph, err := buildTopologyGraph(topo, "")
 	if err != nil {
@@ -775,11 +774,11 @@ func TestBuildTopologyGraph_SSHReachabilityMarked(t *testing.T) {
 func TestOutputTopology_UnreachableDeviceRenderedWithPrefix(t *testing.T) {
 	// router2 is in ordered hosts but SSH failed
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1", "router2"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {Neighbors: []*lldp.Neighbor{{Identity: "router2"}}},
 		},
-		errors: map[string]error{
+		Errors: map[string]error{
 			"router2": errors.New("connection refused"),
 		},
 	}
@@ -798,11 +797,11 @@ func TestOutputTopology_UnreachableDeviceRenderedWithPrefix(t *testing.T) {
 
 func TestOutputTopology_UnreachableCountInSummary(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router1", "router2"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1", "router2"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {Neighbors: []*lldp.Neighbor{{Identity: "router2"}}},
 		},
-		errors: map[string]error{
+		Errors: map[string]error{
 			"router2": errors.New("connection refused"),
 		},
 	}
@@ -820,12 +819,12 @@ func TestOutputTopology_UnreachableCountInSummary(t *testing.T) {
 
 func TestOutputTopology_RendersMNDPInterfaceDetailsWithRadioMarker(t *testing.T) {
 	topo := &topology{
-		orderedHosts: []string{"router1"},
-		results: map[string]*lldp.ParseResult{
+		OrderedHosts: []string{"router1"},
+		Results: map[string]*lldp.ParseResult{
 			"router1": {Neighbors: []*lldp.Neighbor{}},
 		},
-		errors: map[string]error{},
-		mndpByIdentity: map[string]*mndp.Device{
+		Errors: map[string]error{},
+		MNDPByIdentity: map[string]*mndp.Device{
 			"router1": {
 				Identity: "router1",
 				Interfaces: []mndp.InterfaceRecord{

@@ -23,7 +23,7 @@ Automate. Control. Scale. Your MikroTik fleet on autopilot.
 
 Available for all commands:
 
-- `--host <host>`, `-H <host>`  MikroTik router identities (comma-separated for multiple routers). If not provided, will auto-discover from `router*.rsc` files in current directory
+- `--host <host>`, `-H <host>`  MikroTik router identities (comma-separated for multiple routers). If omitted with `--mndp`, hosts are resolved from topology discovery first and fall back to local `router*.rsc` files with a warning. Without `--mndp`, hosts are discovered from local `router*.rsc` files.
 - `--ssh-user <username>`, `-u <username>` - MikroTik router SSH username (default: "admin")
 - `--ssh-password <password>`, `-p <password>` - MikroTik router SSH password
 - `--ssh-passphrase <passphrase>`, `-P <passphrase>` - User private SSH key passphrase
@@ -37,11 +37,11 @@ mikrotik-fleet-autopilot --host router1,router2 --ssh-user admin --ssh-password 
 
 ### Available Commands
 
-#### discover
-Discover LLDP topology across the configured routers.
+#### topology
+Discover and display the LLDP topology graph across dynamically discovered routers.
 
 ```bash
-mikrotik-fleet-autopilot discover [options]
+mikrotik-fleet-autopilot --mndp topology [options]
 ```
 
 MNDP handling is identity-centric and multi-homed aware:
@@ -55,11 +55,11 @@ MNDP handling is identity-centric and multi-homed aware:
 
 **Examples:**
 ```bash
-# Discover topology from configured routers
-mikrotik-fleet-autopilot discover
+# Discover and print topology graph
+mikrotik-fleet-autopilot --mndp topology
 
 # Show the local mfa computer as connected to a topology node identity
-mikrotik-fleet-autopilot discover --connected-to router1
+mikrotik-fleet-autopilot --mndp topology --connected-to router1
 ```
 
 #### export
@@ -75,8 +75,11 @@ mikrotik-fleet-autopilot export [options]
 
 **Examples:**
 ```bash
-# Export configuration for auto-discovered routers
+# Export configuration for locally discovered routers
 mikrotik-fleet-autopilot export
+
+# Export configuration with discovery-first host resolution (MNDP/LLDP, then local fallback)
+mikrotik-fleet-autopilot --mndp export
 
 # Export with sensitive data to a specific directory
 mikrotik-fleet-autopilot export --show-sensitive --output-dir ./backups

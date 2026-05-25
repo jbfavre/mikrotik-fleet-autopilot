@@ -746,7 +746,7 @@ func TestMNDPAndHostMutualExclusivity(t *testing.T) {
 	var hosts string
 
 	cmd := buildCommand(&globalConfig, &hosts)
-	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--mndp", "discover"})
+	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--host", "router1", "--mndp", "topology"})
 	if err == nil {
 		t.Fatal("cmd.Run() expected mutual exclusivity error, got nil")
 	}
@@ -762,7 +762,7 @@ func TestMNDPFlagAloneDoesNotError(t *testing.T) {
 	cmd := buildCommand(&globalConfig, &hosts)
 
 	// Use --help to stop after CLI parsing/validation so the test does not execute
-	// the real discover action or touch network interfaces.
+	// the real topology action or touch network interfaces.
 	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--mndp", "--help"})
 
 	if err != nil {
@@ -779,17 +779,40 @@ func TestMNDPFlagAloneDoesNotError(t *testing.T) {
 	}
 }
 
-func TestMNDPFlagRejectedForNonDiscoverSubcommands(t *testing.T) {
+func TestMNDPFlagAcceptedForNonTopologySubcommands(t *testing.T) {
+	var globalConfig core.Config
+	var hosts string
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp dir: %v", err)
+	}
+	if err := os.WriteFile("router1.rsc", []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create router1.rsc: %v", err)
+	}
+
+	cmd := buildCommand(&globalConfig, &hosts)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	err := cmd.Run(ctx, []string{"mikrotik-fleet-autopilot", "--mndp", "updates"})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Errorf("cmd.Run() unexpected error for --mndp with updates: %v", err)
+	}
+}
+
+func TestTopologyRequiresMNDP(t *testing.T) {
 	var globalConfig core.Config
 	var hosts string
 
 	cmd := buildCommand(&globalConfig, &hosts)
-	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "--mndp", "updates"})
+	err := cmd.Run(context.Background(), []string{"mikrotik-fleet-autopilot", "topology"})
 	if err == nil {
-		t.Fatal("cmd.Run() expected error for --mndp on non-discover subcommand, got nil")
+		t.Fatal("cmd.Run() expected error for topology without --mndp, got nil")
 	}
-	if !strings.Contains(err.Error(), "only supported with the discover subcommand") {
-		t.Errorf("unexpected error for --mndp with updates: %v", err)
+	if !strings.Contains(err.Error(), "--mndp is required with the topology subcommand") {
+		t.Errorf("unexpected error for topology without --mndp: %v", err)
 	}
 }
 

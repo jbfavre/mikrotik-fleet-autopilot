@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v3"
-	"jb.favre/mikrotik-fleet-autopilot/cmd/discover"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/enroll"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/export"
+	"jb.favre/mikrotik-fleet-autopilot/cmd/topology"
 	"jb.favre/mikrotik-fleet-autopilot/cmd/updates"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/discover"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
 
@@ -43,7 +44,7 @@ func buildCommand(globalConfig *core.Config, hosts *string) *cli.Command {
 				Name:        "host",
 				Aliases:     []string{"H"},
 				Value:       "",
-				Usage:       "Comma-separated list of MikroTik hosts. Mutually exclusive with --mndp. If omitted and --mndp is not set, routers are auto-discovered from router*.rsc files",
+				Usage:       "Comma-separated list of MikroTik hosts. Mutually exclusive with --mndp. If omitted, hosts resolve via topology discovery when --mndp is set, otherwise from router*.rsc files",
 				Destination: hosts,
 			},
 			&cli.StringFlag{
@@ -102,7 +103,7 @@ func buildCommand(globalConfig *core.Config, hosts *string) *cli.Command {
 			&cli.BoolFlag{
 				Name:        "mndp",
 				Category:    "discovery",
-				Usage:       "Dynamically discover MikroTik devices via MNDP. Mutually exclusive with --host",
+				Usage:       "Enable topology discovery host resolution via MNDP/LLDP. Mutually exclusive with --host",
 				Destination: &globalConfig.UseMNDP,
 			},
 			&cli.StringFlag{
@@ -112,7 +113,7 @@ func buildCommand(globalConfig *core.Config, hosts *string) *cli.Command {
 				Usage:    "How long to listen for MNDP responses (e.g. 15s, 1m). Only used with --mndp",
 			},
 		},
-		Commands: append(append(append(export.Command, updates.Command...), enroll.Command...), discover.Command...),
+		Commands: append(append(append(export.Command, updates.Command...), enroll.Command...), topology.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			// Set log level once at startup.
 			logLevel := slog.LevelWarn
@@ -149,10 +150,6 @@ func buildCommand(globalConfig *core.Config, hosts *string) *cli.Command {
 				slog.Debug("command line arguments", "args", cmd.Args())
 				subcommand := cmd.Args().Get(0)
 
-				if globalConfig.UseMNDP && subcommand != "discover" {
-					return ctx, fmt.Errorf("--mndp is only supported with the discover subcommand")
-				}
-
 				// Mutual exclusivity guard
 				if *hosts != "" && globalConfig.UseMNDP {
 					return ctx, fmt.Errorf("--host and --mndp are mutually exclusive: use --mndp for dynamic discovery or --host to target specific devices")
@@ -162,18 +159,35 @@ func buildCommand(globalConfig *core.Config, hosts *string) *cli.Command {
 				if *hosts != "" {
 					// Split comma-separated hosts
 					globalConfig.Hosts = core.ParseHosts(*hosts)
-				} else if !globalConfig.UseMNDP {
-					// Auto-discover routers
-					routers, err := core.DiscoverHosts()
-					if err != nil {
-						return ctx, fmt.Errorf("failed to discover routers: %w", err)
+				} else {
+					switch {
+					case subcommand == "topology":
+						if !globalConfig.UseMNDP {
+							return ctx, fmt.Errorf("--mndp is required with the topology subcommand")
+						}
+						// topology subcommand performs strict discovery itself.
+					case globalConfig.UseMNDP:
+						routers, err := discover.ResolveHostsDiscoveryFirst(ctx, discover.Config{
+							UseMNDP:     true,
+							Interface:   globalConfig.Interface,
+							MNDPTimeout: globalConfig.MNDPTimeout,
+						}, discover.Dependencies{})
+						if err != nil {
+							return ctx, fmt.Errorf("failed to resolve hosts from topology discovery: %w", err)
+						}
+						globalConfig.Hosts = routers
+						slog.Info("resolved routers from topology discovery", "count", len(routers), "routers", routers)
+					default:
+						routers, err := core.DiscoverHosts()
+						if err != nil {
+							return ctx, fmt.Errorf("failed to discover routers: %w", err)
+						}
+						globalConfig.Hosts = routers
+						slog.Info("auto-discovered routers", "count", len(routers), "routers", routers)
 					}
-					globalConfig.Hosts = routers
-					slog.Info("auto-discovered routers", "count", len(routers), "routers", routers)
 				}
-				// When --mndp is set, Hosts stays empty here; discover subcommand populates it.
 
-				if len(globalConfig.Hosts) == 0 && !globalConfig.UseMNDP {
+				if len(globalConfig.Hosts) == 0 && subcommand != "topology" {
 					slog.Error("no routers specified or discovered")
 					return ctx, fmt.Errorf("no routers specified or discovered")
 				}

@@ -8,7 +8,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
-	commondiscover "jb.favre/mikrotik-fleet-autopilot/common/discover"
+	"jb.favre/mikrotik-fleet-autopilot/common/discover"
 	"jb.favre/mikrotik-fleet-autopilot/common/mndp"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
@@ -40,11 +40,11 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string)
 		return fmt.Errorf("failed to get config: %w", err)
 	}
 
-	topo, err := commondiscover.Build(ctx, cfg.Hosts, commondiscover.Config{
+	topo, err := discover.Build(ctx, cfg.Hosts, discover.Config{
 		UseMNDP:     cfg.UseMNDP,
 		Interface:   cfg.Interface,
 		MNDPTimeout: cfg.MNDPTimeout,
-	}, commondiscover.Dependencies{
+	}, discover.Dependencies{
 		CreateSSHConnection: createSSHConnection,
 		ListenMNDP:          listenMNDP,
 	})
@@ -55,4 +55,4 @@ func runDiscoverForHosts(ctx context.Context, out io.Writer, connectedTo string)
 	return outputTopology(out, topo, connectedTo)
 }
 
-type topology = commondiscover.Topology
+type topology = discover.Topology

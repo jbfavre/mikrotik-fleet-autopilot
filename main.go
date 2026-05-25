@@ -115,103 +115,139 @@ func buildCommand(globalConfig *core.Config, hosts *string) *cli.Command {
 		},
 		Commands: append(append(append(export.Command, updates.Command...), enroll.Command...), topology.Command...),
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			// Set log level once at startup.
-			logLevel := slog.LevelWarn
-			if globalConfig.Debug {
-				logLevel = slog.LevelDebug
+			var passwordPtr *string
+			if cmd.IsSet("ssh-password") {
+				v := cmd.String("ssh-password")
+				passwordPtr = &v
 			}
-			core.SetupLogging(logLevel)
-			slog.Info("Starting global")
-
-			effectiveMaxConcurrent, err := core.ResolveMaxConcurrentHosts(globalConfig.MaxConcurrentHosts)
-			if err != nil {
-				return ctx, err
+			var passphrasePtr *string
+			if cmd.IsSet("ssh-passphrase") {
+				v := cmd.String("ssh-passphrase")
+				passphrasePtr = &v
 			}
-			slog.Debug("resolved max concurrent hosts", "configured", globalConfig.MaxConcurrentHosts, "effective", effectiveMaxConcurrent)
-			globalConfig.EffectiveMaxConcurrent = effectiveMaxConcurrent
-			globalConfig.PreferLiveMode = !globalConfig.BufferedOutput
-
-			if raw := cmd.String("mndp-timeout"); raw != "" {
-				d, err := time.ParseDuration(raw)
-				if err != nil {
-					return ctx, fmt.Errorf("invalid --mndp-timeout value %q: %w", raw, err)
-				}
-				if d <= 0 {
-					return ctx, fmt.Errorf("invalid --mndp-timeout value %q: must be greater than 0", raw)
-				}
-				globalConfig.MNDPTimeout = d
-			} else {
-				return ctx, fmt.Errorf("invalid --mndp-timeout value %q: cannot be empty", raw)
+			params := BeforeHookParams{
+				HasSubcommand:  cmd.Args().Len() > 0,
+				Subcommand:     cmd.Args().Get(0),
+				HostsRaw:       *hosts,
+				MNDPTimeoutRaw: cmd.String("mndp-timeout"),
+				Password:       passwordPtr,
+				Passphrase:     passphrasePtr,
 			}
-
-			// Check if a subcommand was provided
-			// If not, the help will be shown automatically by urfave/cli
-			if cmd.Args().Len() > 0 {
-				slog.Debug("command line arguments", "args", cmd.Args())
-				subcommand := cmd.Args().Get(0)
-
-				// Mutual exclusivity guard
-				if *hosts != "" && globalConfig.UseMNDP {
-					return ctx, fmt.Errorf("--host and --mndp are mutually exclusive: use --mndp for dynamic discovery or --host to target specific devices")
-				}
-
-				// Create SSH manager with credentials (credentials stay encapsulated)
-				var passwordPtr *string
-				if cmd.IsSet("ssh-password") {
-					v := cmd.String("ssh-password")
-					passwordPtr = &v
-				}
-				var passphrasePtr *string
-				if cmd.IsSet("ssh-passphrase") {
-					v := cmd.String("ssh-passphrase")
-					passphrasePtr = &v
-				}
-				sshManager := ssh.NewSshManager(globalConfig.User, passwordPtr, passphrasePtr)
-
-				// Make global config (without credentials) and SSH manager available in context
-				ctx = context.WithValue(ctx, core.SshManagerKey, sshManager)
-
-				// Setup hosts
-				if *hosts != "" {
-					// Split comma-separated hosts
-					globalConfig.Hosts = core.ParseHosts(*hosts)
-				} else {
-					switch {
-					case subcommand == "topology":
-						if !globalConfig.UseMNDP {
-							return ctx, fmt.Errorf("--mndp is required with the topology subcommand")
-						}
-						// topology subcommand performs strict discovery itself.
-					case globalConfig.UseMNDP:
-						routers, err := discover.ResolveHostsDiscoveryFirst(ctx, discover.Config{
-							UseMNDP:     true,
-							Interface:   globalConfig.Interface,
-							MNDPTimeout: globalConfig.MNDPTimeout,
-						}, discover.Dependencies{})
-						if err != nil {
-							return ctx, fmt.Errorf("failed to resolve hosts from topology discovery: %w", err)
-						}
-						globalConfig.Hosts = routers
-						slog.Info("resolved routers from topology discovery", "count", len(routers), "routers", routers)
-					default:
-						routers, err := core.DiscoverHosts()
-						if err != nil {
-							return ctx, fmt.Errorf("failed to discover routers: %w", err)
-						}
-						globalConfig.Hosts = routers
-						slog.Info("auto-discovered routers", "count", len(routers), "routers", routers)
-					}
-				}
-
-				if len(globalConfig.Hosts) == 0 && subcommand != "topology" {
-					slog.Error("no routers specified or discovered")
-					return ctx, fmt.Errorf("no routers specified or discovered")
-				}
-			}
-			ctx = context.WithValue(ctx, core.ConfigKey, globalConfig)
-			slog.Debug("global config available in context", "config", *globalConfig)
-			slog.Info("starting subcommand", "subcommand", cmd.Args().Get(0))
-			return ctx, nil
+			return runBeforeHook(ctx, globalConfig, params, defaultBeforeHookDeps())
 		},
 	}
+}
+
+// BeforeHookParams holds CLI flag values needed by the Before hook logic.
+// Extracted from *cli.Command so the logic can be tested without a real CLI context.
+type BeforeHookParams struct {
+	HasSubcommand  bool
+	Subcommand     string
+	HostsRaw       string  // raw value of the --host flag
+	MNDPTimeoutRaw string  // raw value of --mndp-timeout, e.g. "15s"
+	Password       *string // nil when --ssh-password was not set
+	Passphrase     *string // nil when --ssh-passphrase was not set
+}
+
+// BeforeHookDeps holds injectable side-effectful functions for testing.
+type BeforeHookDeps struct {
+	// ResolveHostsDiscoveryFirst performs MNDP/LLDP discovery with local fallback.
+	ResolveHostsDiscoveryFirst func(ctx context.Context, cfg discover.Config, deps discover.Dependencies) ([]string, error)
+	// DiscoverLocalHosts resolves hosts from local router*.rsc files.
+	DiscoverLocalHosts func() ([]string, error)
+}
+
+// defaultBeforeHookDeps returns the production implementations of BeforeHookDeps.
+func defaultBeforeHookDeps() BeforeHookDeps {
+	return BeforeHookDeps{
+		ResolveHostsDiscoveryFirst: discover.ResolveHostsDiscoveryFirst,
+		DiscoverLocalHosts:         core.DiscoverHosts,
+	}
+}
+
+// runBeforeHook contains all the Before hook business logic.
+// It is called by the thin Before closure in buildCommand, which is responsible only
+// for extracting BeforeHookParams from *cli.Command.
+func runBeforeHook(ctx context.Context, globalConfig *core.Config, params BeforeHookParams, deps BeforeHookDeps) (context.Context, error) {
+	logLevel := slog.LevelWarn
+	if globalConfig.Debug {
+		logLevel = slog.LevelDebug
+	}
+	core.SetupLogging(logLevel)
+	slog.Info("Starting global")
+
+	effectiveMaxConcurrent, err := core.ResolveMaxConcurrentHosts(globalConfig.MaxConcurrentHosts)
+	if err != nil {
+		return ctx, err
+	}
+	slog.Debug("resolved max concurrent hosts", "configured", globalConfig.MaxConcurrentHosts, "effective", effectiveMaxConcurrent)
+	globalConfig.EffectiveMaxConcurrent = effectiveMaxConcurrent
+	globalConfig.PreferLiveMode = !globalConfig.BufferedOutput
+
+	if params.MNDPTimeoutRaw != "" {
+		d, err := time.ParseDuration(params.MNDPTimeoutRaw)
+		if err != nil {
+			return ctx, fmt.Errorf("invalid --mndp-timeout value %q: %w", params.MNDPTimeoutRaw, err)
+		}
+		if d <= 0 {
+			return ctx, fmt.Errorf("invalid --mndp-timeout value %q: must be greater than 0", params.MNDPTimeoutRaw)
+		}
+		globalConfig.MNDPTimeout = d
+	} else {
+		return ctx, fmt.Errorf("invalid --mndp-timeout value %q: cannot be empty", params.MNDPTimeoutRaw)
+	}
+
+	if params.HasSubcommand {
+		slog.Debug("command line arguments", "subcommand", params.Subcommand)
+
+		// Mutual exclusivity guard
+		if params.HostsRaw != "" && globalConfig.UseMNDP {
+			return ctx, fmt.Errorf("--host and --mndp are mutually exclusive: use --mndp for dynamic discovery or --host to target specific devices")
+		}
+
+		// Create SSH manager with credentials (credentials stay encapsulated)
+		sshManager := ssh.NewSshManager(globalConfig.User, params.Password, params.Passphrase)
+		ctx = context.WithValue(ctx, core.SshManagerKey, sshManager)
+
+		// Setup hosts
+		if params.HostsRaw != "" {
+			globalConfig.Hosts = core.ParseHosts(params.HostsRaw)
+		} else {
+			switch {
+			case params.Subcommand == "topology":
+				if !globalConfig.UseMNDP {
+					return ctx, fmt.Errorf("--mndp is required with the topology subcommand")
+				}
+				// topology subcommand performs strict discovery itself.
+			case globalConfig.UseMNDP:
+				routers, err := deps.ResolveHostsDiscoveryFirst(ctx, discover.Config{
+					UseMNDP:     true,
+					Interface:   globalConfig.Interface,
+					MNDPTimeout: globalConfig.MNDPTimeout,
+				}, discover.Dependencies{})
+				if err != nil {
+					return ctx, fmt.Errorf("failed to resolve hosts from topology discovery: %w", err)
+				}
+				globalConfig.Hosts = routers
+				slog.Info("resolved routers from topology discovery", "count", len(routers), "routers", routers)
+			default:
+				routers, err := deps.DiscoverLocalHosts()
+				if err != nil {
+					return ctx, fmt.Errorf("failed to discover routers: %w", err)
+				}
+				globalConfig.Hosts = routers
+				slog.Info("auto-discovered routers", "count", len(routers), "routers", routers)
+			}
+		}
+
+		if len(globalConfig.Hosts) == 0 && params.Subcommand != "topology" {
+			slog.Error("no routers specified or discovered")
+			return ctx, fmt.Errorf("no routers specified or discovered")
+		}
+	}
+
+	ctx = context.WithValue(ctx, core.ConfigKey, globalConfig)
+	slog.Debug("global config available in context", "config", *globalConfig)
+	slog.Info("starting subcommand", "subcommand", params.Subcommand)
+	return ctx, nil
 }

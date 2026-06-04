@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"gonum.org/v1/gonum/graph/simple"
+	"jb.favre/mikrotik-fleet-autopilot/common/discover"
 	"jb.favre/mikrotik-fleet-autopilot/common/mndp"
 )
 
@@ -98,12 +99,53 @@ func outputTopology(out io.Writer, topo *topology, connectedTo string) error {
 		return werr
 	}
 
-	plan := buildUpgradePlan(graph, topo.OrderedHosts)
+	plan, err := discover.BuildUpgradePlan(topo)
+	if err != nil {
+		return err
+	}
 
 	if err := renderTopologyGraph(out, graph, topo.OrderedHosts, plan); err != nil {
 		return err
 	}
 	return nil
+}
+
+// buildSpanningTree performs a BFS from root over nodes in inComponent and
+// returns the spanning-tree parent map (child -> parent) and a sorted children
+// map (parent -> []child).
+func buildSpanningTree(graph *topologyGraph, root string, inComponent map[string]bool, orderedHosts []string) (parent map[string]string, children map[string][]string) {
+	parent = make(map[string]string)
+	queue := []string{root}
+	visited := map[string]bool{root: true}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		neighbors := graph.neighbors(current)
+		sort.Slice(neighbors, func(i, j int) bool {
+			return betterNode(graph, neighbors[i], neighbors[j], orderedHosts)
+		})
+		for _, next := range neighbors {
+			if !inComponent[next] || visited[next] {
+				continue
+			}
+			visited[next] = true
+			parent[next] = current
+			queue = append(queue, next)
+		}
+	}
+
+	children = make(map[string][]string)
+	for child, p := range parent {
+		children[p] = append(children[p], child)
+	}
+	for p := range children {
+		sort.Slice(children[p], func(i, j int) bool {
+			return betterNode(graph, children[p][i], children[p][j], orderedHosts)
+		})
+	}
+
+	return parent, children
 }
 
 func buildTopologyGraph(topo *topology, connectedTo string) (*topologyGraph, error) {
@@ -252,7 +294,7 @@ func (w *errorTrackingWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func renderTopologyGraph(out io.Writer, graph *topologyGraph, OrderedHosts []string, plan *upgradePlan) error {
+func renderTopologyGraph(out io.Writer, graph *topologyGraph, OrderedHosts []string, plan *discover.UpgradePlan) error {
 	trackedOut := &errorTrackingWriter{w: out}
 	components := connectedComponents(graph)
 	roots := selectRoots(graph, components, OrderedHosts, preferredRoot(graph))
@@ -631,7 +673,7 @@ func shortName(fqdn string) string {
 // printUpgradePlan renders the upgrade wave schedule computed by buildUpgradePlan.
 // It is the only upgrade-related function in output.go; all planning logic lives
 // in planner.go.
-func printUpgradePlan(out io.Writer, plan *upgradePlan) error {
+func printUpgradePlan(out io.Writer, plan *discover.UpgradePlan) error {
 	if plan == nil {
 		return nil
 	}
@@ -643,25 +685,25 @@ func printUpgradePlan(out io.Writer, plan *upgradePlan) error {
 		return err
 	}
 
-	if len(plan.waves) == 0 {
+	if len(plan.Waves) == 0 {
 		if _, err := fmt.Fprintf(out, "No upgradeable devices found.\n"); err != nil {
 			return err
 		}
 	} else {
-		total := len(plan.waves)
-		for _, wave := range plan.waves {
+		total := len(plan.Waves)
+		for _, wave := range plan.Waves {
 			label := "parallel"
-			if wave.index == total {
+			if wave.Index == total {
 				label = "final"
 			}
-			if _, err := fmt.Fprintf(out, "Wave %d (%s): %s\n", wave.index, label, strings.Join(wave.devices, ", ")); err != nil {
+			if _, err := fmt.Fprintf(out, "Wave %d (%s): %s\n", wave.Index, label, strings.Join(wave.Devices, ", ")); err != nil {
 				return err
 			}
 		}
 	}
 
-	if len(plan.excluded) > 0 {
-		if _, err := fmt.Fprintf(out, "\nExcluded (not upgradeable): %s\n", strings.Join(plan.excluded, ", ")); err != nil {
+	if len(plan.Excluded) > 0 {
+		if _, err := fmt.Fprintf(out, "\nExcluded (not upgradeable): %s\n", strings.Join(plan.Excluded, ", ")); err != nil {
 			return err
 		}
 	}
@@ -669,7 +711,7 @@ func printUpgradePlan(out io.Writer, plan *upgradePlan) error {
 	return nil
 }
 
-func printSummary(out io.Writer, graph *topologyGraph, treeEdgeCount int, plan *upgradePlan) {
+func printSummary(out io.Writer, graph *topologyGraph, treeEdgeCount int, plan *discover.UpgradePlan) {
 	totalLinks := 0
 	for _, edges := range graph.undirected {
 		totalLinks += len(edges)
@@ -706,14 +748,14 @@ func printSummary(out io.Writer, graph *topologyGraph, treeEdgeCount int, plan *
 	if plan != nil {
 		upgradeableCount := 0
 		maxParallelism := 0
-		for _, wave := range plan.waves {
-			upgradeableCount += len(wave.devices)
-			if len(wave.devices) > maxParallelism {
-				maxParallelism = len(wave.devices)
+		for _, wave := range plan.Waves {
+			upgradeableCount += len(wave.Devices)
+			if len(wave.Devices) > maxParallelism {
+				maxParallelism = len(wave.Devices)
 			}
 		}
 		_, _ = fmt.Fprintf(out, "  Upgradeable devices  : %d\n", upgradeableCount)
-		_, _ = fmt.Fprintf(out, "  Upgrade waves        : %d\n", len(plan.waves))
+		_, _ = fmt.Fprintf(out, "  Upgrade waves        : %d\n", len(plan.Waves))
 		_, _ = fmt.Fprintf(out, "  Max wave parallelism : %d\n", maxParallelism)
 	}
 }

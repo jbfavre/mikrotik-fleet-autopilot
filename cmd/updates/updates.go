@@ -13,6 +13,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/discover"
 	"jb.favre/mikrotik-fleet-autopilot/common/display"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 )
@@ -35,7 +36,11 @@ var ErrCannotCheckUpdates = errors.New("cannot check for updates")
 type UpdatesDependencies struct {
 	SSHConnectionFactory func(context.Context, string) (ssh.RunnerInterface, error)
 	ReconnectDelay       time.Duration
+	DiscoverTopology     func(context.Context, []string, discover.Config, discover.Dependencies) (*discover.Topology, error)
+	BuildUpgradePlan     func(*discover.Topology) (*discover.UpgradePlan, error)
 }
+
+var runSingleHostUpdate = updates
 
 var Command = []*cli.Command{
 	{
@@ -66,14 +71,77 @@ var Command = []*cli.Command{
 			deps := UpdatesDependencies{
 				SSHConnectionFactory: ssh.CreateConnection,
 				ReconnectDelay:       10 * time.Second,
+				DiscoverTopology:     discover.Build,
+				BuildUpgradePlan:     discover.BuildUpgradePlan,
 			}
-
-			return runUpdatesForHosts(ctx, coreCfg.Hosts, updatesCfg, deps, os.Stdout)
+			return runUpdatesAction(ctx, coreCfg, updatesCfg, deps, os.Stdout)
 		},
 	},
 }
 
+func runUpdatesAction(ctx context.Context, coreCfg *core.Config, updatesCfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
+	if !updatesCfg.UpdatesApply {
+		return runUpdatesForHosts(ctx, coreCfg.Hosts, updatesCfg, deps, out)
+	}
+
+	waves, err := buildUpdateWavesForApply(ctx, coreCfg, deps)
+	if err != nil {
+		return err
+	}
+
+	return runUpdatesForWaves(ctx, waves, updatesCfg, deps, out)
+}
+
+func withDefaultUpdatesDependencies(deps UpdatesDependencies) UpdatesDependencies {
+	if deps.SSHConnectionFactory == nil {
+		deps.SSHConnectionFactory = ssh.CreateConnection
+	}
+	if deps.ReconnectDelay <= 0 {
+		deps.ReconnectDelay = 10 * time.Second
+	}
+	if deps.DiscoverTopology == nil {
+		deps.DiscoverTopology = discover.Build
+	}
+	if deps.BuildUpgradePlan == nil {
+		deps.BuildUpgradePlan = discover.BuildUpgradePlan
+	}
+	return deps
+}
+
+func buildUpdateWavesForApply(ctx context.Context, cfg *core.Config, deps UpdatesDependencies) ([][]string, error) {
+	deps = withDefaultUpdatesDependencies(deps)
+
+	topo, err := deps.DiscoverTopology(ctx, cfg.Hosts, discover.Config{
+		UseMNDP:     cfg.UseMNDP,
+		Interface:   cfg.Interface,
+		MNDPTimeout: cfg.MNDPTimeout,
+	}, discover.Dependencies{
+		CreateSSHConnection: deps.SSHConnectionFactory,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to build topology for update planning: %w", err)
+	}
+
+	plan, err := deps.BuildUpgradePlan(topo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build update execution plan: %w", err)
+	}
+
+	waves := make([][]string, 0, len(plan.Waves))
+	for _, wave := range plan.Waves {
+		if len(wave.Devices) == 0 {
+			continue
+		}
+		devices := make([]string, len(wave.Devices))
+		copy(devices, wave.Devices)
+		waves = append(waves, devices)
+	}
+
+	return waves, nil
+}
+
 func runUpdatesForHosts(ctx context.Context, hosts []string, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
+	deps = withDefaultUpdatesDependencies(deps)
 	disp := display.New(out, hosts, display.InitOptions{
 		Debug:          cfg.Debug,
 		PreferLiveMode: cfg.PreferLiveMode,
@@ -89,7 +157,7 @@ func runUpdatesForHosts(ctx context.Context, hosts []string, cfg UpdatesConfig, 
 	processHost := func(i int, host string) {
 		line := disp.Line(i)
 		displayStepCallback := display.NewStepCallback(line)
-		osStatus, boardStatus, err := updates(ctx, host, cfg, deps, displayStepCallback)
+		osStatus, boardStatus, err := runSingleHostUpdate(ctx, host, cfg, deps, displayStepCallback)
 		switch {
 		case errors.Is(err, ssh.ErrConnectionFailed), errors.Is(err, ErrCannotCheckUpdates):
 			line.CompleteStep("❓")
@@ -133,6 +201,96 @@ loop:
 	disp.Stop()
 	core.SetLiveLogWriter(nil)
 	return result
+}
+
+func runUpdatesForWaves(ctx context.Context, waves [][]string, cfg UpdatesConfig, deps UpdatesDependencies, out io.Writer) error {
+	deps = withDefaultUpdatesDependencies(deps)
+
+	hosts := make([]string, 0)
+	for _, wave := range waves {
+		hosts = append(hosts, wave...)
+	}
+
+	disp := display.New(out, hosts, display.InitOptions{
+		Debug:          cfg.Debug,
+		PreferLiveMode: cfg.PreferLiveMode,
+		Concurrent:     cfg.MaxConcurrentHosts > 1,
+	})
+	core.SetLiveLogWriter(disp.LogWriter())
+
+	hostIdx := make(map[string]int, len(hosts))
+	for i, host := range hosts {
+		hostIdx[host] = i
+	}
+
+	errs := make([]error, len(hosts))
+	for _, wave := range waves {
+		if err := runSingleWave(ctx, wave, cfg, deps, disp, hostIdx, errs); err != nil {
+			disp.Stop()
+			core.SetLiveLogWriter(nil)
+			return errors.Join(append(errs, err)...)
+		}
+	}
+
+	result := errors.Join(errs...)
+	disp.Stop()
+	core.SetLiveLogWriter(nil)
+	return result
+}
+
+func runSingleWave(ctx context.Context, wave []string, cfg UpdatesConfig, deps UpdatesDependencies, disp *display.LiveDisplay, hostIdx map[string]int, errs []error) error {
+	processHost := func(host string) {
+		i := hostIdx[host]
+		line := disp.Line(i)
+		displayStepCallback := display.NewStepCallback(line)
+		osStatus, boardStatus, err := runSingleHostUpdate(ctx, host, cfg, deps, displayStepCallback)
+		switch {
+		case errors.Is(err, ssh.ErrConnectionFailed), errors.Is(err, ErrCannotCheckUpdates):
+			line.CompleteStep("❓")
+			line.Finish("❓", err.Error())
+		case err != nil:
+			line.CompleteStep("❌")
+			line.Finish("❌", err.Error())
+			errs[i] = err
+		case osStatus == nil:
+			line.Finish("❓", "update applied, status unverified")
+		default:
+			emoji, msg := formatUpdateResult(osStatus, boardStatus)
+			line.Finish(emoji, msg)
+		}
+	}
+
+	if cfg.MaxConcurrentHosts <= 1 {
+		for _, host := range wave {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			processHost(host)
+		}
+		return nil
+	}
+
+	sem := make(chan struct{}, cfg.MaxConcurrentHosts)
+	var wg sync.WaitGroup
+	var ctxErr error
+loop:
+	for _, host := range wave {
+		wg.Add(1)
+		select {
+		case sem <- struct{}{}:
+			go func(h string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				processHost(h)
+			}(host)
+		case <-ctx.Done():
+			wg.Done()
+			ctxErr = ctx.Err()
+			break loop
+		}
+	}
+	wg.Wait()
+	return ctxErr
 }
 
 type UpdateStatus struct {

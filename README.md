@@ -98,6 +98,12 @@ mikrotik-fleet-autopilot updates [options]
 **Options:**
 - `--updates-apply` - Automatically download and install available updates (default: false, check only)
 
+Behavior notes:
+- check-only mode (`updates` without `--updates-apply`) keeps host processing order as provided by `--host` or host resolution.
+- apply mode (`--updates-apply`) builds a discovery topology and computes upgrade waves to preserve graph connectivity while routers reboot.
+- waves are executed sequentially, while hosts inside a wave still use `--max-concurrent-hosts` parallelism.
+- if topology discovery or plan construction fails in apply mode, the command fails (no fallback to unordered apply).
+
 **Examples:**
 ```bash
 # Check for updates (no installation)

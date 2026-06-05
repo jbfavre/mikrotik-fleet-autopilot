@@ -8,11 +8,14 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"jb.favre/mikrotik-fleet-autopilot/common/core"
+	"jb.favre/mikrotik-fleet-autopilot/common/discover"
+	"jb.favre/mikrotik-fleet-autopilot/common/display"
 	"jb.favre/mikrotik-fleet-autopilot/common/ssh"
 	"jb.favre/mikrotik-fleet-autopilot/common/sshmocks_test"
 )
@@ -1544,4 +1547,166 @@ func TestRunUpdatesForHosts_Concurrent(t *testing.T) {
 		t.Errorf("expected maxInFlight > 1 (goroutines should run concurrently), got %d", maxInFlight.Load())
 	}
 	t.Logf("peak concurrent SSH connections: %d", maxInFlight.Load())
+}
+
+func TestBuildUpdateWavesForApply_UsesDiscoverPlanner(t *testing.T) {
+	cfg := &core.Config{
+		Hosts:       []string{"router1", "router2"},
+		UseMNDP:     true,
+		Interface:   "en0",
+		MNDPTimeout: 3 * time.Second,
+	}
+
+	var gotHosts []string
+	var gotDiscoverCfg discover.Config
+
+	deps := UpdatesDependencies{
+		DiscoverTopology: func(_ context.Context, hosts []string, discoverCfg discover.Config, _ discover.Dependencies) (*discover.Topology, error) {
+			gotHosts = append([]string(nil), hosts...)
+			gotDiscoverCfg = discoverCfg
+			return &discover.Topology{OrderedHosts: hosts}, nil
+		},
+		BuildUpgradePlan: func(_ *discover.Topology) (*discover.UpgradePlan, error) {
+			return &discover.UpgradePlan{
+				Waves: []discover.UpgradeWave{
+					{Index: 1, Devices: []string{"router2"}},
+					{Index: 2, Devices: []string{"router1"}},
+				},
+			}, nil
+		},
+	}
+
+	waves, err := buildUpdateWavesForApply(context.Background(), cfg, deps)
+	if err != nil {
+		t.Fatalf("buildUpdateWavesForApply() unexpected error = %v", err)
+	}
+
+	if !slices.Equal(gotHosts, cfg.Hosts) {
+		t.Fatalf("discover hosts = %v, want %v", gotHosts, cfg.Hosts)
+	}
+	if gotDiscoverCfg.UseMNDP != cfg.UseMNDP || gotDiscoverCfg.Interface != cfg.Interface || gotDiscoverCfg.MNDPTimeout != cfg.MNDPTimeout {
+		t.Fatalf("discover cfg mismatch: got %+v want UseMNDP=%v Interface=%q MNDPTimeout=%v", gotDiscoverCfg, cfg.UseMNDP, cfg.Interface, cfg.MNDPTimeout)
+	}
+
+	if len(waves) != 2 {
+		t.Fatalf("expected 2 waves, got %d", len(waves))
+	}
+	if !slices.Equal(waves[0], []string{"router2"}) {
+		t.Fatalf("wave[0] = %v, want [router2]", waves[0])
+	}
+	if !slices.Equal(waves[1], []string{"router1"}) {
+		t.Fatalf("wave[1] = %v, want [router1]", waves[1])
+	}
+}
+
+func TestRunUpdatesForWaves_RespectsWaveBarrier(t *testing.T) {
+	originalUpdater := runSingleHostUpdate
+	t.Cleanup(func() {
+		runSingleHostUpdate = originalUpdater
+	})
+
+	var mu sync.Mutex
+	wave1Started := 0
+	wave1Done := 0
+	wave1Finished := false
+	releaseWave1 := make(chan struct{})
+
+	runSingleHostUpdate = func(_ context.Context, host string, _ UpdatesConfig, _ UpdatesDependencies, _ display.StepCallback) (*UpdateStatus, *UpdateStatus, error) {
+		switch host {
+		case "router-a", "router-b":
+			mu.Lock()
+			wave1Started++
+			if wave1Started == 2 {
+				close(releaseWave1)
+			}
+			mu.Unlock()
+
+			<-releaseWave1
+
+			mu.Lock()
+			wave1Done++
+			if wave1Done == 2 {
+				wave1Finished = true
+			}
+			mu.Unlock()
+		case "router-c":
+			mu.Lock()
+			finished := wave1Finished
+			mu.Unlock()
+			if !finished {
+				return nil, nil, fmt.Errorf("router-c started before wave 1 completed")
+			}
+		}
+
+		return &UpdateStatus{Installed: "7.14.1", Available: "7.14.1"}, nil, nil
+	}
+
+	cfg := UpdatesConfig{UpdatesApply: true, Debug: true, MaxConcurrentHosts: 2, PreferLiveMode: true}
+	waves := [][]string{{"router-a", "router-b"}, {"router-c"}}
+
+	var out bytes.Buffer
+	err := runUpdatesForWaves(context.Background(), waves, cfg, UpdatesDependencies{}, &out)
+	if err != nil {
+		t.Fatalf("runUpdatesForWaves() unexpected error = %v", err)
+	}
+}
+
+func TestRunUpdatesAction_ApplyModeFailsWhenDiscoveryFails(t *testing.T) {
+	coreCfg := &core.Config{
+		Hosts:       []string{"router1"},
+		UseMNDP:     true,
+		MNDPTimeout: 3 * time.Second,
+	}
+
+	updatesCfg := UpdatesConfig{
+		UpdatesApply:       true,
+		Debug:              true,
+		MaxConcurrentHosts: 1,
+		PreferLiveMode:     true,
+	}
+
+	deps := UpdatesDependencies{
+		DiscoverTopology: func(context.Context, []string, discover.Config, discover.Dependencies) (*discover.Topology, error) {
+			return nil, fmt.Errorf("simulated discovery failure")
+		},
+	}
+
+	var out bytes.Buffer
+	err := runUpdatesAction(context.Background(), coreCfg, updatesCfg, deps, &out)
+	if err == nil {
+		t.Fatal("runUpdatesAction() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to build topology for update planning") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunUpdatesAction_CheckOnlySkipsDiscoveryPlanner(t *testing.T) {
+	coreCfg := &core.Config{
+		Hosts: []string{"router1"},
+	}
+
+	updatesCfg := UpdatesConfig{
+		UpdatesApply:       false,
+		Debug:              true,
+		MaxConcurrentHosts: 1,
+		PreferLiveMode:     true,
+	}
+
+	deps := UpdatesDependencies{
+		DiscoverTopology: func(context.Context, []string, discover.Config, discover.Dependencies) (*discover.Topology, error) {
+			return nil, fmt.Errorf("must not be called in check-only mode")
+		},
+		BuildUpgradePlan: func(*discover.Topology) (*discover.UpgradePlan, error) {
+			return nil, fmt.Errorf("must not be called in check-only mode")
+		},
+		SSHConnectionFactory: makeRouterSSHFactory(nil, nil),
+		ReconnectDelay:       10 * time.Millisecond,
+	}
+
+	var out bytes.Buffer
+	err := runUpdatesAction(context.Background(), coreCfg, updatesCfg, deps, &out)
+	if err != nil {
+		t.Fatalf("runUpdatesAction() unexpected error = %v", err)
+	}
 }

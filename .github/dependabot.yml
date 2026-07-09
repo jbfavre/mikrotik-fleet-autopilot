@@ -16,7 +16,7 @@ updates:
     schedule:
       interval: "daily"
     groups:
-      codeql:
+      github/codeql-action:
         patterns:
           - "github/codeql-action"
       other-actions:

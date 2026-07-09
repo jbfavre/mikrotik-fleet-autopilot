@@ -16,11 +16,11 @@ updates:
     schedule:
       interval: "daily"
     groups:
-      github/codeql-action:
+      codeql-action:
         patterns:
           - "github/codeql-action"
       other-actions:
         patterns:
           - "*"
         exclude-patterns:
-          - "github/codeql-action"
+          - "codeql-action"

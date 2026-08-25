@@ -5,7 +5,7 @@ go 1.26.1
 require (
 	github.com/hekmon/liveterm/v2 v2.6.1
 	github.com/kevinburke/ssh_config v1.6.0
-	github.com/urfave/cli/v3 v3.10.1
+	github.com/urfave/cli/v3 v3.11.0
 	golang.org/x/crypto v0.54.0
 	golang.org/x/term v0.45.0
 	gonum.org/v1/gonum v0.17.0

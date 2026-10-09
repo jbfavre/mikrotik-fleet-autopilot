@@ -1,3 +1,3 @@
 [[IgnoredVulns]]
 id = "GO-2026-5932"
-reason = "We do not import x/crypto/opengpg"
+reason = "We do not import golang.org/x/crypto/openpgp"

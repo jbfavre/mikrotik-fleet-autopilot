@@ -376,6 +376,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		if err != nil {
 			return nil, nil, err
 		}
+		reportStep("✅", "Applied RouterOS update")
 
 		finalOsStatus = newOsStatus
 		if newBoardStatus != nil {
@@ -442,6 +443,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 					"upgrade", boardStatus.Available,
 					"upToDate", boardUpToDate)
 			}
+			reportStep("✅", "Checked RouterBoard status")
 		}
 	}
 
@@ -453,6 +455,7 @@ func updates(ctx context.Context, host string, cfg UpdatesConfig, deps UpdatesDe
 		if err != nil {
 			return nil, nil, err
 		}
+		reportStep("✅", "Applied RouterBoard update")
 		reportStep("⏳", "Waiting for router to come back up…")
 		finalOsStatus = newOsStatus
 		finalBoardStatus = newBoardStatus

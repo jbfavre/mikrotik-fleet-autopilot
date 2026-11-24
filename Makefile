@@ -104,7 +104,7 @@ verify: ## Verify dependencies
 quick: fmt vet test ## Quick check before commit (fmt + vet + test)
 
 # Full CI-like workflow
-ci: clean check-fmt vet test-coverage ## Full CI workflow
+ci: clean check-fmt vet build test-coverage ## Full CI workflow
 
 # List all subcommands
 list-cmds: ## List all available subcommands
